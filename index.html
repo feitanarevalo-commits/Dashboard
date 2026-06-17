@@ -39,9 +39,46 @@ function avatarLetter(name) {
 function hasStatusTag(lead) {
   return STATUS_TAGS.some(t => lead.tags.includes(t));
 }
+
+// ─── LEAD ORIGIN: Fresh vs Imported ───────────────────────
+// Fresh   = never contacted on any campaign (a brand-new lead).
+// Imported= has been contacted / recycled / brought in from a sheet
+//           or external import (i.e. previously worked).
+function leadOrigin(lead) {
+  const t = lead.tags || [];
+  const worked = !!lead.lastContactDate || t.includes('Contacted') || t.includes('For Recycle') || t.includes('Existing Leads') || lead.source === 'import' || lead.recycled === true;
+  return worked ? 'Imported' : 'Fresh';
+}
+function isRecycled(lead) {
+  return (lead.tags || []).includes('For Recycle') || lead.recycled === true;
+}
+
+// ─── PERMISSIONS ──────────────────────────────────────────
+function userRole(name, config) {
+  const u = (config.users || []).find(x => x.name === name);
+  return u ? u.role : 'employee';
+}
+function isAdminUser(user) {
+  return user && user.role === 'admin';
+}
 function exportCSV(leads, filename = 'leads.csv') {
-  const rows = ['Channel,Platform,Niche,Followers,Email,Tags,Campaign,Assigned To,Date Assigned', ...leads.map(l => [`"${l.channelName}"`, l.platform, l.niche, l.followers, `"${l.emails.join('; ')}"`, `"${l.tags.join('; ')}"`, `"${l.campaigns.join(', ')}"`, l.assignedTo || '', l.dateAssigned || ''].join(','))].join('\n');
+  const rows = ['Channel,Platform,Niche,Followers,Email,Tags,Origin,Campaign,Assigned To,Date Assigned', ...leads.map(l => [`"${l.channelName}"`, l.platform, l.niche, l.followers, `"${l.emails.join('; ')}"`, `"${l.tags.join('; ')}"`, leadOrigin(l), `"${l.campaigns.join(', ')}"`, l.assignedTo || '', l.dateAssigned || ''].join(','))].join('\n');
   const blob = new Blob([rows], {
+    type: 'text/csv'
+  });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
+// Export a KPI summary table (one row per rep) to CSV.
+function exportKpiCSV(repRows, period, filename = 'rep_kpis.csv') {
+  const head = `Enfinity Sales Dashboard — Rep KPI Report (${period})`;
+  const cols = 'Sales Rep,Total Assigned,Fresh,Recycled,Potential,Contacted,High Ticket,Not Qualified';
+  const body = repRows.map(r => [`"${r.rep}"`, r.total, r.fresh, r.recycled, r.potential, r.contacted, r.ht, r.nq].join(','));
+  const csv = [head, '', cols, ...body].join('\n');
+  const blob = new Blob([csv], {
     type: 'text/csv'
   });
   const a = document.createElement('a');
@@ -906,6 +943,9 @@ function ColHeader({
       });
       return [...all];
     }
+    if (col === 'origin') {
+      return ['Fresh', 'Imported'];
+    }
     return [];
   }
   const filterOpts = getOptions();
@@ -1004,6 +1044,7 @@ function LeadsTable({
   onBulkAssign,
   showAssigned = false,
   showCampaign = true,
+  showOrigin = false,
   config,
   feats,
   campColorMap,
@@ -1062,6 +1103,9 @@ function LeadsTable({
     }
     if (colFilter.platform) {
       if (l.platform !== colFilter.platform) return false;
+    }
+    if (colFilter.origin) {
+      if (leadOrigin(l) !== colFilter.origin) return false;
     }
     return true;
   }).sort((a, b) => {
@@ -1319,6 +1363,10 @@ function LeadsTable({
     col: "tags",
     label: "Tags",
     ...colHeaderProps
+  }), showOrigin && /*#__PURE__*/React.createElement(ColHeader, {
+    col: "origin",
+    label: "Origin",
+    ...colHeaderProps
   }), showCampaign && cols.campaign && /*#__PURE__*/React.createElement(ColHeader, {
     col: "campaign",
     label: "Campaign",
@@ -1405,7 +1453,11 @@ function LeadsTable({
     onChange: tags => patchLead(lead.id, {
       tags
     })
-  })), showCampaign && cols.campaign && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(InlinePicker, {
+  })), showOrigin && /*#__PURE__*/React.createElement("td", null, leadOrigin(lead) === 'Fresh' ? /*#__PURE__*/React.createElement("span", {
+    className: "origin-badge fresh"
+  }, "● Fresh") : /*#__PURE__*/React.createElement("span", {
+    className: "origin-badge imported"
+  }, "↻ Imported")), showCampaign && cols.campaign && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(InlinePicker, {
     type: "campaign",
     selected: lead.campaigns,
     options: (config.campaigns || []).map(c => c.id),
@@ -1540,20 +1592,94 @@ function LeadsTable({
 }
 
 // ─── HOME VIEW ────────────────────────────────────────────
+const PERIODS = [{
+  id: 'daily',
+  label: 'Daily',
+  days: 1
+}, {
+  id: 'weekly',
+  label: 'Weekly',
+  days: 7
+}, {
+  id: 'monthly',
+  label: 'Monthly',
+  days: 30
+}, {
+  id: 'yearly',
+  label: 'Yearly',
+  days: 365
+}];
 function HomeView({
   leads,
   config
 }) {
-  const total = leads.length,
-    assigned = leads.filter(l => l.assignedTo).length;
-  const potential = leads.filter(l => l.tags.includes('Potential')).length;
-  const ht = leads.filter(l => l.tags.includes('HT')).length;
-  const unassigned = total - assigned;
+  const [period, setPeriod] = useState('monthly');
+  const pdfRef = useRef(null);
   const campColorMap = {};
   (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
+  const pDef = PERIODS.find(p => p.id === period) || PERIODS[2];
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - (pDef.days - 1));
+  function inPeriod(l) {
+    return l.dateAssigned && new Date(l.dateAssigned) >= cutoff;
+  }
+
+  // Per-rep KPI rows for the selected period (based on dateAssigned).
+  const reps = config.salesReps || [];
+  const repRows = reps.map(r => {
+    const mine = leads.filter(l => l.assignedTo === r && inPeriod(l));
+    return {
+      rep: r,
+      total: mine.length,
+      fresh: mine.filter(l => leadOrigin(l) === 'Fresh').length,
+      recycled: mine.filter(l => isRecycled(l)).length,
+      potential: mine.filter(l => l.tags.includes('Potential')).length,
+      contacted: mine.filter(l => l.tags.includes('Contacted')).length,
+      ht: mine.filter(l => l.tags.includes('HT')).length,
+      nq: mine.filter(l => l.tags.includes('Not Qualified')).length
+    };
+  });
+  const maxRep = Math.max(1, ...repRows.map(r => r.total));
+  const periodLeads = leads.filter(inPeriod);
+  const total = periodLeads.length;
+  const freshTot = periodLeads.filter(l => leadOrigin(l) === 'Fresh').length;
+  const recycledTot = periodLeads.filter(l => isRecycled(l)).length;
+  const potentialTot = periodLeads.filter(l => l.tags.includes('Potential')).length;
+  const contactedTot = periodLeads.filter(l => l.tags.includes('Contacted')).length;
   return /*#__PURE__*/React.createElement("div", {
-    className: "home-content"
+    className: "home-content",
+    ref: pdfRef
   }, /*#__PURE__*/React.createElement("div", {
+    className: "print-header",
+    style: {
+      display: 'none'
+    }
+  }, /*#__PURE__*/React.createElement("h1", {
+    style: {
+      margin: 0
+    }
+  }, "Enfinity Sales Dashboard"), /*#__PURE__*/React.createElement("p", null, "Rep KPI Report — ", pDef.label, " (", cutoff.toISOString().split('T')[0], " → today)")), /*#__PURE__*/React.createElement("div", {
+    className: "analytics-toolbar no-print"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "period-toggle"
+  }, PERIODS.map(p => /*#__PURE__*/React.createElement("button", {
+    key: p.id,
+    className: `period-btn${period === p.id ? ' active' : ''}`,
+    onClick: () => setPeriod(p.id)
+  }, p.label))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginLeft: 'auto',
+      display: 'flex',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: () => exportKpiCSV(repRows, pDef.label, `enfinity_rep_kpis_${period}.csv`)
+  }, "⬇ Download CSV"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: () => exportPDF('Rep KPI Report')
+  }, "🖨 Download PDF"))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 12,
@@ -1563,83 +1689,135 @@ function HomeView({
     className: "stat-card accent"
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
-  }, "Total Leads"), /*#__PURE__*/React.createElement("div", {
+  }, "Assigned (", pDef.label, ")"), /*#__PURE__*/React.createElement("div", {
     className: "stat-value"
   }, total), /*#__PURE__*/React.createElement("div", {
     className: "stat-sub"
-  }, "across all platforms")), /*#__PURE__*/React.createElement("div", {
+  }, "across all reps")), /*#__PURE__*/React.createElement("div", {
     className: "stat-card green"
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
-  }, "Potential"), /*#__PURE__*/React.createElement("div", {
+  }, "Fresh Leads"), /*#__PURE__*/React.createElement("div", {
     className: "stat-value"
-  }, potential), /*#__PURE__*/React.createElement("div", {
+  }, freshTot), /*#__PURE__*/React.createElement("div", {
     className: "stat-sub"
-  }, "ready to contact")), /*#__PURE__*/React.createElement("div", {
+  }, "never contacted")), /*#__PURE__*/React.createElement("div", {
     className: "stat-card orange"
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
-  }, "High Ticket"), /*#__PURE__*/React.createElement("div", {
+  }, "Recycled"), /*#__PURE__*/React.createElement("div", {
     className: "stat-value"
-  }, ht), /*#__PURE__*/React.createElement("div", {
+  }, recycledTot), /*#__PURE__*/React.createElement("div", {
     className: "stat-sub"
-  }, "priority leads")), /*#__PURE__*/React.createElement("div", {
+  }, "previously worked")), /*#__PURE__*/React.createElement("div", {
     className: "stat-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
-  }, "Assigned"), /*#__PURE__*/React.createElement("div", {
+  }, "Contacted"), /*#__PURE__*/React.createElement("div", {
     className: "stat-value"
-  }, assigned), /*#__PURE__*/React.createElement("div", {
+  }, contactedTot), /*#__PURE__*/React.createElement("div", {
     className: "stat-sub"
-  }, unassigned, " unassigned"))), /*#__PURE__*/React.createElement("div", {
-    className: "grid-2"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, potentialTot, " potential"))), /*#__PURE__*/React.createElement("div", {
     className: "card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-header"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-title"
-  }, "Leads by Sales Rep")), /*#__PURE__*/React.createElement("div", {
+  }, "Leads per Sales Rep — Fresh vs Recycled"), /*#__PURE__*/React.createElement("div", {
+    className: "chart-legend"
+  }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("i", {
+    style: {
+      background: 'var(--accent)'
+    }
+  }), "Fresh"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("i", {
+    style: {
+      background: 'var(--warn)'
+    }
+  }), "Recycled"))), /*#__PURE__*/React.createElement("div", {
     className: "card-body"
-  }, (config.salesReps || []).map(r => {
-    const cnt = leads.filter(l => l.assignedTo === r).length;
-    return /*#__PURE__*/React.createElement("div", {
-      className: "bar-row",
-      key: r
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "bar-label"
-    }, r), /*#__PURE__*/React.createElement("div", {
-      className: "bar-track"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "bar-fill",
-      style: {
-        width: `${total ? cnt / total * 100 : 0}%`,
-        background: 'var(--accent)'
-      }
-    })), /*#__PURE__*/React.createElement("div", {
-      className: "bar-count"
-    }, cnt));
+  }, repRows.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--text-dim)',
+      padding: 12
+    }
+  }, "No sales reps configured."), repRows.map(r => /*#__PURE__*/React.createElement("div", {
+    className: "grouped-bar-row",
+    key: r.rep
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bar-label"
+  }, r.rep), /*#__PURE__*/React.createElement("div", {
+    className: "grouped-bar-track"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "gbar",
+    style: {
+      width: `${r.fresh / maxRep * 100}%`,
+      background: 'var(--accent)'
+    },
+    title: `Fresh: ${r.fresh}`
   }), /*#__PURE__*/React.createElement("div", {
-    className: "bar-row"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "bar-label",
+    className: "gbar",
     style: {
-      color: 'var(--text-light)'
-    }
-  }, "Unassigned"), /*#__PURE__*/React.createElement("div", {
-    className: "bar-track"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "bar-fill",
-    style: {
-      width: `${total ? unassigned / total * 100 : 0}%`,
-      background: 'var(--border)'
-    }
+      width: `${r.recycled / maxRep * 100}%`,
+      background: 'var(--warn)'
+    },
+    title: `Recycled: ${r.recycled}`
   })), /*#__PURE__*/React.createElement("div", {
-    className: "bar-count",
+    className: "bar-count"
+  }, r.total))))), /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title"
+  }, "Per-Rep KPI Breakdown (", pDef.label, ")")), /*#__PURE__*/React.createElement("div", {
+    className: "card-body",
     style: {
-      color: 'var(--text-light)'
+      padding: 0
     }
-  }, unassigned)))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "kpi-table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Sales Rep"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Fresh"), /*#__PURE__*/React.createElement("th", null, "Recycled"), /*#__PURE__*/React.createElement("th", null, "Potential"), /*#__PURE__*/React.createElement("th", null, "Contacted"), /*#__PURE__*/React.createElement("th", null, "High Ticket"), /*#__PURE__*/React.createElement("th", null, "NQ"), /*#__PURE__*/React.createElement("th", {
+    className: "no-print"
+  }, "Report"))), /*#__PURE__*/React.createElement("tbody", null, repRows.map(r => /*#__PURE__*/React.createElement("tr", {
+    key: r.rep
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 600
+    }
+  }, r.rep), /*#__PURE__*/React.createElement("td", null, r.total), /*#__PURE__*/React.createElement("td", {
+    style: {
+      color: 'var(--accent)',
+      fontWeight: 600
+    }
+  }, r.fresh), /*#__PURE__*/React.createElement("td", {
+    style: {
+      color: 'var(--warn)',
+      fontWeight: 600
+    }
+  }, r.recycled), /*#__PURE__*/React.createElement("td", null, r.potential), /*#__PURE__*/React.createElement("td", null, r.contacted), /*#__PURE__*/React.createElement("td", null, r.ht), /*#__PURE__*/React.createElement("td", null, r.nq), /*#__PURE__*/React.createElement("td", {
+    className: "no-print"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-xs",
+    title: "Download this rep's leads as CSV",
+    onClick: () => exportCSV(leads.filter(l => l.assignedTo === r.rep && inPeriod(l)), `${r.rep}_${period}_leads.csv`)
+  }, "⬇ CSV")))), repRows.length > 0 && /*#__PURE__*/React.createElement("tr", {
+    style: {
+      borderTop: '2px solid var(--border)',
+      fontWeight: 700
+    }
+  }, /*#__PURE__*/React.createElement("td", null, "All Reps"), /*#__PURE__*/React.createElement("td", null, repRows.reduce((s, r) => s + r.total, 0)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      color: 'var(--accent)'
+    }
+  }, repRows.reduce((s, r) => s + r.fresh, 0)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      color: 'var(--warn)'
+    }
+  }, repRows.reduce((s, r) => s + r.recycled, 0)), /*#__PURE__*/React.createElement("td", null, repRows.reduce((s, r) => s + r.potential, 0)), /*#__PURE__*/React.createElement("td", null, repRows.reduce((s, r) => s + r.contacted, 0)), /*#__PURE__*/React.createElement("td", null, repRows.reduce((s, r) => s + r.ht, 0)), /*#__PURE__*/React.createElement("td", null, repRows.reduce((s, r) => s + r.nq, 0)), /*#__PURE__*/React.createElement("td", {
+    className: "no-print"
+  })))))), /*#__PURE__*/React.createElement("div", {
+    className: "grid-2"
+  }, /*#__PURE__*/React.createElement("div", {
     className: "card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-header"
@@ -1648,7 +1826,7 @@ function HomeView({
   }, "Campaign Distribution")), /*#__PURE__*/React.createElement("div", {
     className: "card-body"
   }, (config.campaigns || []).map(c => {
-    const cnt = leads.filter(l => l.campaigns.includes(c.id)).length;
+    const cnt = periodLeads.filter(l => l.campaigns.includes(c.id)).length;
     return /*#__PURE__*/React.createElement("div", {
       className: "bar-row",
       key: c.id
@@ -1671,36 +1849,10 @@ function HomeView({
     className: "card-header"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-title"
-  }, "Status Breakdown")), /*#__PURE__*/React.createElement("div", {
-    className: "card-body"
-  }, STATUSES.map(s => {
-    const cnt = leads.filter(l => l.tags.includes(s)).length;
-    return /*#__PURE__*/React.createElement("div", {
-      className: "bar-row",
-      key: s
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "bar-label"
-    }, s.replace('Not Qualified', 'NQ').replace('Existing Leads', 'Existing').replace('For Recycle', 'Recycle')), /*#__PURE__*/React.createElement("div", {
-      className: "bar-track"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "bar-fill",
-      style: {
-        width: `${total ? cnt / total * 100 : 0}%`,
-        background: '#9BA8B4'
-      }
-    })), /*#__PURE__*/React.createElement("div", {
-      className: "bar-count"
-    }, cnt));
-  }))), /*#__PURE__*/React.createElement("div", {
-    className: "card"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-header"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-title"
   }, "Platform Split")), /*#__PURE__*/React.createElement("div", {
     className: "card-body"
-  }, ['YouTube', 'TikTok', 'Instagram'].map(p => {
-    const cnt = leads.filter(l => l.platform === p).length;
+  }, PLATFORMS.map(p => {
+    const cnt = periodLeads.filter(l => l.platform === p).length;
     return /*#__PURE__*/React.createElement("div", {
       className: "bar-row",
       key: p
@@ -3416,6 +3568,117 @@ function SettingsDrawer({
   }, "✓ Apply Changes"))));
 }
 
+// ─── LOGIN SCREEN ─────────────────────────────────────────
+function LoginScreen({
+  config,
+  onLogin
+}) {
+  const users = config.users || [];
+  const [selected, setSelected] = useState(null);
+  const [pw, setPw] = useState('');
+  const [err, setErr] = useState('');
+  const pwRef = useRef(null);
+  function pick(u) {
+    setSelected(u);
+    setPw('');
+    setErr('');
+    setTimeout(() => pwRef.current && pwRef.current.focus(), 50);
+  }
+  function submit(e) {
+    e && e.preventDefault();
+    if (!selected) return;
+    if (pw === selected.password) {
+      onLogin(selected);
+    } else {
+      setErr('Incorrect password');
+      setPw('');
+    }
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "login-screen"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "login-card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "login-brand"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "logo",
+    style: {
+      width: 48,
+      height: 48,
+      fontSize: 24
+    }
+  }, "E"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "login-title"
+  }, "Enfinity"), /*#__PURE__*/React.createElement("div", {
+    className: "login-sub"
+  }, "Sales Dashboard"))), !selected ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "login-prompt"
+  }, "Select your profile to sign in"), /*#__PURE__*/React.createElement("div", {
+    className: "login-grid"
+  }, users.map(u => /*#__PURE__*/React.createElement("button", {
+    key: u.name,
+    className: "login-user",
+    onClick: () => pick(u)
+  }, /*#__PURE__*/React.createElement(RepAvatar, {
+    rep: u.name,
+    config: config,
+    size: 48,
+    bgOverride: "var(--card)"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "login-user-name"
+  }, u.name), /*#__PURE__*/React.createElement("div", {
+    className: `login-role ${u.role}`
+  }, u.role === 'admin' ? '★ Admin' : 'Employee'))))) : /*#__PURE__*/React.createElement("form", {
+    className: "login-form",
+    onSubmit: submit
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn-ghost btn-xs",
+    style: {
+      alignSelf: 'flex-start'
+    },
+    onClick: () => setSelected(null)
+  }, "← Back"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 8,
+      margin: '8px 0'
+    }
+  }, /*#__PURE__*/React.createElement(RepAvatar, {
+    rep: selected.name,
+    config: config,
+    size: 64,
+    bgOverride: "var(--card)"
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      fontSize: 16
+    }
+  }, selected.name), /*#__PURE__*/React.createElement("div", {
+    className: `login-role ${selected.role}`
+  }, selected.role === 'admin' ? '★ Admin' : 'Employee')), /*#__PURE__*/React.createElement("input", {
+    ref: pwRef,
+    type: "password",
+    placeholder: "Password",
+    value: pw,
+    onChange: e => {
+      setPw(e.target.value);
+      setErr('');
+    },
+    autoFocus: true
+  }), err && /*#__PURE__*/React.createElement("div", {
+    className: "login-err"
+  }, err), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    className: "btn btn-primary",
+    style: {
+      width: '100%'
+    }
+  }, "Sign In"))));
+}
+
 // ─── APP ──────────────────────────────────────────────────
 function App() {
   const [tab, setTab] = useState('home');
@@ -3427,6 +3690,29 @@ function App() {
   const [activeRep, setActiveRep] = useState(() => localStorage.getItem('activeRep') || null);
   const [showRepSelect, setShowRepSelect] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('currentUser') || 'null');
+    } catch (e) {
+      return null;
+    }
+  });
+  const [platformFilter, setPlatformFilter] = useState(() => localStorage.getItem('platformFilter') || 'All');
+  const isAdmin = isAdminUser(currentUser);
+  function login(u) {
+    setCurrentUser(u);
+    localStorage.setItem('currentUser', JSON.stringify(u));
+    addToast(`Welcome, ${u.name}`, 'success');
+  }
+  function logout() {
+    setCurrentUser(null);
+    localStorage.removeItem('currentUser');
+    setActiveRep(null);
+    setTab('home');
+  }
+  useEffect(() => {
+    localStorage.setItem('platformFilter', platformFilter);
+  }, [platformFilter]);
   useEffect(() => {
     document.documentElement.setAttribute('data-dark', darkMode ? 'true' : '');
     if (!darkMode) document.documentElement.removeAttribute('data-dark');
@@ -3446,6 +3732,11 @@ function App() {
   }
   function saveL(upd) {
     const old = leads.find(l => l.id === upd.id);
+    // Employees may only edit leads that are unassigned or assigned to themselves.
+    if (!isAdmin && old && old.assignedTo && old.assignedTo !== currentUser.name) {
+      addToast(`Only ${old.assignedTo} or an admin can edit this lead`, 'error');
+      return;
+    }
     let updated = {
       ...upd
     };
@@ -3457,6 +3748,10 @@ function App() {
     logH('✏️', `Lead "${updated.channelName}" updated`);
   }
   function delL(id) {
+    if (!isAdmin) {
+      addToast('Only admins can delete leads', 'error');
+      return;
+    }
     const l = leads.find(x => x.id === id);
     setLeads(ls => ls.filter(x => x.id !== id));
     logH('🗑', `Lead "${l?.channelName}" deleted`);
@@ -3489,7 +3784,10 @@ function App() {
   function importLeads(newLeads) {
     setLeads(existing => {
       const existingUrls = new Set(existing.map(l => l.url).filter(Boolean));
-      const fresh = newLeads.filter(l => !l.url || !existingUrls.has(l.url));
+      const fresh = newLeads.filter(l => !l.url || !existingUrls.has(l.url)).map(l => ({
+        ...l,
+        source: 'import'
+      }));
       logH('📊', `Google Sheets import: ${fresh.length} leads added`);
       return [...existing, ...fresh];
     });
@@ -3565,14 +3863,17 @@ function App() {
   }, []);
   const campColorMap = {};
   (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
+
+  // Platform filter — restricts every view to the chosen primary platform.
+  const vLeads = platformFilter === 'All' ? leads : leads.filter(l => l.platform === platformFilter);
   const recentCutoff = new Date();
   recentCutoff.setDate(recentCutoff.getDate() - 7);
   const counts = {
-    potential: leads.filter(l => l.tags.includes('Potential')).length,
-    nq: leads.filter(l => l.tags.includes('Not Qualified')).length,
-    contacted: leads.filter(l => l.tags.includes('Contacted')).length,
-    recycle: leads.filter(l => l.tags.includes('For Recycle')).length,
-    recent: leads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff).length
+    potential: vLeads.filter(l => l.tags.includes('Potential')).length,
+    nq: vLeads.filter(l => l.tags.includes('Not Qualified')).length,
+    contacted: vLeads.filter(l => l.tags.includes('Contacted')).length,
+    recycle: vLeads.filter(l => l.tags.includes('For Recycle')).length,
+    recent: vLeads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff).length
   };
   const NAV_MAIN = [{
     id: 'home',
@@ -3632,7 +3933,7 @@ function App() {
   }];
   function renderMain() {
     if (showRepSelect) return /*#__PURE__*/React.createElement(RepSelectScreen, {
-      leads: leads,
+      leads: vLeads,
       config: config,
       activeRep: activeRep,
       onSelect: r => {
@@ -3645,7 +3946,7 @@ function App() {
     });
     if (tab === 'rep-home' && activeRep) return /*#__PURE__*/React.createElement(RepDashboard, {
       rep: activeRep,
-      leads: leads,
+      leads: vLeads,
       config: config,
       onEdit: saveL,
       onDelete: delL,
@@ -3654,11 +3955,11 @@ function App() {
       onImportClose: importToClose
     });
     if (tab === 'home') return /*#__PURE__*/React.createElement(HomeView, {
-      leads: leads,
+      leads: vLeads,
       config: config
     });
     if (tab === 'scraper') return /*#__PURE__*/React.createElement(ScraperView, {
-      leads: leads,
+      leads: vLeads,
       onSave: saveL,
       onDelete: delL,
       onBulkAssign: bulkAssign,
@@ -3671,12 +3972,13 @@ function App() {
       feats: config.features || {}
     });
     if (tab === 'prev-scraped') return /*#__PURE__*/React.createElement(LeadsTable, {
-      leads: leads,
+      leads: vLeads,
       onEdit: saveL,
       onDelete: delL,
       onBulkAssign: bulkAssign,
       showAssigned: true,
       showCampaign: true,
+      showOrigin: true,
       config: config,
       feats: config.features || {},
       campColorMap: campColorMap,
@@ -3684,19 +3986,20 @@ function App() {
       printTitle: "All Scraped Leads"
     });
     if (tab === 'lead-mgmt') return /*#__PURE__*/React.createElement(LeadMgmtView, {
-      leads: leads,
+      leads: vLeads,
       onSave: saveL,
       onBulkAssign: bulkAssign,
       addToast: addToast,
       config: config
     });
     if (tab === 'potential') return /*#__PURE__*/React.createElement(LeadsTable, {
-      leads: leads.filter(l => l.tags.includes('Potential')),
+      leads: vLeads.filter(l => l.tags.includes('Potential')),
       onEdit: saveL,
       onDelete: delL,
       onBulkAssign: bulkAssign,
       showAssigned: true,
       showCampaign: true,
+      showOrigin: true,
       config: config,
       feats: config.features || {},
       campColorMap: campColorMap,
@@ -3704,12 +4007,13 @@ function App() {
       printTitle: "Potential Leads"
     });
     if (tab === 'nq') return /*#__PURE__*/React.createElement(LeadsTable, {
-      leads: leads.filter(l => l.tags.includes('Not Qualified')),
+      leads: vLeads.filter(l => l.tags.includes('Not Qualified')),
       onEdit: saveL,
       onDelete: delL,
       onBulkAssign: bulkAssign,
       showAssigned: true,
       showCampaign: true,
+      showOrigin: true,
       config: config,
       feats: config.features || {},
       campColorMap: campColorMap,
@@ -3717,7 +4021,7 @@ function App() {
       printTitle: "NQ Leads"
     });
     if (tab === 'contacted') return /*#__PURE__*/React.createElement(ContactedView, {
-      leads: leads,
+      leads: vLeads,
       onSave: saveL,
       onDelete: delL,
       onBulkAssign: bulkAssign,
@@ -3725,12 +4029,13 @@ function App() {
       campColorMap: campColorMap
     });
     if (tab === 'recycle') return /*#__PURE__*/React.createElement(LeadsTable, {
-      leads: leads.filter(l => l.tags.includes('For Recycle')),
+      leads: vLeads.filter(l => l.tags.includes('For Recycle')),
       onEdit: saveL,
       onDelete: delL,
       onBulkAssign: bulkAssign,
       showAssigned: true,
       showCampaign: true,
+      showOrigin: true,
       config: config,
       feats: config.features || {},
       campColorMap: campColorMap,
@@ -3738,12 +4043,13 @@ function App() {
       printTitle: "For Recycle Leads"
     });
     if (tab === 'recent') return /*#__PURE__*/React.createElement(LeadsTable, {
-      leads: leads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff),
+      leads: vLeads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff),
       onEdit: saveL,
       onDelete: delL,
       onBulkAssign: bulkAssign,
       showAssigned: true,
       showCampaign: true,
+      showOrigin: true,
       config: config,
       feats: config.features || {},
       campColorMap: campColorMap,
@@ -3758,7 +4064,7 @@ function App() {
     if (camp) return /*#__PURE__*/React.createElement(CampaignView, {
       campaign: camp,
       campColor: camp.color,
-      leads: leads,
+      leads: vLeads,
       onSave: saveL,
       onBulkAssign: bulkAssign,
       addToast: addToast,
@@ -3780,6 +4086,12 @@ function App() {
     recent: 'Recently Assigned',
     ...Object.fromEntries((config.campaigns || []).map(c => [c.id.toLowerCase(), `${c.label} Campaign`]))
   };
+
+  // Gate the entire app behind login.
+  if (!currentUser) return /*#__PURE__*/React.createElement(LoginScreen, {
+    config: config,
+    onLogin: login
+  });
   return /*#__PURE__*/React.createElement("div", {
     id: "root",
     style: {
@@ -3805,28 +4117,30 @@ function App() {
     className: "topbar-badge"
   }, /*#__PURE__*/React.createElement("span", {
     className: "webhook-dot"
-  }), " n8n Live"), (config.features || {}).dailyRefresh && /*#__PURE__*/React.createElement("div", {
-    className: "topbar-badge"
-  }, "🕐 Daily 06:00 UTC"), /*#__PURE__*/React.createElement("div", {
-    className: "topbar-rep-pill",
-    onClick: () => setShowRepSelect(true),
-    title: activeRep ? `Logged in as ${activeRep} — click to switch` : 'Click to select your profile'
-  }, activeRep ? /*#__PURE__*/React.createElement(RepAvatar, {
-    rep: activeRep,
+  }), " n8n Live"), /*#__PURE__*/React.createElement("select", {
+    className: "platform-select",
+    value: platformFilter,
+    onChange: e => setPlatformFilter(e.target.value),
+    title: "Primary platform shown across the dashboard"
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "All"
+  }, "All Platforms"), PLATFORMS.map(p => /*#__PURE__*/React.createElement("option", {
+    key: p,
+    value: p
+  }, PLATFORM_ICON[p], " ", p))), /*#__PURE__*/React.createElement("div", {
+    className: "topbar-user-pill",
+    title: `Signed in as ${currentUser.name} (${currentUser.role})`
+  }, /*#__PURE__*/React.createElement(RepAvatar, {
+    rep: currentUser.name,
     config: config,
     size: 26,
     online: true,
     bgOverride: "var(--card)"
-  }) : /*#__PURE__*/React.createElement("div", {
-    className: "topbar-rep-avatar"
-  }, "?"), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "topbar-rep-name"
-  }, activeRep || 'Select Rep'), activeRep && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 10,
-      color: 'var(--text-dim)'
-    }
-  }, "▾")), /*#__PURE__*/React.createElement("button", {
+  }, currentUser.name), isAdmin && /*#__PURE__*/React.createElement("span", {
+    className: "role-chip"
+  }, "ADMIN")), /*#__PURE__*/React.createElement("button", {
     className: `btn btn-outline btn-sm dark-mode-btn`,
     onClick: () => setDarkMode(d => !d),
     title: "Toggle dark mode",
@@ -3834,10 +4148,14 @@ function App() {
       fontSize: 16,
       padding: '6px 10px'
     }
-  }, darkMode ? '☀' : '🌙'), /*#__PURE__*/React.createElement("button", {
+  }, darkMode ? '☀' : '🌙'), isAdmin && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
     onClick: () => setShowSettings(true)
-  }, "⚙ Customize"))), /*#__PURE__*/React.createElement("div", {
+  }, "⚙ Customize"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: logout,
+    title: "Sign out"
+  }, "⎋ Logout"))), /*#__PURE__*/React.createElement("div", {
     className: "app-body"
   }, /*#__PURE__*/React.createElement("nav", {
     className: "sidebar"
@@ -3877,7 +4195,7 @@ function App() {
     className: "sidebar-section-label"
   }, "Campaigns"), (config.campaigns || []).map(c => {
     const id = c.id.toLowerCase();
-    const cnt = leads.filter(l => l.campaigns.includes(c.id)).length;
+    const cnt = vLeads.filter(l => l.campaigns.includes(c.id)).length;
     return /*#__PURE__*/React.createElement("div", {
       key: id,
       className: `nav-item ${tab === id && !showRepSelect ? 'active' : ''}`,
@@ -3898,7 +4216,7 @@ function App() {
   }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
   }, "Sales Reps"), (config.salesReps || []).map(r => {
-    const cnt = leads.filter(l => l.assignedTo === r).length;
+    const cnt = vLeads.filter(l => l.assignedTo === r).length;
     return /*#__PURE__*/React.createElement("div", {
       key: r,
       className: `nav-item ${tab === 'rep-home' && activeRep === r ? 'active' : ''}`,
@@ -3927,12 +4245,17 @@ function App() {
     }
   }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-footer"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, isAdmin && /*#__PURE__*/React.createElement("div", {
     className: "nav-item settings",
     onClick: () => setShowSettings(true)
   }, /*#__PURE__*/React.createElement("span", {
     className: "nav-icon"
-  }, "⚙"), "Settings & Customize"))), /*#__PURE__*/React.createElement("div", {
+  }, "⚙"), "Settings & Customize"), /*#__PURE__*/React.createElement("div", {
+    className: "nav-item settings",
+    onClick: logout
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "nav-icon"
+  }, "⎋"), "Logout (", currentUser.name, ")"))), /*#__PURE__*/React.createElement("div", {
     className: "main"
   }, !showRepSelect && !activeRep && /*#__PURE__*/React.createElement("div", {
     className: "main-header"

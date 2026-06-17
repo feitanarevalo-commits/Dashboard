@@ -83,6 +83,23 @@ var DEFAULT_CONFIG = {
   repEmojis:  { Pen: '', Rein: '', Chase: '', Mikka: '' },
   repPhotos:  {},
 
+  // ── USERS & LOGIN ──────────────────────────────────────────
+  // role: 'admin'    = full access (open Settings, delete/edit any lead, see all analytics)
+  //       'employee' = sees own leads, cannot open Settings or delete leads
+  //
+  // ⚠ SECURITY NOTE: passwords are stored client-side. This gates casual
+  //   access for an internal team, but anyone who views the page source can
+  //   read them. It is NOT bank-grade security. Change the defaults below.
+  //   Admins are: Robert, Chai, Rein.
+  users: [
+    { name: 'Robert', role: 'admin',    password: 'enfinity' },
+    { name: 'Chai',   role: 'admin',    password: 'enfinity' },
+    { name: 'Rein',   role: 'admin',    password: 'enfinity' },
+    { name: 'Pen',    role: 'employee', password: 'enfinity' },
+    { name: 'Chase',  role: 'employee', password: 'enfinity' },
+    { name: 'Mikka',  role: 'employee', password: 'enfinity' },
+  ],
+
   // Tags shown in the Settings drawer "Status Tags" section
   statusTags: ['Potential', 'Not Qualified', 'Contacted', 'Existing Leads', 'For Recycle', 'Duplicate'],
 };
