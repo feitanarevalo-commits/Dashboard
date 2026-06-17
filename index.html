@@ -1,12 +1,3957 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Niche Signal — Lead Dashboard</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LeadFlow — YouTube &amp; Social Scraper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="config.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+;(function() {
+const {
+  useState,
+  useEffect,
+  useCallback,
+  useRef
+} = React;
+// All constants (PLATFORMS, STATUSES, STATUS_TAGS, TAG_COLORS,
+// DEFAULT_CONFIG, SAMPLE_LEADS, SAMPLE_HISTORY) come from config.js
+
+// ─── UTILS ────────────────────────────────────────────────
+function getRowClass(lead) {
+  const c = lead.campaigns;
+  if (c.includes('MSN') && c.includes('VVV')) return 'row-both';
+  if (c.includes('MSN')) return 'row-msn';
+  if (c.includes('VVV')) return 'row-vvv';
+  return '';
+}
+function avatarLetter(name) {
+  return name ? name[0].toUpperCase() : '?';
+}
+function hasStatusTag(lead) {
+  return STATUS_TAGS.some(t => lead.tags.includes(t));
+}
+function exportCSV(leads, filename = 'leads.csv') {
+  const rows = ['Channel,Platform,Niche,Followers,Email,Tags,Campaign,Assigned To,Date Assigned', ...leads.map(l => [`"${l.channelName}"`, l.platform, l.niche, l.followers, `"${l.emails.join('; ')}"`, `"${l.tags.join('; ')}"`, `"${l.campaigns.join(', ')}"`, l.assignedTo || '', l.dateAssigned || ''].join(','))].join('\n');
+  const blob = new Blob([rows], {
+    type: 'text/csv'
+  });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+function exportPDF(repName) {
+  const style = document.createElement('style');
+  style.id = 'print-style';
+  style.textContent = `@media print { .no-print,.sidebar,.topbar,.toolbar,.main-header,.drawer,.drawer-overlay,.toasts { display: none !important; } .print-header { display: block !important; } body { font-size: 11pt; } }`;
+  document.head.appendChild(style);
+  document.querySelector('.print-header') && (document.querySelector('.print-header').style.display = 'block');
+  window.print();
+  setTimeout(() => {
+    const s = document.getElementById('print-style');
+    s && s.remove();
+  }, 500);
+}
+
+// ─── TOAST ────────────────────────────────────────────────
+function Toast({
+  toasts
+}) {
+  const icons = {
+    success: '✅',
+    error: '❌',
+    info: 'ℹ️'
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "toasts"
+  }, toasts.map(t => /*#__PURE__*/React.createElement("div", {
+    key: t.id,
+    className: `toast ${t.type}`
+  }, /*#__PURE__*/React.createElement("span", null, icons[t.type]), t.msg)));
+}
+
+// ─── TAG BADGE ────────────────────────────────────────────
+const TAG_COLORS = {
+  'Potential': {
+    bg: '#E3FCF2',
+    color: '#00875A'
+  },
+  'Not Qualified': {
+    bg: '#FFEBE6',
+    color: '#DE350B'
+  },
+  'Contacted': {
+    bg: '#EBF2FF',
+    color: '#1366D6'
+  },
+  'For Recycle': {
+    bg: '#FFF4E5',
+    color: '#FF8B00'
+  },
+  'Existing Leads': {
+    bg: '#EAE6FF',
+    color: '#6554C0'
+  },
+  'Duplicate': {
+    bg: '#F0F2F5',
+    color: '#68737D'
+  },
+  'HT': {
+    bg: '#FFF4E5',
+    color: '#FF8B00'
+  }
+};
+function TagBadge({
+  tag
+}) {
+  if (tag === 'HT') return /*#__PURE__*/React.createElement("span", {
+    className: "tag tag-ht"
+  }, "⚡ HT");
+  return /*#__PURE__*/React.createElement("span", {
+    className: `tag ${STATUS_CLS[tag] || 'tag-duplicate'}`
+  }, tag);
+}
+
+// ─── TOGGLE ───────────────────────────────────────────────
+function Toggle({
+  checked,
+  onChange
+}) {
+  return /*#__PURE__*/React.createElement("label", {
+    className: "toggle"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: checked,
+    onChange: e => onChange(e.target.checked)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "toggle-track"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "toggle-thumb"
+  }));
+}
+
+// ─── LEAD MODAL ───────────────────────────────────────────
+function LeadModal({
+  lead,
+  onClose,
+  onSave,
+  onDelete,
+  config
+}) {
+  const [form, setForm] = useState({
+    ...lead,
+    emails: [...(lead.emails || [])],
+    tags: Array.isArray(lead.tags) ? [...lead.tags] : []
+  });
+  const [newEmail, setNewEmail] = useState('');
+  const [newUrl, setNewUrl] = useState('');
+  const [confirmDel, setConfirmDel] = useState(false);
+  function upd(k, v) {
+    setForm(f => ({
+      ...f,
+      [k]: v
+    }));
+  }
+  function addEmail() {
+    if (newEmail && !form.emails.includes(newEmail)) {
+      setForm(f => ({
+        ...f,
+        emails: [...f.emails, newEmail]
+      }));
+      setNewEmail('');
+    }
+  }
+  function delEmail(e) {
+    setForm(f => ({
+      ...f,
+      emails: f.emails.filter(x => x !== e)
+    }));
+  }
+  function addUrl() {
+    const u = newUrl.trim();
+    if (u) {
+      setForm(f => ({
+        ...f,
+        channels: [...(f.channels || []), u]
+      }));
+      setNewUrl('');
+    }
+  }
+  function delUrl(i) {
+    setForm(f => ({
+      ...f,
+      channels: (f.channels || []).filter((_, j) => j !== i)
+    }));
+  }
+  function toggleTag(t) {
+    const tags = form.tags || [];
+    upd('tags', tags.includes(t) ? tags.filter(x => x !== t) : [...tags, t]);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-overlay",
+    onClick: e => e.target === e.currentTarget && onClose()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-header"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", null, "Edit Lead"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: 'var(--text-dim)',
+      fontSize: 13,
+      marginTop: 3
+    }
+  }, lead.channelName)), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: onClose,
+    style: {
+      fontSize: 16,
+      padding: '4px 8px'
+    }
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Channel Name"), /*#__PURE__*/React.createElement("input", {
+    value: form.channelName,
+    onChange: e => upd('channelName', e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Platform"), /*#__PURE__*/React.createElement("select", {
+    value: form.platform,
+    onChange: e => upd('platform', e.target.value),
+    style: {
+      width: '100%'
+    }
+  }, PLATFORMS.map(p => /*#__PURE__*/React.createElement("option", {
+    key: p
+  }, p)))), /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Niche"), /*#__PURE__*/React.createElement("input", {
+    value: form.niche,
+    onChange: e => upd('niche', e.target.value)
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Followers / Subscribers"), /*#__PURE__*/React.createElement("input", {
+    value: form.followers,
+    onChange: e => upd('followers', e.target.value)
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label",
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between'
+    }
+  }, "Channel URLs", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      fontWeight: 400,
+      color: 'var(--text-light)',
+      textTransform: 'none',
+      letterSpacing: 0
+    }
+  }, "First URL = primary link shown in table")), /*#__PURE__*/React.createElement("div", {
+    className: "email-rows"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "email-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    value: form.url || '',
+    onChange: e => upd('url', e.target.value),
+    placeholder: "Primary channel URL (e.g. youtube.com/@handle)",
+    style: {
+      flex: 1
+    }
+  })), (form.channels || []).map((u, i) => /*#__PURE__*/React.createElement("div", {
+    className: "email-row",
+    key: i
+  }, /*#__PURE__*/React.createElement("input", {
+    value: u,
+    onChange: e => {
+      const arr = [...(form.channels || [])];
+      arr[i] = e.target.value;
+      upd('channels', arr);
+    },
+    placeholder: "Additional channel URL..."
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-danger btn-xs",
+    onClick: () => delUrl(i)
+  }, "✕"))), /*#__PURE__*/React.createElement("div", {
+    className: "email-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    placeholder: "Add another channel URL...",
+    value: newUrl,
+    onChange: e => setNewUrl(e.target.value),
+    onKeyDown: e => e.key === 'Enter' && addUrl()
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-xs",
+    onClick: addUrl
+  }, "+ Add URL")))), /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Emails"), /*#__PURE__*/React.createElement("div", {
+    className: "email-rows"
+  }, form.emails.map((em, i) => /*#__PURE__*/React.createElement("div", {
+    className: "email-row",
+    key: i
+  }, /*#__PURE__*/React.createElement("input", {
+    value: em,
+    onChange: e => {
+      const arr = [...form.emails];
+      arr[i] = e.target.value;
+      upd('emails', arr);
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-danger btn-xs",
+    onClick: () => delEmail(em)
+  }, "✕"))), /*#__PURE__*/React.createElement("div", {
+    className: "email-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    placeholder: "Add email address...",
+    value: newEmail,
+    onChange: e => setNewEmail(e.target.value),
+    onKeyDown: e => e.key === 'Enter' && addEmail()
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-xs",
+    onClick: addEmail
+  }, "+ Add")))), /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Tags / Status"), /*#__PURE__*/React.createElement("div", {
+    className: "tag-grid"
+  }, [...STATUSES, 'HT'].map(t => {
+    const tags = form.tags || [];
+    const on = tags.includes(t);
+    const c = TAG_COLORS[t] || {
+      bg: '#F0F2F5',
+      color: '#68737D'
+    };
+    return /*#__PURE__*/React.createElement("button", {
+      key: t,
+      type: "button",
+      className: `tag-btn${on ? ' on' : ''}`,
+      style: on ? {
+        background: c.bg,
+        color: c.color,
+        borderColor: c.color
+      } : {},
+      onClick: () => toggleTag(t)
+    }, t === 'HT' ? '⚡ HT' : t);
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Assign to Rep"), /*#__PURE__*/React.createElement("select", {
+    value: form.assignedTo || '',
+    onChange: e => {
+      upd('assignedTo', e.target.value || null);
+      if (e.target.value && !form.dateAssigned) upd('dateAssigned', new Date().toISOString().split('T')[0]);
+    },
+    style: {
+      width: '100%'
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "— Unassigned —"), (config.salesReps || []).map(r => /*#__PURE__*/React.createElement("option", {
+    key: r
+  }, r)))), /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Date Assigned"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: form.dateAssigned || '',
+    onChange: e => upd('dateAssigned', e.target.value)
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer"
+  }, /*#__PURE__*/React.createElement("div", null, !confirmDel ? /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-danger btn-sm",
+    onClick: () => setConfirmDel(true)
+  }, "🗑 Delete Lead") : /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: 'var(--danger)',
+      fontWeight: 600
+    }
+  }, "Confirm delete?"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-danger btn-sm",
+    onClick: () => {
+      onDelete(lead.id);
+      onClose();
+    }
+  }, "Yes, Delete"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: () => setConfirmDel(false)
+  }, "Cancel"))), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer-right"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: onClose
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: () => {
+      onSave(form);
+      onClose();
+    }
+  }, "Save Changes")))));
+}
+
+// ─── CONTEXT MENU ────────────────────────────────────────
+function ContextMenu({
+  x,
+  y,
+  lead,
+  sel,
+  allLeads,
+  config,
+  campColorMap,
+  onEdit,
+  onDelete,
+  onOpenEdit,
+  onClose
+}) {
+  const isBulk = sel && sel.length > 1 && sel.includes(lead.id);
+  const [live, setLive] = useState({
+    ...lead
+  });
+  const ref = React.useRef(null);
+  useEffect(() => {
+    function outside(e) {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    }
+    function esc(e) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', outside);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', outside);
+      document.removeEventListener('keydown', esc);
+    };
+  }, []);
+  const pos = {
+    top: y,
+    left: x
+  };
+  useEffect(() => {
+    if (ref.current) {
+      const r = ref.current.getBoundingClientRect();
+      if (r.right > window.innerWidth) ref.current.style.left = x - r.width + 'px';
+      if (r.bottom > window.innerHeight) ref.current.style.top = y - r.height + 'px';
+    }
+  }, []);
+  function applyToTargets(patch) {
+    if (isBulk) {
+      (allLeads || []).filter(l => sel.includes(l.id)).forEach(l => {
+        let u = {
+          ...l
+        };
+        if (patch.tags !== undefined) u.tags = patch.tags(l.tags);
+        if (patch.campaigns !== undefined) u.campaigns = patch.campaigns(l.campaigns);
+        if (patch.assignedTo !== undefined) {
+          u.assignedTo = patch.assignedTo;
+          u.dateAssigned = new Date().toISOString().split('T')[0];
+        }
+        onEdit(u);
+      });
+    }
+  }
+  function toggleTag(t) {
+    const nextTags = tags => tags.includes(t) ? tags.filter(x => x !== t) : [...tags, t];
+    if (isBulk) {
+      applyToTargets({
+        tags: nextTags
+      });
+    }
+    const u = {
+      ...live,
+      tags: nextTags(live.tags)
+    };
+    setLive(u);
+    onEdit(u);
+  }
+  function toggleCamp(c) {
+    const nextCamps = camps => camps.includes(c) ? camps.filter(x => x !== c) : [...camps, c];
+    if (isBulk) {
+      applyToTargets({
+        campaigns: nextCamps
+      });
+    }
+    const u = {
+      ...live,
+      campaigns: nextCamps(live.campaigns)
+    };
+    setLive(u);
+    onEdit(u);
+  }
+  function assignRep(r) {
+    if (isBulk) {
+      applyToTargets({
+        assignedTo: r
+      });
+    }
+    const u = {
+      ...live,
+      assignedTo: r,
+      dateAssigned: new Date().toISOString().split('T')[0]
+    };
+    setLive(u);
+    onEdit(u);
+    onClose();
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "ctx-menu",
+    ref: ref,
+    style: {
+      top: y,
+      left: x
+    }
+  }, isBulk && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'var(--accent)',
+      color: 'white',
+      fontSize: 11,
+      fontWeight: 700,
+      padding: '6px 14px',
+      textAlign: 'center'
+    }
+  }, "Applying to ", sel.length, " selected leads"), !isBulk && /*#__PURE__*/React.createElement("div", {
+    className: "ctx-item",
+    onClick: () => {
+      onOpenEdit(live);
+      onClose();
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "✏"), " Edit Lead"), /*#__PURE__*/React.createElement("div", {
+    className: "ctx-sep"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "ctx-section-label"
+  }, "Tags"), [...STATUSES, 'HT'].map(t => {
+    const on = live.tags.includes(t);
+    const c = TAG_COLORS[t] || {
+      bg: '#F0F2F5',
+      color: '#68737D'
+    };
+    return /*#__PURE__*/React.createElement("div", {
+      key: t,
+      className: "ctx-item",
+      onClick: () => toggleTag(t)
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 14,
+        height: 14,
+        borderRadius: 3,
+        border: `2px solid ${on ? c.color : 'var(--border)'}`,
+        background: on ? c.color : 'transparent',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0
+      }
+    }, on && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'white',
+        fontSize: 8,
+        lineHeight: 1
+      }
+    }, "✓")), /*#__PURE__*/React.createElement("span", {
+      style: on ? {
+        color: c.color,
+        fontWeight: 600
+      } : {}
+    }, t === 'HT' ? '⚡ HT' : t));
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "ctx-sep"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "ctx-section-label"
+  }, "Campaign"), (config.campaigns || []).map(camp => {
+    const on = live.campaigns.includes(camp.id);
+    return /*#__PURE__*/React.createElement("div", {
+      key: camp.id,
+      className: "ctx-item",
+      onClick: () => toggleCamp(camp.id)
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 14,
+        height: 14,
+        borderRadius: 3,
+        border: `2px solid ${on ? camp.color : 'var(--border)'}`,
+        background: on ? camp.color : 'transparent',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0
+      }
+    }, on && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'white',
+        fontSize: 8,
+        lineHeight: 1
+      }
+    }, "✓")), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: camp.color,
+        fontWeight: 600
+      }
+    }, "● ", camp.label));
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "ctx-sep"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "ctx-section-label"
+  }, "Assign to Rep"), (config.salesReps || []).map(r => {
+    const on = live.assignedTo === r;
+    return /*#__PURE__*/React.createElement("div", {
+      key: r,
+      className: "ctx-item",
+      onClick: () => assignRep(r)
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 20,
+        height: 20,
+        borderRadius: '50%',
+        background: on ? 'var(--accent)' : 'var(--accent-light)',
+        color: on ? 'white' : 'var(--accent)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 10,
+        fontWeight: 700,
+        flexShrink: 0
+      }
+    }, r[0]), /*#__PURE__*/React.createElement("span", {
+      style: on ? {
+        fontWeight: 600
+      } : {}
+    }, r), on && /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: 'auto',
+        color: 'var(--accent)',
+        fontSize: 11
+      }
+    }, "✓"));
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "ctx-sep"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "ctx-item danger",
+    onClick: () => {
+      if (window.confirm(`Delete "${live.channelName}"?`)) {
+        onDelete(live.id);
+      }
+      onClose();
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "🗑"), " Delete Lead"));
+}
+
+// ─── INLINE PICKER ───────────────────────────────────────
+function InlinePicker({
+  type,
+  selected,
+  options,
+  campColorMap,
+  onChange
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef(null);
+  useEffect(() => {
+    function outside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', outside);
+    return () => document.removeEventListener('mousedown', outside);
+  }, []);
+  function toggle(val) {
+    const next = selected.includes(val) ? selected.filter(x => x !== val) : [...selected, val];
+    onChange(next);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'relative',
+      minWidth: 80
+    },
+    ref: ref
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 3,
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      cursor: 'pointer',
+      minHeight: 24
+    },
+    onClick: () => setOpen(o => !o)
+  }, selected.length === 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-light)',
+      padding: '2px 4px'
+    }
+  }, "— ▾"), type === 'tag' && selected.map(t => {
+    const c = TAG_COLORS[t] || {
+      bg: '#F0F2F5',
+      color: '#68737D'
+    };
+    return /*#__PURE__*/React.createElement("span", {
+      key: t,
+      style: {
+        fontSize: 10,
+        fontWeight: 600,
+        padding: '2px 7px',
+        borderRadius: 20,
+        background: c.bg,
+        color: c.color,
+        whiteSpace: 'nowrap'
+      }
+    }, t === 'HT' ? '⚡ HT' : t);
+  }), type === 'campaign' && selected.map(c => {
+    const col = campColorMap && campColorMap[c] || 'var(--accent)';
+    return /*#__PURE__*/React.createElement("span", {
+      key: c,
+      style: {
+        fontSize: 10,
+        fontWeight: 700,
+        padding: '2px 7px',
+        borderRadius: 20,
+        background: col + '20',
+        color: col,
+        whiteSpace: 'nowrap'
+      }
+    }, "● ", c);
+  }), selected.length > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9,
+      color: 'var(--text-dim)',
+      opacity: .7
+    }
+  }, "▾")), open && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'fixed',
+      zIndex: 500,
+      background: 'var(--card)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius)',
+      boxShadow: 'var(--shadow-lg)',
+      minWidth: 170,
+      padding: '6px 0',
+      marginTop: 4
+    },
+    ref: el => {
+      if (el) {
+        const r = ref.current.getBoundingClientRect();
+        el.style.top = r.bottom + 4 + 'px';
+        el.style.left = r.left + 'px';
+      }
+    }
+  }, options.map(opt => {
+    const val = opt.id || opt;
+    const active = selected.includes(val);
+    let pill;
+    if (type === 'tag') {
+      const c = TAG_COLORS[val] || {
+        bg: '#F0F2F5',
+        color: '#68737D'
+      };
+      pill = /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 11,
+          fontWeight: 600,
+          padding: '1px 8px',
+          borderRadius: 20,
+          background: c.bg,
+          color: c.color
+        }
+      }, val === 'HT' ? '⚡ HT' : val);
+    } else {
+      const col = campColorMap && campColorMap[val] || 'var(--accent)';
+      pill = /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 11,
+          fontWeight: 700,
+          padding: '1px 8px',
+          borderRadius: 20,
+          background: col + '20',
+          color: col
+        }
+      }, "● ", val);
+    }
+    return /*#__PURE__*/React.createElement("div", {
+      key: val,
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '7px 14px',
+        cursor: 'pointer',
+        background: active ? 'var(--accent-light)' : 'transparent'
+      },
+      onClick: () => toggle(val)
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 14,
+        height: 14,
+        borderRadius: 3,
+        border: `2px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+        background: active ? 'var(--accent)' : 'transparent',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0
+      }
+    }, active && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'white',
+        fontSize: 9,
+        fontWeight: 700
+      }
+    }, "✓")), pill);
+  })));
+}
+
+// ─── COL HEADER (with filter dropdown) ───────────────────
+function ColHeader({
+  col,
+  label,
+  sortCol,
+  sortDir,
+  onSort,
+  leads,
+  colFilter,
+  setColFilter,
+  openFilterCol,
+  setOpenFilterCol
+}) {
+  const ref = useRef(null);
+  const isOpen = openFilterCol === col;
+  const hasFilter = colFilter[col] != null;
+  useEffect(() => {
+    if (!isOpen) return;
+    function outside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpenFilterCol(null);
+    }
+    function esc(e) {
+      if (e.key === 'Escape') setOpenFilterCol(null);
+    }
+    document.addEventListener('mousedown', outside);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', outside);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [isOpen]);
+
+  // Build filter options for this column
+  function getOptions() {
+    if (col === 'tags') {
+      const all = new Set();
+      leads.forEach(l => (l.tags || []).forEach(t => all.add(t)));
+      const opts = [...all];
+      opts.push('Unassigned');
+      return opts;
+    }
+    if (col === 'assignedTo') {
+      const all = new Set();
+      leads.forEach(l => {
+        if (l.assignedTo) all.add(l.assignedTo);
+      });
+      return [...all, 'Unassigned'];
+    }
+    if (col === 'campaign') {
+      const all = new Set();
+      leads.forEach(l => (l.campaigns || []).forEach(c => all.add(c)));
+      return [...all, 'None'];
+    }
+    if (col === 'platform') {
+      const all = new Set();
+      leads.forEach(l => {
+        if (l.platform) all.add(l.platform);
+      });
+      return [...all];
+    }
+    return [];
+  }
+  const filterOpts = getOptions();
+  const isSorted = sortCol === col;
+  const sortLabel = isSorted ? sortDir === 'asc' ? '▲' : '▼' : '⇅';
+  function handleSort(dir) {
+    onSort(col, dir);
+    setOpenFilterCol(null);
+  }
+  function handleFilter(val) {
+    setColFilter(f => ({
+      ...f,
+      [col]: val
+    }));
+    setOpenFilterCol(null);
+  }
+  function clearFilter() {
+    setColFilter(f => {
+      const n = {
+        ...f
+      };
+      delete n[col];
+      return n;
+    });
+    setOpenFilterCol(null);
+  }
+  return /*#__PURE__*/React.createElement("th", {
+    style: {
+      position: 'relative',
+      userSelect: 'none',
+      whiteSpace: 'nowrap',
+      cursor: 'pointer'
+    },
+    className: `sortable${isSorted ? ' sort-' + sortDir : ''}`,
+    ref: ref
+  }, /*#__PURE__*/React.createElement("span", {
+    onClick: () => setOpenFilterCol(isOpen ? null : col),
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4
+    }
+  }, label, /*#__PURE__*/React.createElement("span", {
+    className: "sort-chevron",
+    style: {
+      fontSize: 9,
+      opacity: hasFilter ? 1 : .4,
+      color: hasFilter ? 'var(--accent)' : undefined
+    }
+  }, hasFilter ? '●' : sortLabel)), isOpen && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'fixed',
+      zIndex: 600,
+      background: 'var(--card)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius)',
+      boxShadow: 'var(--shadow-lg)',
+      minWidth: 180,
+      padding: '4px 0'
+    },
+    ref: el => {
+      if (el) {
+        const thRect = ref.current.getBoundingClientRect();
+        el.style.top = thRect.bottom + 2 + 'px';
+        el.style.left = thRect.left + 'px';
+      }
+    },
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "col-filter-item",
+    onClick: () => handleSort('asc')
+  }, "Sort A → Z"), /*#__PURE__*/React.createElement("div", {
+    className: "col-filter-item",
+    onClick: () => handleSort('desc')
+  }, "Sort Z → A"), filterOpts.length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "col-filter-sep"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "col-filter-section"
+  }, "Filter"), filterOpts.map(opt => /*#__PURE__*/React.createElement("div", {
+    key: opt,
+    className: `col-filter-item${colFilter[col] === opt ? ' col-filter-active' : ''}`,
+    onClick: () => handleFilter(opt)
+  }, opt))), hasFilter && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "col-filter-sep"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "col-filter-item col-filter-clear",
+    onClick: clearFilter
+  }, "✕ Clear filter"))));
+}
+
+// ─── LEADS TABLE ──────────────────────────────────────────
+function LeadsTable({
+  leads,
+  onEdit,
+  onDelete,
+  onBulkAssign,
+  showAssigned = false,
+  showCampaign = true,
+  config,
+  feats,
+  campColorMap,
+  filename = 'leads',
+  printTitle = 'Lead Report'
+}) {
+  const [sel, setSel] = useState([]);
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterRep, setFilterRep] = useState('');
+  const [sortCol, setSortCol] = useState('');
+  const [sortDir, setSortDir] = useState('asc');
+  const [bulkRep, setBulkRep] = useState('');
+  const [bulkTags, setBulkTags] = useState([]);
+  const [bulkCamps, setBulkCamps] = useState([]);
+  const [editLead, setEditLead] = useState(null);
+  const [ctxMenu, setCtxMenu] = useState(null);
+  const [page, setPage] = useState(1);
+  const [colFilter, setColFilter] = useState({});
+  const [openFilterCol, setOpenFilterCol] = useState(null);
+  const PAGE_SIZE = 25;
+  const cols = config.columns || {};
+  const allReps = config.salesReps || [];
+  function handleSort(col, dir) {
+    setSortCol(col);
+    setSortDir(dir || 'asc');
+  }
+
+  // Apply column filters on top of search/status/rep filters
+  const filtered = leads.filter(l => {
+    const s = search.toLowerCase();
+    if (s && !l.channelName.toLowerCase().includes(s) && !l.niche.toLowerCase().includes(s) && !l.platform.toLowerCase().includes(s)) return false;
+    if (filterStatus && !l.tags.includes(filterStatus)) return false;
+    if (filterRep && l.assignedTo !== filterRep) return false;
+    // Column filters
+    if (colFilter.tags) {
+      if (colFilter.tags === 'Unassigned') {
+        if ((l.tags || []).length > 0) return false;
+      } else {
+        if (!(l.tags || []).includes(colFilter.tags)) return false;
+      }
+    }
+    if (colFilter.assignedTo) {
+      if (colFilter.assignedTo === 'Unassigned') {
+        if (l.assignedTo) return false;
+      } else {
+        if (l.assignedTo !== colFilter.assignedTo) return false;
+      }
+    }
+    if (colFilter.campaign) {
+      if (colFilter.campaign === 'None') {
+        if ((l.campaigns || []).length > 0) return false;
+      } else {
+        if (!(l.campaigns || []).includes(colFilter.campaign)) return false;
+      }
+    }
+    if (colFilter.platform) {
+      if (l.platform !== colFilter.platform) return false;
+    }
+    return true;
+  }).sort((a, b) => {
+    if (!sortCol) return 0;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    if (sortCol === 'channelName') return dir * a.channelName.localeCompare(b.channelName);
+    if (sortCol === 'platform') return dir * (a.platform || '').localeCompare(b.platform || '');
+    if (sortCol === 'niche') return dir * (a.niche || '').localeCompare(b.niche || '');
+    if (sortCol === 'followers') {
+      const fa = parseInt(String(a.followers).replace(/[^0-9]/g, '')) || 0;
+      const fb = parseInt(String(b.followers).replace(/[^0-9]/g, '')) || 0;
+      return dir * (fa - fb);
+    }
+    if (sortCol === 'assignedTo') return dir * (a.assignedTo || '').localeCompare(b.assignedTo || '');
+    if (sortCol === 'dateAssigned') return dir * (a.dateAssigned || '').localeCompare(b.dateAssigned || '');
+    return 0;
+  });
+  useEffect(() => setPage(1), [search, filterStatus, filterRep, sortCol, sortDir, colFilter]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const allSel = filtered.length > 0 && filtered.every(l => sel.includes(l.id));
+  function toggleAll() {
+    setSel(allSel ? [] : filtered.map(l => l.id));
+  }
+  function toggleOne(id) {
+    setSel(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  }
+  function doSaveBulk() {
+    const today = new Date().toISOString().split('T')[0];
+    sel.forEach(id => {
+      const l = leads.find(x => x.id === id);
+      if (!l) return;
+      let u = {
+        ...l
+      };
+      if (bulkRep) {
+        u.assignedTo = bulkRep;
+        u.dateAssigned = today;
+      }
+      bulkTags.forEach(t => {
+        if (!u.tags.includes(t)) u.tags = [...u.tags, t];
+      });
+      bulkCamps.forEach(c => {
+        if (!u.campaigns.includes(c)) u.campaigns = [...u.campaigns, c];
+      });
+      onEdit(u);
+    });
+    setSel([]);
+    setBulkRep('');
+    setBulkTags([]);
+    setBulkCamps([]);
+  }
+  function toggleBulkTag(t) {
+    setBulkTags(ts => ts.includes(t) ? ts.filter(x => x !== t) : [...ts, t]);
+  }
+  function toggleBulkCamp(c) {
+    setBulkCamps(cs => cs.includes(c) ? cs.filter(x => x !== c) : [...cs, c]);
+  }
+  function patchLead(id, patch) {
+    const l = leads.find(x => x.id === id);
+    if (l) onEdit({
+      ...l,
+      ...patch
+    });
+  }
+  function handleCtx(e, lead) {
+    e.preventDefault();
+    setCtxMenu({
+      x: e.clientX,
+      y: e.clientY,
+      lead
+    });
+  }
+  const colHeaderProps = {
+    sortCol,
+    sortDir,
+    onSort: handleSort,
+    leads,
+    colFilter,
+    setColFilter,
+    openFilterCol,
+    setOpenFilterCol
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "toolbar no-print"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "search-field"
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "14",
+    height: "14",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2"
+  }, /*#__PURE__*/React.createElement("circle", {
+    cx: "11",
+    cy: "11",
+    r: "8"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "m21 21-4.35-4.35"
+  })), /*#__PURE__*/React.createElement("input", {
+    placeholder: "Search channels, niches, platforms...",
+    value: search,
+    onChange: e => setSearch(e.target.value)
+  })), /*#__PURE__*/React.createElement("select", {
+    value: filterStatus,
+    onChange: e => setFilterStatus(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "All Status"), STATUSES.map(s => /*#__PURE__*/React.createElement("option", {
+    key: s
+  }, s)), /*#__PURE__*/React.createElement("option", {
+    value: "HT"
+  }, "HT (High Ticket)")), showAssigned && /*#__PURE__*/React.createElement("select", {
+    value: filterRep,
+    onChange: e => setFilterRep(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "All Reps"), allReps.map(r => /*#__PURE__*/React.createElement("option", {
+    key: r
+  }, r))), /*#__PURE__*/React.createElement("span", {
+    className: "count-label no-print"
+  }, filtered.length, " lead", filtered.length !== 1 ? 's' : '', sel.length > 0 && ` · ${sel.length} selected`), /*#__PURE__*/React.createElement("div", {
+    className: "export-group no-print",
+    style: {
+      marginLeft: 'auto'
+    }
+  }, feats.exportCSV && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: () => exportCSV(filtered, `${filename}.csv`)
+  }, "⬇ CSV"), feats.exportPDF && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: () => exportPDF()
+  }, "🖨 PDF"))), sel.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "bulk-panel no-print"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: 'var(--accent)',
+      fontSize: 13,
+      whiteSpace: 'nowrap'
+    }
+  }, "✓ ", sel.length, " selected"), /*#__PURE__*/React.createElement("div", {
+    className: "toolbar-sep"
+  }), feats.bulkAssign && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+    className: "bulk-panel-label"
+  }, "Rep"), /*#__PURE__*/React.createElement("select", {
+    value: bulkRep,
+    onChange: e => setBulkRep(e.target.value),
+    style: {
+      fontSize: 12,
+      padding: '5px 10px'
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "— none —"), allReps.map(r => /*#__PURE__*/React.createElement("option", {
+    key: r
+  }, r)))), /*#__PURE__*/React.createElement("div", {
+    className: "toolbar-sep"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "bulk-panel-label"
+  }, "Tags"), /*#__PURE__*/React.createElement("div", {
+    className: "bulk-chip"
+  }, [...STATUSES, 'HT'].map(t => {
+    const on = bulkTags.includes(t);
+    const c = TAG_COLORS[t] || {
+      bg: '#F0F2F5',
+      color: '#68737D'
+    };
+    return /*#__PURE__*/React.createElement("span", {
+      key: t,
+      className: `bulk-chip-item${on ? ' active' : ''}`,
+      style: on ? {
+        background: c.bg,
+        color: c.color
+      } : {},
+      onClick: () => toggleBulkTag(t)
+    }, t === 'HT' ? '⚡ HT' : t);
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "toolbar-sep"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "bulk-panel-label"
+  }, "Campaign"), /*#__PURE__*/React.createElement("div", {
+    className: "bulk-chip"
+  }, (config.campaigns || []).map(c => {
+    const on = bulkCamps.includes(c.id);
+    return /*#__PURE__*/React.createElement("span", {
+      key: c.id,
+      className: `bulk-chip-item${on ? ' active' : ''}`,
+      style: on ? {
+        background: c.color + '22',
+        color: c.color,
+        borderColor: c.color
+      } : {},
+      onClick: () => toggleBulkCamp(c.id)
+    }, "● ", c.label);
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "toolbar-sep"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    onClick: doSaveBulk,
+    disabled: !bulkRep && bulkTags.length === 0 && bulkCamps.length === 0
+  }, "Save Changes"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: () => {
+      setSel([]);
+      setBulkRep('');
+      setBulkTags([]);
+      setBulkCamps([]);
+    }
+  }, "✕ Clear")), /*#__PURE__*/React.createElement("div", {
+    className: "print-header"
+  }, printTitle, " — ", filtered.length, " leads — ", new Date().toLocaleDateString()), /*#__PURE__*/React.createElement("div", {
+    className: "table-container"
+  }, filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "empty"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "empty-icon"
+  }, "📭"), /*#__PURE__*/React.createElement("h3", null, "No leads found"), /*#__PURE__*/React.createElement("p", null, "Try adjusting your filters")) : /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, feats.bulkAssign && /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 40
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: allSel,
+    onChange: toggleAll
+  })), cols.thumbnail && /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 50
+    }
+  }, "Photo"), cols.channelName && /*#__PURE__*/React.createElement(ColHeader, {
+    col: "channelName",
+    label: "Channel",
+    ...colHeaderProps
+  }), cols.url && /*#__PURE__*/React.createElement("th", null, "URL"), cols.platform && /*#__PURE__*/React.createElement(ColHeader, {
+    col: "platform",
+    label: "Platform",
+    ...colHeaderProps
+  }), cols.niche && /*#__PURE__*/React.createElement(ColHeader, {
+    col: "niche",
+    label: "Niche",
+    ...colHeaderProps
+  }), cols.followers && /*#__PURE__*/React.createElement(ColHeader, {
+    col: "followers",
+    label: "Followers",
+    ...colHeaderProps
+  }), cols.emails && /*#__PURE__*/React.createElement("th", null, "Email"), cols.tags && /*#__PURE__*/React.createElement(ColHeader, {
+    col: "tags",
+    label: "Tags",
+    ...colHeaderProps
+  }), showCampaign && cols.campaign && /*#__PURE__*/React.createElement(ColHeader, {
+    col: "campaign",
+    label: "Campaign",
+    ...colHeaderProps
+  }), showAssigned && cols.assignedTo && /*#__PURE__*/React.createElement(ColHeader, {
+    col: "assignedTo",
+    label: "Assigned To",
+    ...colHeaderProps
+  }), showAssigned && cols.dateAssigned && /*#__PURE__*/React.createElement(ColHeader, {
+    col: "dateAssigned",
+    label: "Date Assigned",
+    ...colHeaderProps
+  }), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 80
+    },
+    className: "no-print"
+  }, "Actions"))), /*#__PURE__*/React.createElement("tbody", null, paginated.map(lead => /*#__PURE__*/React.createElement("tr", {
+    key: lead.id,
+    className: getRowClass(lead),
+    onContextMenu: e => handleCtx(e, lead),
+    style: {
+      cursor: 'context-menu'
+    }
+  }, feats.bulkAssign && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: sel.includes(lead.id),
+    onChange: () => toggleOne(lead.id)
+  })), cols.thumbnail && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("a", {
+    href: lead.url,
+    target: "_blank",
+    rel: "noopener noreferrer"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "thumb",
+    title: `Visit ${lead.channelName}`
+  }, avatarLetter(lead.channelName)))), cols.channelName && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
+    className: "channel-name"
+  }, lead.channelName), lead.channels && lead.channels.length > 1 && /*#__PURE__*/React.createElement("div", {
+    className: "channel-sub"
+  }, lead.channels.length, " channels")), cols.url && /*#__PURE__*/React.createElement("td", {
+    style: {
+      maxWidth: 160
+    }
+  }, lead.url ? /*#__PURE__*/React.createElement("a", {
+    href: lead.url,
+    target: "_blank",
+    rel: "noopener noreferrer",
+    style: {
+      fontSize: 11,
+      color: 'var(--accent)',
+      textDecoration: 'none',
+      display: 'block',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
+    },
+    title: lead.url
+  }, lead.url.replace(/https?:\/\/(www\.)?/, '')) : /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-light)'
+    }
+  }, "—")), cols.platform && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+    className: "platform-badge"
+  }, PLATFORM_ICON[lead.platform], " ", lead.platform)), cols.niche && /*#__PURE__*/React.createElement("td", {
+    style: {
+      color: 'var(--text-dim)',
+      fontSize: 11
+    }
+  }, lead.niche), cols.followers && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+    className: "followers-val"
+  }, lead.followers)), cols.emails && /*#__PURE__*/React.createElement("td", {
+    className: "email-cell"
+  }, lead.emails[0] || /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-light)'
+    }
+  }, "—"), lead.emails.length > 1 && /*#__PURE__*/React.createElement("span", {
+    className: "more-emails"
+  }, "+", lead.emails.length - 1)), cols.tags && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(InlinePicker, {
+    type: "tag",
+    selected: lead.tags,
+    options: [...STATUSES, 'HT'],
+    campColorMap: campColorMap,
+    onChange: tags => patchLead(lead.id, {
+      tags
+    })
+  })), showCampaign && cols.campaign && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(InlinePicker, {
+    type: "campaign",
+    selected: lead.campaigns,
+    options: (config.campaigns || []).map(c => c.id),
+    campColorMap: campColorMap,
+    onChange: campaigns => patchLead(lead.id, {
+      campaigns
+    })
+  })), showAssigned && cols.assignedTo && /*#__PURE__*/React.createElement("td", null, lead.assignedTo ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 22,
+      height: 22,
+      borderRadius: '50%',
+      background: 'var(--accent-light)',
+      color: 'var(--accent)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: 10,
+      fontWeight: 700
+    }
+  }, lead.assignedTo[0]), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 600
+    }
+  }, lead.assignedTo)) : /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-light)',
+      fontSize: 11
+    }
+  }, "Unassigned")), showAssigned && cols.dateAssigned && /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-dim)'
+    }
+  }, lead.dateAssigned || '—'), /*#__PURE__*/React.createElement("td", {
+    className: "no-print"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 5
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn-icon",
+    onClick: () => setEditLead(lead),
+    title: "Edit lead"
+  }, "✏"), onDelete && /*#__PURE__*/React.createElement("button", {
+    className: "btn-icon",
+    style: {
+      color: 'var(--danger)',
+      borderColor: 'rgba(222,53,11,.25)'
+    },
+    onClick: () => {
+      if (window.confirm(`Delete "${lead.channelName}"?`)) onDelete(lead.id);
+    },
+    title: "Delete lead"
+  }, "🗑")))))))), totalPages > 1 && /*#__PURE__*/React.createElement("div", {
+    className: "pagination no-print"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "page-btn",
+    onClick: () => setPage(1),
+    disabled: page === 1
+  }, "«"), /*#__PURE__*/React.createElement("button", {
+    className: "page-btn",
+    onClick: () => setPage(p => Math.max(1, p - 1)),
+    disabled: page === 1
+  }, "‹"), Array.from({
+    length: totalPages
+  }, (_, i) => i + 1).filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 2).reduce((acc, p, i, arr) => {
+    if (i > 0 && p - arr[i - 1] > 1) acc.push(/*#__PURE__*/React.createElement("span", {
+      key: 'e' + p,
+      style: {
+        padding: '0 4px',
+        color: 'var(--text-dim)'
+      }
+    }, "…"));
+    acc.push(/*#__PURE__*/React.createElement("button", {
+      key: p,
+      className: `page-btn${page === p ? ' active' : ''}`,
+      onClick: () => setPage(p)
+    }, p));
+    return acc;
+  }, []), /*#__PURE__*/React.createElement("button", {
+    className: "page-btn",
+    onClick: () => setPage(p => Math.min(totalPages, p + 1)),
+    disabled: page === totalPages
+  }, "›"), /*#__PURE__*/React.createElement("button", {
+    className: "page-btn",
+    onClick: () => setPage(totalPages),
+    disabled: page === totalPages
+  }, "»"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-dim)',
+      marginLeft: 8
+    }
+  }, "Page ", page, " of ", totalPages, " · ", filtered.length, " leads")), editLead && /*#__PURE__*/React.createElement(LeadModal, {
+    lead: editLead,
+    config: config,
+    onClose: () => setEditLead(null),
+    onSave: l => {
+      if (onEdit) onEdit(l);
+      setEditLead(null);
+    },
+    onDelete: id => {
+      if (onDelete) onDelete(id);
+      setEditLead(null);
+    }
+  }), ctxMenu && /*#__PURE__*/React.createElement(ContextMenu, {
+    x: ctxMenu.x,
+    y: ctxMenu.y,
+    lead: ctxMenu.lead,
+    sel: sel,
+    allLeads: leads,
+    config: config,
+    campColorMap: campColorMap,
+    onEdit: l => {
+      if (onEdit) onEdit(l);
+    },
+    onDelete: id => {
+      if (onDelete) onDelete(id);
+      setCtxMenu(null);
+    },
+    onOpenEdit: l => setEditLead(l),
+    onClose: () => setCtxMenu(null)
+  }));
+}
+
+// ─── HOME VIEW ────────────────────────────────────────────
+function HomeView({
+  leads,
+  config
+}) {
+  const total = leads.length,
+    assigned = leads.filter(l => l.assignedTo).length;
+  const potential = leads.filter(l => l.tags.includes('Potential')).length;
+  const ht = leads.filter(l => l.tags.includes('HT')).length;
+  const unassigned = total - assigned;
+  const campColorMap = {};
+  (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "home-content"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 12,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-card accent"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Total Leads"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, total), /*#__PURE__*/React.createElement("div", {
+    className: "stat-sub"
+  }, "across all platforms")), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card green"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Potential"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, potential), /*#__PURE__*/React.createElement("div", {
+    className: "stat-sub"
+  }, "ready to contact")), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card orange"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "High Ticket"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, ht), /*#__PURE__*/React.createElement("div", {
+    className: "stat-sub"
+  }, "priority leads")), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Assigned"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, assigned), /*#__PURE__*/React.createElement("div", {
+    className: "stat-sub"
+  }, unassigned, " unassigned"))), /*#__PURE__*/React.createElement("div", {
+    className: "grid-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title"
+  }, "Leads by Sales Rep")), /*#__PURE__*/React.createElement("div", {
+    className: "card-body"
+  }, (config.salesReps || []).map(r => {
+    const cnt = leads.filter(l => l.assignedTo === r).length;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "bar-row",
+      key: r
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bar-label"
+    }, r), /*#__PURE__*/React.createElement("div", {
+      className: "bar-track"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bar-fill",
+      style: {
+        width: `${total ? cnt / total * 100 : 0}%`,
+        background: 'var(--accent)'
+      }
+    })), /*#__PURE__*/React.createElement("div", {
+      className: "bar-count"
+    }, cnt));
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "bar-row"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bar-label",
+    style: {
+      color: 'var(--text-light)'
+    }
+  }, "Unassigned"), /*#__PURE__*/React.createElement("div", {
+    className: "bar-track"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bar-fill",
+    style: {
+      width: `${total ? unassigned / total * 100 : 0}%`,
+      background: 'var(--border)'
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "bar-count",
+    style: {
+      color: 'var(--text-light)'
+    }
+  }, unassigned)))), /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title"
+  }, "Campaign Distribution")), /*#__PURE__*/React.createElement("div", {
+    className: "card-body"
+  }, (config.campaigns || []).map(c => {
+    const cnt = leads.filter(l => l.campaigns.includes(c.id)).length;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "bar-row",
+      key: c.id
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bar-label"
+    }, c.label), /*#__PURE__*/React.createElement("div", {
+      className: "bar-track"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bar-fill",
+      style: {
+        width: `${total ? cnt / total * 100 : 0}%`,
+        background: c.color
+      }
+    })), /*#__PURE__*/React.createElement("div", {
+      className: "bar-count"
+    }, cnt));
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title"
+  }, "Status Breakdown")), /*#__PURE__*/React.createElement("div", {
+    className: "card-body"
+  }, STATUSES.map(s => {
+    const cnt = leads.filter(l => l.tags.includes(s)).length;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "bar-row",
+      key: s
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bar-label"
+    }, s.replace('Not Qualified', 'NQ').replace('Existing Leads', 'Existing').replace('For Recycle', 'Recycle')), /*#__PURE__*/React.createElement("div", {
+      className: "bar-track"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bar-fill",
+      style: {
+        width: `${total ? cnt / total * 100 : 0}%`,
+        background: '#9BA8B4'
+      }
+    })), /*#__PURE__*/React.createElement("div", {
+      className: "bar-count"
+    }, cnt));
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title"
+  }, "Platform Split")), /*#__PURE__*/React.createElement("div", {
+    className: "card-body"
+  }, ['YouTube', 'TikTok', 'Instagram'].map(p => {
+    const cnt = leads.filter(l => l.platform === p).length;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "bar-row",
+      key: p
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bar-label"
+    }, PLATFORM_ICON[p], " ", p), /*#__PURE__*/React.createElement("div", {
+      className: "bar-track"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bar-fill",
+      style: {
+        width: `${total ? cnt / total * 100 : 0}%`,
+        background: 'var(--purple)'
+      }
+    })), /*#__PURE__*/React.createElement("div", {
+      className: "bar-count"
+    }, cnt));
+  })))));
+}
+
+// ─── REP AVATAR COMPONENT ────────────────────────────────
+function RepAvatar({
+  rep,
+  config,
+  size = 36,
+  online = false,
+  bgOverride = null
+}) {
+  const color = (config.repColors || {})[rep] || '#6366F1';
+  const emoji = (config.repEmojis || {})[rep] || '';
+  const photo = (config.repPhotos || {})[rep] || '';
+  const fontSize = emoji ? Math.round(size * .48) : Math.round(size * .38);
+  const dotSize = Math.max(6, Math.round(size * .28));
+  const borderColor = bgOverride || 'var(--bg)';
+  return /*#__PURE__*/React.createElement("div", {
+    className: "rep-avatar",
+    style: {
+      width: size,
+      height: size,
+      background: photo ? 'transparent' : color,
+      color: 'white',
+      fontSize,
+      flexShrink: 0
+    }
+  }, photo ? /*#__PURE__*/React.createElement("img", {
+    src: photo,
+    alt: rep
+  }) : emoji || rep[0].toUpperCase(), online && /*#__PURE__*/React.createElement("div", {
+    className: "rep-online-dot",
+    style: {
+      width: dotSize,
+      height: dotSize,
+      bottom: -1,
+      right: -1,
+      border: `${Math.max(1, Math.round(dotSize * .22))}px solid ${borderColor}`
+    }
+  }));
+}
+
+// ─── REP DASHBOARD VIEW ───────────────────────────────────
+function RepDashboard({
+  rep,
+  leads,
+  config,
+  onEdit,
+  onDelete,
+  onBulkAssign,
+  onBack,
+  onImportClose
+}) {
+  function importToClose(r, ls) {
+    if (onImportClose) onImportClose(r, ls);
+  }
+  const myLeads = leads.filter(l => l.assignedTo === rep && !l.tags.includes('Contacted'));
+  const campColorMap = {};
+  (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
+  const total = myLeads.length;
+  const potential = myLeads.filter(l => l.tags.includes('Potential')).length;
+  const contacted = myLeads.filter(l => l.tags.includes('Contacted')).length;
+  const ht = myLeads.filter(l => l.tags.includes('HT')).length;
+  const feats = config.features || {};
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rep-view-header no-print"
+  }, /*#__PURE__*/React.createElement(RepAvatar, {
+    rep: rep,
+    config: config,
+    size: 42,
+    online: true,
+    bgOverride: "var(--card)"
+  }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      fontSize: 15
+    }
+  }, rep, "'s Dashboard"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-dim)'
+    }
+  }, total, " active leads")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginLeft: 'auto',
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    onClick: () => importToClose(rep, myLeads),
+    title: "Import this rep's leads into Close.io CRM via n8n webhook"
+  }, "⬆ Import to Close.io"), /*#__PURE__*/React.createElement("div", {
+    className: "export-group"
+  }, feats.exportCSV && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: () => exportCSV(myLeads, `${rep}_leads.csv`)
+  }, "⬇ Export CSV"), feats.exportPDF && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: () => exportPDF(rep)
+  }, "🖨 Export PDF")), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: onBack
+  }, "← Back"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 12,
+      padding: '16px 24px',
+      flexShrink: 0,
+      borderBottom: '1px solid var(--border)',
+      background: 'var(--card)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-card accent",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Total"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, total)), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card green",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Potential"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, potential)), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Contacted"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, contacted)), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card orange",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "High Ticket"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, ht))), /*#__PURE__*/React.createElement(LeadsTable, {
+    leads: myLeads,
+    onEdit: onEdit,
+    onDelete: onDelete,
+    onBulkAssign: onBulkAssign,
+    showAssigned: true,
+    showCampaign: true,
+    config: config,
+    feats: feats,
+    campColorMap: campColorMap,
+    filename: `${rep}_leads`,
+    printTitle: `${rep}'s Lead Report`
+  }));
+}
+
+// ─── REP SELECT SCREEN ────────────────────────────────────
+function RepSelectScreen({
+  leads,
+  config,
+  activeRep,
+  onSelect
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "rep-select-screen"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rep-select-title"
+  }, /*#__PURE__*/React.createElement("h2", null, "Select Your Profile"), /*#__PURE__*/React.createElement("p", null, "Choose your name to log in and manage your assigned leads")), /*#__PURE__*/React.createElement("div", {
+    className: "rep-grid"
+  }, (config.salesReps || []).map(r => {
+    const active = leads.filter(l => l.assignedTo === r && !l.tags.includes('Contacted')).length;
+    const total = leads.filter(l => l.assignedTo === r).length;
+    const isOnline = activeRep === r;
+    const color = (config.repColors || {})[r] || '#6366F1';
+    return /*#__PURE__*/React.createElement("div", {
+      key: r,
+      className: `rep-card-btn${isOnline ? ' rep-card-online' : ''}`,
+      onClick: () => onSelect(r),
+      style: isOnline ? {
+        borderColor: color,
+        boxShadow: `0 0 0 3px ${color}30`
+      } : {}
+    }, /*#__PURE__*/React.createElement(RepAvatar, {
+      rep: r,
+      config: config,
+      size: 64,
+      online: isOnline,
+      bgOverride: "var(--card)"
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "rep-name"
+    }, r), /*#__PURE__*/React.createElement("div", {
+      className: "rep-leads"
+    }, active, " active · ", total, " total"), isOnline && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        fontWeight: 700,
+        color,
+        marginTop: 2
+      }
+    }, "● Currently logged in"));
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: () => onSelect(activeRep)
+  }, "← Back"));
+}
+
+// ─── CONTACTED VIEW ──────────────────────────────────────
+function ContactedView({
+  leads,
+  onSave,
+  onDelete,
+  onBulkAssign,
+  config,
+  campColorMap
+}) {
+  const contacted = leads.filter(l => l.tags.includes('Contacted'));
+  const today = new Date();
+  function recycleInfo(l) {
+    if (!l.lastContactDate) return null;
+    const diff = Math.floor((today - new Date(l.lastContactDate)) / 86400000);
+    if (l.campaigns.includes('VVV')) {
+      const left = 30 - diff;
+      return {
+        threshold: 30,
+        diff,
+        left,
+        color: left <= 7 ? 'var(--danger)' : left <= 14 ? 'var(--warn)' : 'var(--success)'
+      };
+    }
+    if (l.campaigns.includes('MSN')) {
+      const left = 90 - diff;
+      return {
+        threshold: 90,
+        diff,
+        left,
+        color: left <= 14 ? 'var(--danger)' : left <= 30 ? 'var(--warn)' : 'var(--success)'
+      };
+    }
+    return null;
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+      overflow: 'auto'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '16px 24px',
+      borderBottom: '1px solid var(--border)',
+      background: 'var(--card)',
+      display: 'flex',
+      gap: 12,
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-card accent",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Total Contacted"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, contacted.length)), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card green",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "VVV (30-day recycle)"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, contacted.filter(l => l.campaigns.includes('VVV')).length)), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card orange",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "MSN (90-day recycle)"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, contacted.filter(l => l.campaigns.includes('MSN')).length)), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Recycle Soon (<14d)"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value",
+    style: {
+      color: 'var(--danger)'
+    }
+  }, contacted.filter(l => {
+    const r = recycleInfo(l);
+    return r && r.left <= 14 && r.left > 0;
+  }).length))), /*#__PURE__*/React.createElement("table", {
+    className: "leads-table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Channel"), /*#__PURE__*/React.createElement("th", null, "Campaign"), /*#__PURE__*/React.createElement("th", null, "Assigned To"), /*#__PURE__*/React.createElement("th", null, "Last Contacted"), /*#__PURE__*/React.createElement("th", null, "Days Since Contact"), /*#__PURE__*/React.createElement("th", null, "Recycle In"))), /*#__PURE__*/React.createElement("tbody", null, contacted.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: 6,
+    style: {
+      textAlign: 'center',
+      padding: 32,
+      color: 'var(--text-dim)'
+    }
+  }, "No contacted leads yet")), contacted.map(l => {
+    const r = recycleInfo(l);
+    return /*#__PURE__*/React.createElement("tr", {
+      key: l.id,
+      className: l.campaigns.includes('MSN') && l.campaigns.includes('VVV') ? 'row-both' : l.campaigns.includes('MSN') ? 'row-msn' : l.campaigns.includes('VVV') ? 'row-vvv' : ''
+    }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 600,
+        fontSize: 13
+      }
+    }, l.channelName), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: 'var(--text-dim)'
+      }
+    }, l.platform)), /*#__PURE__*/React.createElement("td", null, l.campaigns.map(c => /*#__PURE__*/React.createElement("span", {
+      key: c,
+      className: "tag-badge",
+      style: {
+        background: campColorMap[c] || 'var(--accent)',
+        color: '#fff',
+        marginRight: 4
+      }
+    }, c))), /*#__PURE__*/React.createElement("td", null, l.assignedTo || /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--text-dim)'
+      }
+    }, "—")), /*#__PURE__*/React.createElement("td", null, l.lastContactDate || /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--text-dim)'
+      }
+    }, "—")), /*#__PURE__*/React.createElement("td", null, r ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontWeight: 600,
+        color: r.diff > 0 ? 'var(--text-dim)' : 'var(--text)'
+      }
+    }, r.diff, " day", r.diff !== 1 ? 's' : '') : /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--text-dim)'
+      }
+    }, "—")), /*#__PURE__*/React.createElement("td", null, r ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontWeight: 700,
+        color: r.color
+      }
+    }, r.left <= 0 ? '⚠ Ready to Recycle' : `${r.left}d`) : /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--text-dim)'
+      }
+    }, "—")));
+  }))));
+}
+
+// ─── GOOGLE SHEETS IMPORT ────────────────────────────────
+function GoogleImportView({
+  onImport,
+  addToast
+}) {
+  const [url, setUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [mapping, setMapping] = useState({});
+  const FIELDS = [{
+    key: 'channelName',
+    label: 'Channel Name',
+    required: true
+  }, {
+    key: 'url',
+    label: 'Channel URL'
+  }, {
+    key: 'platform',
+    label: 'Platform'
+  }, {
+    key: 'niche',
+    label: 'Niche'
+  }, {
+    key: 'followers',
+    label: 'Followers'
+  }, {
+    key: 'emails',
+    label: 'Email(s)'
+  }, {
+    key: 'tags',
+    label: 'Tags / Status'
+  }, {
+    key: 'assignedTo',
+    label: 'Assigned To'
+  }];
+  function extractSheetId(raw) {
+    const m = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    return m ? m[1] : null;
+  }
+  function extractGid(raw) {
+    const m = raw.match(/[?&#]gid=(\d+)/);
+    return m ? m[1] : '0';
+  }
+  async function fetchDirectCSV(id, gid) {
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+    const res = await fetch(csvUrl, {
+      mode: 'cors'
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.text();
+  }
+  async function fetchViaCorsProxy(id, gid) {
+    const csvUrl = encodeURIComponent(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`);
+    const res = await fetch(`https://corsproxy.io/?${csvUrl}`);
+    if (!res.ok) throw new Error('Proxy HTTP ' + res.status);
+    return await res.text();
+  }
+  function fetchViaJsonp(id, gid) {
+    return new Promise((resolve, reject) => {
+      const cb = '__gs_' + Date.now();
+      const s = document.createElement('script');
+      s.src = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:json;responseHandler:${cb}&gid=${gid}`;
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('Timeout'));
+      }, 12000);
+      function cleanup() {
+        try {
+          delete window[cb];
+        } catch (e) {}
+        s.remove();
+        clearTimeout(timer);
+      }
+      window[cb] = data => {
+        cleanup();
+        resolve(data);
+      };
+      s.onerror = () => {
+        cleanup();
+        reject(new Error('Script error'));
+      };
+      document.head.appendChild(s);
+    });
+  }
+  async function fetchViaGviz(id, gid) {
+    const data = await fetchViaJsonp(id, gid);
+    if (!data || !data.table) throw new Error('No table');
+    const cols = data.table.cols.map(c => (c.label || c.id || '').trim());
+    const rows = (data.table.rows || []).map(r => (r.c || []).map((cell, i) => {
+      if (!cell || cell.v == null) return '';
+      if (cell.f) return cell.f;
+      return String(cell.v).trim();
+    }));
+    const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+    return [cols.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))].join('\n');
+  }
+  function parseCSV(text) {
+    const lines = text.split('\n').filter(l => l.trim());
+    function parseLine(line) {
+      const out = [];
+      let cur = '',
+        q = false;
+      for (let i = 0; i < line.length; i++) {
+        if (line[i] === '"') {
+          q = !q;
+        } else if (line[i] === ',' && !q) {
+          out.push(cur.trim());
+          cur = '';
+        } else cur += line[i];
+      }
+      out.push(cur.trim());
+      return out;
+    }
+    return {
+      headers: parseLine(lines[0]),
+      rows: lines.slice(1).map(parseLine)
+    };
+  }
+  function autoMap(headers) {
+    const ALIASES = {
+      channelName: ['channel name', 'channel', 'name', 'creator', 'creator name', 'handle'],
+      url: ['url', 'link', 'channel url', 'profile url', 'youtube url', 'youtube link'],
+      platform: ['platform', 'social', 'network'],
+      niche: ['niche', 'category', 'topic', 'industry', 'vertical'],
+      followers: ['followers', 'subscribers', 'subs', 'audience', 'reach', 'follower count'],
+      emails: ['email', 'emails', 'email address', 'contact email', 'contact'],
+      tags: ['tags', 'tag', 'status', 'label', 'stage'],
+      assignedTo: ['assigned to', 'assigned', 'rep', 'sales rep', 'owner', 'agent']
+    };
+    const r = {};
+    headers.forEach((h, i) => {
+      const low = h.toLowerCase().trim();
+      for (const [field, aliases] of Object.entries(ALIASES)) {
+        if (!r[field] && aliases.some(a => low.includes(a))) r[field] = String(i);
+      }
+    });
+    return r;
+  }
+  async function fetchSheet() {
+    const id = extractSheetId(url.trim());
+    if (!id) {
+      addToast('Paste a valid Google Sheets URL', 'error');
+      return;
+    }
+    const gid = extractGid(url.trim());
+    setLoading(true);
+    let text = null;
+    const errors = [];
+    const strategies = [{
+      name: 'Direct CSV',
+      fn: () => fetchDirectCSV(id, gid)
+    }, {
+      name: 'CORS Proxy',
+      fn: () => fetchViaCorsProxy(id, gid)
+    }, {
+      name: 'JSONP/gviz',
+      fn: () => fetchViaGviz(id, gid)
+    }];
+    for (const s of strategies) {
+      try {
+        text = await s.fn();
+        break;
+      } catch (e) {
+        errors.push(`${s.name}: ${e.message}`);
+      }
+    }
+    if (!text) {
+      console.error('All fetch strategies failed:', errors);
+      addToast('Could not load sheet. Ensure it is shared as "Anyone with link can view" and try again.', 'error');
+      setLoading(false);
+      return;
+    }
+    try {
+      const {
+        headers,
+        rows
+      } = parseCSV(text);
+      if (!headers.length) throw new Error('Sheet appears empty');
+      const m = autoMap(headers);
+      setMapping(m);
+      setPreview({
+        headers,
+        rows,
+        previewRows: rows.slice(0, 5)
+      });
+      addToast(`Fetched ${rows.length} rows — confirm column mapping below`, 'success');
+    } catch (e) {
+      addToast(`Parsed sheet but got an error: ${e.message}`, 'error');
+    }
+    setLoading(false);
+  }
+  function doImport() {
+    if (!preview) return;
+    const today = new Date().toISOString().split('T')[0];
+    const get = (row, key) => mapping[key] !== undefined ? (row[parseInt(mapping[key])] || '').trim() : '';
+    const imported = preview.rows.filter(r => r.some(c => c.trim())).map((row, i) => {
+      const emails = get(row, 'emails').split(/[;,]/).map(e => e.trim()).filter(Boolean);
+      const tags = get(row, 'tags').split(/[;,]/).map(t => t.trim()).filter(Boolean);
+      const name = get(row, 'channelName') || `Row ${i + 1}`;
+      const rep = get(row, 'assignedTo') || null;
+      return {
+        id: Date.now() + i,
+        channelName: name,
+        url: get(row, 'url'),
+        platform: get(row, 'platform') || 'YouTube',
+        niche: get(row, 'niche'),
+        followers: get(row, 'followers'),
+        emails,
+        tags,
+        campaigns: [],
+        assignedTo: rep,
+        dateAssigned: rep ? today : null,
+        lastContactDate: null,
+        channels: [name]
+      };
+    });
+    onImport(imported);
+    addToast(`✓ ${imported.length} leads imported`, 'success');
+    setPreview(null);
+    setUrl('');
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+      overflow: 'auto',
+      padding: '24px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      maxWidth: 780,
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      fontSize: 15,
+      marginBottom: 4
+    }
+  }, "Import from Google Sheets"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-dim)',
+      marginBottom: 16
+    }
+  }, "Paste your Google Sheets URL. The sheet must be shared as ", /*#__PURE__*/React.createElement("strong", null, "\"Anyone with the link can view\""), " or published to the web (File → Share → Publish to web → CSV)."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: url,
+    onChange: e => setUrl(e.target.value),
+    onKeyDown: e => e.key === 'Enter' && fetchSheet(),
+    placeholder: "https://docs.google.com/spreadsheets/d/...",
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: fetchSheet,
+    disabled: loading || !url.trim()
+  }, loading ? '⏳ Fetching...' : '⬇ Load Sheet')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12,
+      fontSize: 11,
+      color: 'var(--text-dim)'
+    }
+  }, /*#__PURE__*/React.createElement("strong", null, "How to share:"), " Open your sheet → File → Share → Share with others → Change to \"Anyone with the link\" → Viewer → Done")), preview && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      maxWidth: 780,
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      fontSize: 14,
+      marginBottom: 12
+    }
+  }, "Column Mapping ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 400,
+      fontSize: 11,
+      color: 'var(--text-dim)'
+    }
+  }, "— auto-detected from your headers, adjust if needed")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 10
+    }
+  }, FIELDS.map(f => /*#__PURE__*/React.createElement("div", {
+    key: f.key,
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 120,
+      fontSize: 12,
+      color: 'var(--text-dim)',
+      flexShrink: 0
+    }
+  }, f.label, f.required && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--danger)'
+    }
+  }, " *")), /*#__PURE__*/React.createElement("select", {
+    value: mapping[f.key] || '',
+    onChange: e => setMapping(m => ({
+      ...m,
+      [f.key]: e.target.value
+    })),
+    style: {
+      flex: 1,
+      fontSize: 12
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "— skip —"), preview.headers.map((h, i) => /*#__PURE__*/React.createElement("option", {
+    key: i,
+    value: String(i)
+  }, h))))))), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      maxWidth: 780,
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      fontSize: 14,
+      marginBottom: 12
+    }
+  }, "Preview ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 400,
+      fontSize: 11,
+      color: 'var(--text-dim)'
+    }
+  }, "— first 5 rows of ", preview.rows.length, " total")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "leads-table",
+    style: {
+      fontSize: 11
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, preview.headers.map((h, i) => /*#__PURE__*/React.createElement("th", {
+    key: i
+  }, h)))), /*#__PURE__*/React.createElement("tbody", null, preview.previewRows.map((row, i) => /*#__PURE__*/React.createElement("tr", {
+    key: i
+  }, row.map((cell, j) => /*#__PURE__*/React.createElement("td", {
+    key: j,
+    style: {
+      maxWidth: 140,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
+    }
+  }, cell || /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-dim)'
+    }
+  }, "—"))))))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 780,
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: doImport
+  }, "⬆ Import ", preview.rows.length, " Leads"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: () => {
+      setPreview(null);
+      setUrl('');
+    }
+  }, "Cancel"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-dim)'
+    }
+  }, "Existing leads will not be duplicated — imports are additive."))), !preview && /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      maxWidth: 780
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 600,
+      fontSize: 13,
+      marginBottom: 10,
+      color: 'var(--text-dim)'
+    }
+  }, "Expected sheet columns (column names are flexible)"), /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      fontSize: 12,
+      borderCollapse: 'collapse'
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+    style: {
+      borderBottom: '1px solid var(--border)'
+    }
+  }, /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'left',
+      padding: '6px 8px',
+      color: 'var(--text-dim)',
+      fontWeight: 600
+    }
+  }, "Field"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'left',
+      padding: '6px 8px',
+      color: 'var(--text-dim)',
+      fontWeight: 600
+    }
+  }, "Recognized Column Names"))), /*#__PURE__*/React.createElement("tbody", null, [['Channel Name*', 'Channel Name, Name, Creator, Handle'], ['Channel URL', 'URL, Link, Channel URL, YouTube URL'], ['Platform', 'Platform, Social, Network'], ['Niche', 'Niche, Category, Topic, Industry, Vertical'], ['Followers', 'Followers, Subscribers, Subs, Audience'], ['Email(s)', 'Email, Emails, Contact Email (comma/semicolon for multiple)'], ['Tags', 'Tags, Status, Label, Stage'], ['Assigned To', 'Assigned To, Rep, Sales Rep, Owner']].map(([f, a]) => /*#__PURE__*/React.createElement("tr", {
+    key: f,
+    style: {
+      borderBottom: '1px solid var(--border-light)'
+    }
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: '7px 8px',
+      fontWeight: 500
+    }
+  }, f), /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: '7px 8px',
+      color: 'var(--text-dim)'
+    }
+  }, a)))))));
+}
+
+// ─── SCRAPER VIEW ─────────────────────────────────────────
+function ScraperView({
+  leads,
+  onSave,
+  onDelete,
+  onBulkAssign,
+  addToast,
+  config
+}) {
+  const [webhook, setWebhook] = useState('https://app.n8n.cloud/webhook/your-webhook-id');
+  const [platform, setPlatform] = useState('YouTube');
+  const [niche, setNiche] = useState('');
+  const [minF, setMinF] = useState('10K');
+  const [loading, setLoading] = useState(false);
+  const feats = config.features || {};
+  const campColorMap = {};
+  (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
+  function scrape() {
+    setLoading(true);
+    setTimeout(() => {
+      setLoading(false);
+      addToast('Webhook triggered — scrape job sent to n8n', 'success');
+    }, 2000);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'var(--card)',
+      borderBottom: '1px solid var(--border)',
+      padding: '16px 24px',
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      flexWrap: 'wrap',
+      alignItems: 'flex-end'
+    }
+  }, feats.webhookTrigger && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Webhook URL"), /*#__PURE__*/React.createElement("input", {
+    value: webhook,
+    onChange: e => setWebhook(e.target.value),
+    style: {
+      width: 280
+    },
+    placeholder: "https://app.n8n.cloud/webhook/..."
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Platform"), /*#__PURE__*/React.createElement("select", {
+    value: platform,
+    onChange: e => setPlatform(e.target.value)
+  }, PLATFORMS.map(p => /*#__PURE__*/React.createElement("option", {
+    key: p
+  }, p)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Niche / Keyword"), /*#__PURE__*/React.createElement("input", {
+    value: niche,
+    onChange: e => setNiche(e.target.value),
+    placeholder: "e.g. Finance, Fitness...",
+    style: {
+      width: 160
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Min Followers"), /*#__PURE__*/React.createElement("select", {
+    value: minF,
+    onChange: e => setMinF(e.target.value)
+  }, ['1K', '10K', '50K', '100K', '500K', '1M'].map(v => /*#__PURE__*/React.createElement("option", {
+    key: v
+  }, v)))), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: scrape,
+    disabled: loading,
+    style: {
+      alignSelf: 'flex-end'
+    }
+  }, loading ? '⏳ Scraping...' : '▶ Run Scraper')), feats.dailyRefresh && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12,
+      fontSize: 11,
+      color: 'var(--text-dim)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "webhook-dot"
+  }), "Auto-refresh daily at 06:00 UTC — Last run: Today 06:00")), /*#__PURE__*/React.createElement(LeadsTable, {
+    leads: leads.filter(l => !hasStatusTag(l)),
+    onEdit: onSave,
+    onDelete: onDelete,
+    onBulkAssign: onBulkAssign,
+    showAssigned: true,
+    showCampaign: true,
+    config: config,
+    feats: feats,
+    campColorMap: campColorMap,
+    filename: "scraper_queue",
+    printTitle: "Scraper Queue"
+  }));
+}
+
+// ─── CAMPAIGN VIEW ────────────────────────────────────────
+function CampaignView({
+  campaign,
+  campColor,
+  leads,
+  onSave,
+  onBulkAssign,
+  addToast,
+  config
+}) {
+  const filtered = leads.filter(l => l.campaigns.includes(campaign.id));
+  const [repFilter, setRepFilter] = useState('');
+  const display = repFilter ? filtered.filter(l => l.assignedTo === repFilter) : filtered;
+  const feats = config.features || {};
+  const campColorMap = {};
+  (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
+  function doExportCSV() {
+    exportCSV(display, `${campaign.id}${repFilter ? '_' + repFilter : ''}_leads.csv`);
+    addToast(`Exported ${display.length} leads as CSV`, 'success');
+  }
+  function doExportPDF() {
+    exportPDF();
+    addToast('Printing PDF...', 'info');
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'var(--card)',
+      borderBottom: '1px solid var(--border)',
+      padding: '10px 20px',
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `btn btn-sm ${!repFilter ? 'btn-primary' : 'btn-outline'}`,
+    onClick: () => setRepFilter('')
+  }, "All (", filtered.length, ")"), (config.salesReps || []).map(r => {
+    const cnt = filtered.filter(l => l.assignedTo === r).length;
+    return /*#__PURE__*/React.createElement("button", {
+      key: r,
+      className: `btn btn-sm ${repFilter === r ? 'btn-primary' : 'btn-outline'}`,
+      onClick: () => setRepFilter(f => f === r ? '' : r)
+    }, r, " (", cnt, ")");
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginLeft: 'auto',
+      display: 'flex',
+      gap: 6
+    }
+  }, feats.exportCSV && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: doExportCSV
+  }, "⬇ CSV"), feats.exportPDF && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: doExportPDF
+  }, "🖨 PDF"))), /*#__PURE__*/React.createElement(LeadsTable, {
+    leads: display,
+    onEdit: l => {},
+    onBulkAssign: onBulkAssign,
+    showAssigned: true,
+    showCampaign: false,
+    config: config,
+    feats: feats,
+    campColorMap: campColorMap,
+    filename: `${campaign.id}_leads`,
+    printTitle: `${campaign.label} Campaign Report`
+  }));
+}
+
+// ─── LEAD MGMT VIEW ───────────────────────────────────────
+function LeadMgmtView({
+  leads,
+  onSave,
+  onBulkAssign,
+  addToast,
+  config
+}) {
+  const [repView, setRepView] = useState('');
+  const feats = config.features || {};
+  const campColorMap = {};
+  (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
+  const all = config.salesReps || [];
+  const unassigned = leads.filter(l => !l.assignedTo);
+  const display = repView === 'unassigned' ? unassigned : repView ? leads.filter(l => l.assignedTo === repView) : leads;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'var(--card)',
+      borderBottom: '1px solid var(--border)',
+      padding: '12px 20px',
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      flexShrink: 0
+    },
+    className: "no-print"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `btn btn-sm ${repView === '' ? 'btn-primary' : 'btn-outline'}`,
+    onClick: () => setRepView('')
+  }, "All (", leads.length, ")"), all.map(r => {
+    const cnt = leads.filter(l => l.assignedTo === r).length;
+    return /*#__PURE__*/React.createElement("button", {
+      key: r,
+      className: `btn btn-sm ${repView === r ? 'btn-primary' : 'btn-outline'}`,
+      onClick: () => setRepView(v => v === r ? '' : r)
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 16,
+        height: 16,
+        borderRadius: '50%',
+        background: 'var(--accent)',
+        color: 'white',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 9,
+        fontWeight: 700,
+        marginRight: 4
+      }
+    }, r[0]), r, " (", cnt, ")");
+  }), /*#__PURE__*/React.createElement("button", {
+    className: `btn btn-sm ${repView === 'unassigned' ? 'btn-danger' : 'btn-outline'}`,
+    onClick: () => setRepView(v => v === 'unassigned' ? '' : ' unassigned'),
+    style: repView === 'unassigned' ? {} : {
+      borderColor: 'var(--warn)',
+      color: 'var(--warn)'
+    }
+  }, "Unassigned (", unassigned.length, ")")), /*#__PURE__*/React.createElement(LeadsTable, {
+    leads: display,
+    onEdit: l => {},
+    onBulkAssign: onBulkAssign,
+    showAssigned: true,
+    showCampaign: true,
+    config: config,
+    feats: feats,
+    campColorMap: campColorMap,
+    filename: "lead_management",
+    printTitle: "Lead Management Report"
+  }));
+}
+
+// ─── HISTORY VIEW ─────────────────────────────────────────
+function HistoryView({
+  history,
+  addToast,
+  feats
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "history-list"
+  }, history.map(e => /*#__PURE__*/React.createElement("div", {
+    className: "history-item",
+    key: e.id
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "history-icon-wrap"
+  }, e.icon), /*#__PURE__*/React.createElement("div", {
+    className: "history-text"
+  }, e.text), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'flex-end',
+      gap: 6,
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "history-time"
+  }, e.time), e.restorable && feats.historyRestore && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-xs",
+    onClick: () => addToast('Action restored', 'success')
+  }, "↩ Restore")))));
+}
+
+// ─── SETTINGS DRAWER ──────────────────────────────────────
+function SettingsDrawer({
+  config,
+  onConfig,
+  onClose,
+  addToast
+}) {
+  const [local, setLocal] = useState(() => JSON.parse(JSON.stringify(config)));
+  const [newRep, setNewRep] = useState('');
+  const [newTag, setNewTag] = useState('');
+  const [newCamp, setNewCamp] = useState({
+    label: '',
+    color: '#1366D6'
+  });
+  function set(path, val) {
+    setLocal(prev => {
+      const n = JSON.parse(JSON.stringify(prev));
+      const parts = path.split('.');
+      let o = n;
+      for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]];
+      o[parts[parts.length - 1]] = val;
+      return n;
+    });
+  }
+  function addRep() {
+    const n = newRep.trim();
+    if (!n || local.salesReps.includes(n)) return;
+    setLocal(l => ({
+      ...l,
+      salesReps: [...l.salesReps, n]
+    }));
+    setNewRep('');
+  }
+  function remRep(r) {
+    setLocal(l => ({
+      ...l,
+      salesReps: l.salesReps.filter(x => x !== r)
+    }));
+  }
+  function editRep(i, v) {
+    setLocal(l => {
+      const a = [...l.salesReps];
+      a[i] = v;
+      return {
+        ...l,
+        salesReps: a
+      };
+    });
+  }
+  function addTag() {
+    const n = newTag.trim();
+    if (!n || local.statusTags.includes(n)) return;
+    setLocal(l => ({
+      ...l,
+      statusTags: [...l.statusTags, n]
+    }));
+    setNewTag('');
+  }
+  function remTag(t) {
+    setLocal(l => ({
+      ...l,
+      statusTags: l.statusTags.filter(x => x !== t)
+    }));
+  }
+  function addCamp() {
+    const lab = newCamp.label.trim().toUpperCase();
+    if (!lab) return;
+    setLocal(l => ({
+      ...l,
+      campaigns: [...l.campaigns, {
+        id: lab,
+        label: lab,
+        color: newCamp.color
+      }]
+    }));
+    setNewCamp({
+      label: '',
+      color: '#1366D6'
+    });
+  }
+  function remCamp(id) {
+    setLocal(l => ({
+      ...l,
+      campaigns: l.campaigns.filter(c => c.id !== id)
+    }));
+  }
+  function updCampColor(id, col) {
+    setLocal(l => ({
+      ...l,
+      campaigns: l.campaigns.map(c => c.id === id ? {
+        ...c,
+        color: col
+      } : c)
+    }));
+  }
+  function apply() {
+    onConfig(local);
+    addToast('Settings saved', 'success');
+    onClose();
+  }
+  function reset() {
+    setLocal(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
+  }
+  const TAB_META = {
+    home: {
+      label: 'Home',
+      icon: '🏠'
+    },
+    scraper: {
+      label: 'Scraper',
+      icon: '🔍'
+    },
+    history: {
+      label: 'History',
+      icon: '📋'
+    },
+    'prev-scraped': {
+      label: 'Previously Scraped',
+      icon: '💾'
+    },
+    'lead-mgmt': {
+      label: 'Lead Management',
+      icon: '👥'
+    },
+    'google-import': {
+      label: 'Google Sheets Import',
+      icon: '📊'
+    },
+    potential: {
+      label: 'Potential Leads',
+      icon: '⭐'
+    },
+    nq: {
+      label: 'NQ Leads',
+      icon: '❌'
+    },
+    contacted: {
+      label: 'Contacted Leads',
+      icon: '✉️'
+    },
+    recycle: {
+      label: 'For Recycle',
+      icon: '♻️'
+    },
+    recent: {
+      label: 'Recently Assigned',
+      icon: '🕐'
+    },
+    msn: {
+      label: 'MSN Tab',
+      icon: '🔵'
+    },
+    vvv: {
+      label: 'VVV Tab',
+      icon: '🟣'
+    }
+  };
+  const COL_META = {
+    thumbnail: 'Thumbnail',
+    channelName: 'Channel Name',
+    url: 'URL',
+    platform: 'Platform',
+    niche: 'Niche',
+    followers: 'Followers',
+    emails: 'Email(s)',
+    tags: 'Status Tags',
+    campaign: 'Campaign',
+    assignedTo: 'Assigned To',
+    dateAssigned: 'Date Assigned'
+  };
+  const FEAT_META = {
+    bulkAssign: {
+      label: 'Bulk Assign'
+    },
+    exportCSV: {
+      label: 'Export CSV'
+    },
+    exportPDF: {
+      label: 'Export PDF'
+    },
+    dailyRefresh: {
+      label: 'Daily Auto-Refresh'
+    },
+    colorHighlights: {
+      label: 'Campaign Color Rows'
+    },
+    webhookTrigger: {
+      label: 'n8n Webhook'
+    },
+    historyRestore: {
+      label: 'History Restore'
+    },
+    emailValidation: {
+      label: 'Email Validation (future)'
+    }
+  };
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-overlay",
+    onClick: onClose
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "drawer"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-header"
+  }, /*#__PURE__*/React.createElement("h2", null, "⚙️ Dashboard Customizer"), /*#__PURE__*/React.createElement("button", {
+    className: "btn-icon",
+    onClick: onClose
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "drawer-body"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section-title"
+  }, "Navigation Tabs ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9,
+      opacity: .6
+    }
+  }, "Show / Hide")), Object.entries(TAB_META).map(([id, m]) => /*#__PURE__*/React.createElement("div", {
+    className: "toggle-row",
+    key: id
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "toggle-label"
+  }, m.icon, " ", m.label), /*#__PURE__*/React.createElement(Toggle, {
+    checked: !!local.tabs[id],
+    onChange: v => set(`tabs.${id}`, v)
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section-title"
+  }, "Table Columns"), Object.entries(COL_META).map(([id, label]) => /*#__PURE__*/React.createElement("div", {
+    className: "toggle-row",
+    key: id
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "toggle-label"
+  }, label), /*#__PURE__*/React.createElement(Toggle, {
+    checked: !!local.columns[id],
+    onChange: v => set(`columns.${id}`, v)
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section-title"
+  }, "Features"), Object.entries(FEAT_META).map(([id, m]) => /*#__PURE__*/React.createElement("div", {
+    className: "toggle-row",
+    key: id
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "toggle-label"
+  }, m.label), /*#__PURE__*/React.createElement(Toggle, {
+    checked: !!local.features[id],
+    onChange: v => set(`features.${id}`, v)
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section-title"
+  }, "Webhook URLs"), /*#__PURE__*/React.createElement("div", {
+    className: "edit-list"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-dim)',
+      marginBottom: 4
+    }
+  }, "Scraper Webhook (n8n)"), /*#__PURE__*/React.createElement("input", {
+    value: local.scrapeWebhook || '',
+    onChange: e => setLocal(l => ({
+      ...l,
+      scrapeWebhook: e.target.value
+    })),
+    placeholder: "https://app.n8n.cloud/webhook/...",
+    style: {
+      width: '100%'
+    }
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-dim)',
+      marginBottom: 4
+    }
+  }, "Close.io Import Webhook"), /*#__PURE__*/React.createElement("input", {
+    value: local.closeWebhook || '',
+    onChange: e => setLocal(l => ({
+      ...l,
+      closeWebhook: e.target.value
+    })),
+    placeholder: "https://app.n8n.cloud/webhook/...",
+    style: {
+      width: '100%'
+    }
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section-title"
+  }, "Campaigns"), /*#__PURE__*/React.createElement("div", {
+    className: "edit-list"
+  }, local.campaigns.map(c => /*#__PURE__*/React.createElement("div", {
+    className: "edit-row",
+    key: c.id
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "color",
+    className: "color-swatch",
+    value: c.color,
+    onChange: e => updCampColor(c.id, e.target.value)
+  }), /*#__PURE__*/React.createElement("input", {
+    value: c.label,
+    readOnly: true,
+    style: {
+      color: 'var(--text-dim)',
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-danger btn-xs",
+    onClick: () => remCamp(c.id)
+  }, "✕"))), /*#__PURE__*/React.createElement("div", {
+    className: "edit-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "color",
+    className: "color-swatch",
+    value: newCamp.color,
+    onChange: e => setNewCamp(n => ({
+      ...n,
+      color: e.target.value
+    }))
+  }), /*#__PURE__*/React.createElement("input", {
+    placeholder: "Campaign name...",
+    value: newCamp.label,
+    onChange: e => setNewCamp(n => ({
+      ...n,
+      label: e.target.value
+    })),
+    onKeyDown: e => e.key === 'Enter' && addCamp(),
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-xs",
+    onClick: addCamp
+  }, "+ Add")))), /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section-title"
+  }, "Sales Reps"), /*#__PURE__*/React.createElement("div", {
+    className: "edit-list"
+  }, local.salesReps.map((r, i) => /*#__PURE__*/React.createElement("div", {
+    className: "edit-row",
+    key: i
+  }, /*#__PURE__*/React.createElement("input", {
+    value: r,
+    onChange: e => editRep(i, e.target.value),
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-danger btn-xs",
+    onClick: () => remRep(r)
+  }, "✕"))), /*#__PURE__*/React.createElement("div", {
+    className: "edit-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    placeholder: "Add sales rep...",
+    value: newRep,
+    onChange: e => setNewRep(e.target.value),
+    onKeyDown: e => e.key === 'Enter' && addRep(),
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-xs",
+    onClick: addRep
+  }, "+ Add")))), /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section-title"
+  }, "Rep Avatars ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9,
+      opacity: .6
+    }
+  }, "Photo · Color · Emoji")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 12
+    }
+  }, local.salesReps.map(r => {
+    const color = (local.repColors || {})[r] || '#6366F1';
+    const emoji = (local.repEmojis || {})[r] || '';
+    const photo = (local.repPhotos || {})[r] || '';
+    function setPhoto(val) {
+      setLocal(l => ({
+        ...l,
+        repPhotos: {
+          ...(l.repPhotos || {}),
+          [r]: val
+        }
+      }));
+    }
+    function handleFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => setPhoto(ev.target.result);
+      reader.readAsDataURL(file);
+    }
+    return /*#__PURE__*/React.createElement("div", {
+      key: r,
+      style: {
+        background: 'var(--bg)',
+        borderRadius: 'var(--radius)',
+        padding: '10px 12px',
+        display: 'flex',
+        gap: 12,
+        alignItems: 'center'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 44,
+        height: 44,
+        borderRadius: '50%',
+        overflow: 'hidden',
+        flexShrink: 0,
+        background: color,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'white',
+        fontWeight: 700,
+        fontSize: 18,
+        border: '2px solid var(--border)'
+      }
+    }, photo ? /*#__PURE__*/React.createElement("img", {
+      src: photo,
+      style: {
+        width: '100%',
+        height: '100%',
+        objectFit: 'cover'
+      }
+    }) : emoji || r[0].toUpperCase()), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 600,
+        fontSize: 13
+      }
+    }, r), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center',
+        flexWrap: 'wrap'
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "color",
+      className: "color-swatch",
+      value: color,
+      title: "Avatar color",
+      onChange: e => setLocal(l => ({
+        ...l,
+        repColors: {
+          ...(l.repColors || {}),
+          [r]: e.target.value
+        }
+      }))
+    }), /*#__PURE__*/React.createElement("input", {
+      value: emoji,
+      onChange: e => setLocal(l => ({
+        ...l,
+        repEmojis: {
+          ...(l.repEmojis || {}),
+          [r]: e.target.value
+        }
+      })),
+      placeholder: "emoji",
+      style: {
+        width: 72,
+        textAlign: 'center',
+        fontSize: 15,
+        padding: '4px 6px'
+      }
+    }), /*#__PURE__*/React.createElement("label", {
+      style: {
+        cursor: 'pointer',
+        fontSize: 11,
+        padding: '5px 10px',
+        borderRadius: 'var(--radius)',
+        border: '1px solid var(--border)',
+        background: 'var(--card)',
+        color: 'var(--text-dim)',
+        whiteSpace: 'nowrap'
+      }
+    }, "Upload photo", /*#__PURE__*/React.createElement("input", {
+      type: "file",
+      accept: "image/*",
+      style: {
+        display: 'none'
+      },
+      onChange: handleFile
+    })), photo && /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-danger btn-xs",
+      onClick: () => setPhoto('')
+    }, "Remove"))));
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section-title"
+  }, "Status Tags"), /*#__PURE__*/React.createElement("div", {
+    className: "edit-list"
+  }, local.statusTags.map((t, i) => /*#__PURE__*/React.createElement("div", {
+    className: "edit-row",
+    key: i
+  }, /*#__PURE__*/React.createElement("input", {
+    value: t,
+    readOnly: true,
+    style: {
+      flex: 1,
+      color: 'var(--text-dim)'
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-danger btn-xs",
+    onClick: () => remTag(t)
+  }, "✕"))), /*#__PURE__*/React.createElement("div", {
+    className: "edit-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    placeholder: "Add tag...",
+    value: newTag,
+    onChange: e => setNewTag(e.target.value),
+    onKeyDown: e => e.key === 'Enter' && addTag(),
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-xs",
+    onClick: addTag
+  }, "+ Add"))))), /*#__PURE__*/React.createElement("div", {
+    className: "drawer-footer"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: reset
+  }, "↺ Reset"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: onClose
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    style: {
+      marginLeft: 'auto'
+    },
+    onClick: apply
+  }, "✓ Apply Changes"))));
+}
+
+// ─── APP ──────────────────────────────────────────────────
+function App() {
+  const [tab, setTab] = useState('home');
+  const [leads, setLeads] = useState(SAMPLE_LEADS);
+  const [history, setHistory] = useState(SAMPLE_HISTORY);
+  const [toasts, setToasts] = useState([]);
+  const [config, setConfig] = useState(DEFAULT_CONFIG);
+  const [showSettings, setShowSettings] = useState(false);
+  const [activeRep, setActiveRep] = useState(() => localStorage.getItem('activeRep') || null);
+  const [showRepSelect, setShowRepSelect] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
+  useEffect(() => {
+    document.documentElement.setAttribute('data-dark', darkMode ? 'true' : '');
+    if (!darkMode) document.documentElement.removeAttribute('data-dark');
+    localStorage.setItem('darkMode', darkMode);
+  }, [darkMode]);
+  useEffect(() => {
+    if (activeRep) localStorage.setItem('activeRep', activeRep);else localStorage.removeItem('activeRep');
+  }, [activeRep]);
+  function addToast(msg, type = 'info') {
+    const id = Date.now();
+    setToasts(t => [...t, {
+      id,
+      msg,
+      type
+    }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500);
+  }
+  function saveL(upd) {
+    const old = leads.find(l => l.id === upd.id);
+    let updated = {
+      ...upd
+    };
+    if (old && !old.tags.includes('Contacted') && upd.tags.includes('Contacted')) {
+      updated.lastContactDate = new Date().toISOString().split('T')[0];
+      addToast(`"${upd.channelName}" marked Contacted — date recorded`, 'success');
+    }
+    setLeads(ls => ls.map(l => l.id === updated.id ? updated : l));
+    logH('✏️', `Lead "${updated.channelName}" updated`);
+  }
+  function delL(id) {
+    const l = leads.find(x => x.id === id);
+    setLeads(ls => ls.filter(x => x.id !== id));
+    logH('🗑', `Lead "${l?.channelName}" deleted`);
+    addToast(`"${l?.channelName}" deleted`, 'error');
+  }
+  function logH(icon, text) {
+    setHistory(h => [{
+      id: Date.now(),
+      icon,
+      text,
+      time: new Date().toLocaleString('en-CA', {
+        hour12: false
+      }).replace(',', ''),
+      restorable: true
+    }, ...h]);
+  }
+  function bulkAssign(ids, rep) {
+    setLeads(ls => ls.map(l => ids.includes(l.id) ? {
+      ...l,
+      assignedTo: rep,
+      dateAssigned: new Date().toISOString().split('T')[0]
+    } : l));
+    addToast(`${ids.length} leads assigned to ${rep}`, 'success');
+    logH('✅', `Bulk: ${ids.length} leads → ${rep}`);
+  }
+  function applyConfig(cfg) {
+    setConfig(cfg);
+    if (!cfg.tabs[tab]) setTab('home');
+  }
+  function importLeads(newLeads) {
+    setLeads(existing => {
+      const existingUrls = new Set(existing.map(l => l.url).filter(Boolean));
+      const fresh = newLeads.filter(l => !l.url || !existingUrls.has(l.url));
+      logH('📊', `Google Sheets import: ${fresh.length} leads added`);
+      return [...existing, ...fresh];
+    });
+    setTab('scraper');
+  }
+  function importToClose(rep, repLeads) {
+    const CLOSE_WEBHOOK = config.closeWebhook || 'https://app.n8n.cloud/webhook/your-close-import-webhook';
+    const payload = {
+      rep,
+      leads: repLeads.map(l => ({
+        channelName: l.channelName,
+        url: l.url,
+        platform: l.platform,
+        niche: l.niche,
+        emails: l.emails,
+        tags: l.tags,
+        campaigns: l.campaigns,
+        dateAssigned: l.dateAssigned
+      }))
+    };
+    addToast(`Sending ${repLeads.length} leads to Close.io for ${rep}...`, 'info');
+    fetch(CLOSE_WEBHOOK, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    }).then(() => {
+      addToast(`✓ ${repLeads.length} leads imported to Close.io for ${rep}`, 'success');
+      logH('⬆', `Close.io import: ${repLeads.length} leads for ${rep}`);
+    }).catch(() => {
+      addToast(`Close.io import triggered for ${rep} (configure webhook to go live)`, 'info');
+      logH('⬆', `Close.io import triggered for ${rep}`);
+    });
+  }
+  useEffect(() => {
+    function checkRecycle() {
+      const now = new Date();
+      setLeads(ls => {
+        const recycled = [];
+        const updated = ls.map(l => {
+          if (!l.tags.includes('Contacted') || l.tags.includes('For Recycle') || !l.lastContactDate) return l;
+          const diff = Math.floor((now - new Date(l.lastContactDate)) / 86400000);
+          const isVVV = l.campaigns.includes('VVV');
+          const isMSN = l.campaigns.includes('MSN');
+          const threshold = isVVV ? 30 : isMSN ? 90 : Infinity;
+          if (diff >= threshold) {
+            recycled.push(l.channelName);
+            return {
+              ...l,
+              tags: [...l.tags.filter(t => t !== 'Contacted'), 'For Recycle']
+            };
+          }
+          return l;
+        });
+        if (recycled.length > 0) {
+          setHistory(h => [{
+            id: Date.now(),
+            icon: '♻️',
+            text: `Auto-recycled ${recycled.length} lead(s): ${recycled.join(', ')}`,
+            time: now.toLocaleString('en-CA', {
+              hour12: false
+            }).replace(',', ''),
+            restorable: false
+          }, ...h]);
+        }
+        return updated;
+      });
+    }
+    checkRecycle();
+    const t = setInterval(checkRecycle, 3600000);
+    return () => clearInterval(t);
+  }, []);
+  const campColorMap = {};
+  (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
+  const recentCutoff = new Date();
+  recentCutoff.setDate(recentCutoff.getDate() - 7);
+  const counts = {
+    potential: leads.filter(l => l.tags.includes('Potential')).length,
+    nq: leads.filter(l => l.tags.includes('Not Qualified')).length,
+    contacted: leads.filter(l => l.tags.includes('Contacted')).length,
+    recycle: leads.filter(l => l.tags.includes('For Recycle')).length,
+    recent: leads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff).length
+  };
+  const NAV_MAIN = [{
+    id: 'home',
+    icon: '⊟',
+    label: 'Home'
+  }, {
+    id: 'scraper',
+    icon: '◎',
+    label: 'Scraper'
+  }, {
+    id: 'history',
+    icon: '◷',
+    label: 'History'
+  }, {
+    id: 'prev-scraped',
+    icon: '◈',
+    label: 'Previously Scraped'
+  }, {
+    id: 'lead-mgmt',
+    icon: '◉',
+    label: 'Lead Management'
+  }, {
+    id: 'google-import',
+    icon: '◫',
+    label: 'Google Sheets'
+  }];
+  const NAV_FILTER = [{
+    id: 'potential',
+    icon: '★',
+    label: 'Potential',
+    count: counts.potential,
+    cls: 'green'
+  }, {
+    id: 'nq',
+    icon: '✕',
+    label: 'NQ Leads',
+    count: counts.nq,
+    cls: 'red'
+  }, {
+    id: 'contacted',
+    icon: '✉',
+    label: 'Contacted',
+    count: counts.contacted,
+    cls: 'blue'
+  }, {
+    id: 'recycle',
+    icon: '↻',
+    label: 'For Recycle',
+    count: counts.recycle,
+    cls: 'orange'
+  }, {
+    id: 'recent',
+    icon: '◑',
+    label: 'Recently Assigned',
+    count: counts.recent,
+    cls: ''
+  }];
+  function renderMain() {
+    if (showRepSelect) return /*#__PURE__*/React.createElement(RepSelectScreen, {
+      leads: leads,
+      config: config,
+      activeRep: activeRep,
+      onSelect: r => {
+        if (r) {
+          setActiveRep(r);
+          setTab('rep-home');
+        }
+        setShowRepSelect(false);
+      }
+    });
+    if (tab === 'rep-home' && activeRep) return /*#__PURE__*/React.createElement(RepDashboard, {
+      rep: activeRep,
+      leads: leads,
+      config: config,
+      onEdit: saveL,
+      onDelete: delL,
+      onBulkAssign: bulkAssign,
+      onBack: () => setTab('home'),
+      onImportClose: importToClose
+    });
+    if (tab === 'home') return /*#__PURE__*/React.createElement(HomeView, {
+      leads: leads,
+      config: config
+    });
+    if (tab === 'scraper') return /*#__PURE__*/React.createElement(ScraperView, {
+      leads: leads,
+      onSave: saveL,
+      onDelete: delL,
+      onBulkAssign: bulkAssign,
+      addToast: addToast,
+      config: config
+    });
+    if (tab === 'history') return /*#__PURE__*/React.createElement(HistoryView, {
+      history: history,
+      addToast: addToast,
+      feats: config.features || {}
+    });
+    if (tab === 'prev-scraped') return /*#__PURE__*/React.createElement(LeadsTable, {
+      leads: leads,
+      onEdit: saveL,
+      onDelete: delL,
+      onBulkAssign: bulkAssign,
+      showAssigned: true,
+      showCampaign: true,
+      config: config,
+      feats: config.features || {},
+      campColorMap: campColorMap,
+      filename: "all_leads",
+      printTitle: "All Scraped Leads"
+    });
+    if (tab === 'lead-mgmt') return /*#__PURE__*/React.createElement(LeadMgmtView, {
+      leads: leads,
+      onSave: saveL,
+      onBulkAssign: bulkAssign,
+      addToast: addToast,
+      config: config
+    });
+    if (tab === 'potential') return /*#__PURE__*/React.createElement(LeadsTable, {
+      leads: leads.filter(l => l.tags.includes('Potential')),
+      onEdit: saveL,
+      onDelete: delL,
+      onBulkAssign: bulkAssign,
+      showAssigned: true,
+      showCampaign: true,
+      config: config,
+      feats: config.features || {},
+      campColorMap: campColorMap,
+      filename: "potential_leads",
+      printTitle: "Potential Leads"
+    });
+    if (tab === 'nq') return /*#__PURE__*/React.createElement(LeadsTable, {
+      leads: leads.filter(l => l.tags.includes('Not Qualified')),
+      onEdit: saveL,
+      onDelete: delL,
+      onBulkAssign: bulkAssign,
+      showAssigned: true,
+      showCampaign: true,
+      config: config,
+      feats: config.features || {},
+      campColorMap: campColorMap,
+      filename: "nq_leads",
+      printTitle: "NQ Leads"
+    });
+    if (tab === 'contacted') return /*#__PURE__*/React.createElement(ContactedView, {
+      leads: leads,
+      onSave: saveL,
+      onDelete: delL,
+      onBulkAssign: bulkAssign,
+      config: config,
+      campColorMap: campColorMap
+    });
+    if (tab === 'recycle') return /*#__PURE__*/React.createElement(LeadsTable, {
+      leads: leads.filter(l => l.tags.includes('For Recycle')),
+      onEdit: saveL,
+      onDelete: delL,
+      onBulkAssign: bulkAssign,
+      showAssigned: true,
+      showCampaign: true,
+      config: config,
+      feats: config.features || {},
+      campColorMap: campColorMap,
+      filename: "recycle_leads",
+      printTitle: "For Recycle Leads"
+    });
+    if (tab === 'recent') return /*#__PURE__*/React.createElement(LeadsTable, {
+      leads: leads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff),
+      onEdit: saveL,
+      onDelete: delL,
+      onBulkAssign: bulkAssign,
+      showAssigned: true,
+      showCampaign: true,
+      config: config,
+      feats: config.features || {},
+      campColorMap: campColorMap,
+      filename: "recent_leads",
+      printTitle: "Recently Assigned Leads"
+    });
+    if (tab === 'google-import') return /*#__PURE__*/React.createElement(GoogleImportView, {
+      onImport: importLeads,
+      addToast: addToast
+    });
+    const camp = (config.campaigns || []).find(c => c.id.toLowerCase() === tab);
+    if (camp) return /*#__PURE__*/React.createElement(CampaignView, {
+      campaign: camp,
+      campColor: camp.color,
+      leads: leads,
+      onSave: saveL,
+      onBulkAssign: bulkAssign,
+      addToast: addToast,
+      config: config
+    });
+    return null;
+  }
+  const PAGE_TITLE = {
+    home: 'Home',
+    scraper: 'Scraper',
+    history: 'History',
+    'prev-scraped': 'Previously Scraped Leads',
+    'lead-mgmt': 'Lead Management',
+    'google-import': 'Google Sheets Import',
+    potential: 'Potential Leads',
+    nq: 'NQ Leads',
+    contacted: 'Contacted Leads',
+    recycle: 'For Recycle',
+    recent: 'Recently Assigned',
+    ...Object.fromEntries((config.campaigns || []).map(c => [c.id.toLowerCase(), `${c.label} Campaign`]))
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    id: "root",
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100vh'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "topbar"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "topbar-brand"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "logo"
+  }, "E"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", null, "Enfinity"), /*#__PURE__*/React.createElement("div", {
+    className: "tagline"
+  }, "Sales Dashboard"))), /*#__PURE__*/React.createElement("div", {
+    className: "topbar-search"
+  }, /*#__PURE__*/React.createElement("input", {
+    placeholder: "Search leads, channels, niches..."
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "topbar-right"
+  }, (config.features || {}).webhookTrigger && /*#__PURE__*/React.createElement("div", {
+    className: "topbar-badge"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "webhook-dot"
+  }), " n8n Live"), (config.features || {}).dailyRefresh && /*#__PURE__*/React.createElement("div", {
+    className: "topbar-badge"
+  }, "🕐 Daily 06:00 UTC"), /*#__PURE__*/React.createElement("div", {
+    className: "topbar-rep-pill",
+    onClick: () => setShowRepSelect(true),
+    title: activeRep ? `Logged in as ${activeRep} — click to switch` : 'Click to select your profile'
+  }, activeRep ? /*#__PURE__*/React.createElement(RepAvatar, {
+    rep: activeRep,
+    config: config,
+    size: 26,
+    online: true,
+    bgOverride: "var(--card)"
+  }) : /*#__PURE__*/React.createElement("div", {
+    className: "topbar-rep-avatar"
+  }, "?"), /*#__PURE__*/React.createElement("div", {
+    className: "topbar-rep-name"
+  }, activeRep || 'Select Rep'), activeRep && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: 'var(--text-dim)'
+    }
+  }, "▾")), /*#__PURE__*/React.createElement("button", {
+    className: `btn btn-outline btn-sm dark-mode-btn`,
+    onClick: () => setDarkMode(d => !d),
+    title: "Toggle dark mode",
+    style: {
+      fontSize: 16,
+      padding: '6px 10px'
+    }
+  }, darkMode ? '☀' : '🌙'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: () => setShowSettings(true)
+  }, "⚙ Customize"))), /*#__PURE__*/React.createElement("div", {
+    className: "app-body"
+  }, /*#__PURE__*/React.createElement("nav", {
+    className: "sidebar"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 8
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-section-label"
+  }, "Main"), NAV_MAIN.filter(n => config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
+    key: n.id,
+    className: `nav-item ${tab === n.id && !showRepSelect ? 'active' : ''}`,
+    onClick: () => {
+      setShowRepSelect(false);
+      setTab(n.id);
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "nav-icon"
+  }, n.icon), n.label)), /*#__PURE__*/React.createElement("div", {
+    className: "nav-divider"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-section-label"
+  }, "Lead Filters"), NAV_FILTER.filter(n => config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
+    key: n.id,
+    className: `nav-item ${tab === n.id && !showRepSelect ? 'active' : ''}`,
+    onClick: () => {
+      setShowRepSelect(false);
+      setTab(n.id);
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "nav-icon"
+  }, n.icon), n.label, /*#__PURE__*/React.createElement("span", {
+    className: `nav-badge ${n.cls}`
+  }, n.count))), (config.campaigns || []).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "nav-divider"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-section-label"
+  }, "Campaigns"), (config.campaigns || []).map(c => {
+    const id = c.id.toLowerCase();
+    const cnt = leads.filter(l => l.campaigns.includes(c.id)).length;
+    return /*#__PURE__*/React.createElement("div", {
+      key: id,
+      className: `nav-item ${tab === id && !showRepSelect ? 'active' : ''}`,
+      onClick: () => {
+        setShowRepSelect(false);
+        setTab(id);
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "nav-icon",
+      style: {
+        color: c.color
+      }
+    }, "●"), c.label, /*#__PURE__*/React.createElement("span", {
+      className: "nav-badge"
+    }, cnt));
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "nav-divider"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-section-label"
+  }, "Sales Reps"), (config.salesReps || []).map(r => {
+    const cnt = leads.filter(l => l.assignedTo === r).length;
+    return /*#__PURE__*/React.createElement("div", {
+      key: r,
+      className: `nav-item ${tab === 'rep-home' && activeRep === r ? 'active' : ''}`,
+      onClick: () => {
+        setShowRepSelect(false);
+        setActiveRep(r);
+        setTab('rep-home');
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: 'relative',
+        flexShrink: 0
+      }
+    }, /*#__PURE__*/React.createElement(RepAvatar, {
+      rep: r,
+      config: config,
+      size: 20,
+      online: activeRep === r,
+      bgOverride: "var(--sidebar)"
+    })), r, /*#__PURE__*/React.createElement("span", {
+      className: "nav-badge"
+    }, cnt));
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-footer"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "nav-item settings",
+    onClick: () => setShowSettings(true)
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "nav-icon"
+  }, "⚙"), "Settings & Customize"))), /*#__PURE__*/React.createElement("div", {
+    className: "main"
+  }, !showRepSelect && !activeRep && /*#__PURE__*/React.createElement("div", {
+    className: "main-header"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", null, PAGE_TITLE[tab] || tab)), /*#__PURE__*/React.createElement("div", {
+    className: "main-header-right"
+  }, tab === 'scraper' && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: () => addToast('Manual refresh triggered', 'info')
+  }, "🔄 Refresh All"))), renderMain())), /*#__PURE__*/React.createElement(Toast, {
+    toasts: toasts
+  }), showSettings && /*#__PURE__*/React.createElement(SettingsDrawer, {
+    config: config,
+    onConfig: applyConfig,
+    onClose: () => setShowSettings(false),
+    addToast: addToast
+  }));
+}
+
+})();
+</script>
+</body>
 </html>
