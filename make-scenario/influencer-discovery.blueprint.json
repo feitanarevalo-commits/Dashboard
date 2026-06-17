@@ -1,0 +1,213 @@
+{
+  "name": "Enfinity — Influencer Discovery Scraper",
+  "flow": [
+    {
+      "id": 1,
+      "module": "gateway:CustomWebHook",
+      "version": 1,
+      "parameters": { "hook": null, "maxResults": 1 },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 0, "y": 0 },
+        "restore": { "parameters": { "hook": { "label": "Enfinity Discovery Webhook" } } },
+        "expect": [
+          { "name": "platform", "type": "text" },
+          { "name": "keyword", "type": "text" },
+          { "name": "interest", "type": "text" },
+          { "name": "minFollowers", "type": "number" },
+          { "name": "maxFollowers", "type": "number" },
+          { "name": "limit", "type": "number" }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "module": "builtin:BasicRouter",
+      "version": 1,
+      "mapper": null,
+      "metadata": { "designer": { "x": 300, "y": 0 } },
+      "routes": [
+        {
+          "flow": [
+            {
+              "id": 3,
+              "module": "http:ActionSendData",
+              "version": 3,
+              "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+              "filter": {
+                "name": "Instagram",
+                "conditions": [[{ "a": "{{1.platform}}", "o": "text:equal", "b": "Instagram" }]]
+              },
+              "mapper": {
+                "url": "https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items?token=YOUR_APIFY_TOKEN",
+                "method": "post",
+                "headers": [{ "name": "Content-Type", "value": "application/json" }],
+                "qs": [],
+                "bodyType": "raw",
+                "parseResponse": true,
+                "contentType": "application/json",
+                "data": "{\n  \"search\": \"{{if(1.keyword; 1.keyword; 1.interest)}}\",\n  \"searchType\": \"hashtag\",\n  \"resultsType\": \"details\",\n  \"resultsLimit\": {{ifempty(1.limit; 25)}}\n}"
+              },
+              "metadata": { "designer": { "x": 600, "y": -150 } }
+            },
+            {
+              "id": 4,
+              "module": "gateway:WebhookRespond",
+              "version": 1,
+              "parameters": {},
+              "mapper": {
+                "status": "200",
+                "body": "{{3.data}}",
+                "headers": [
+                  { "name": "Content-Type", "value": "application/json" },
+                  { "name": "Access-Control-Allow-Origin", "value": "*" },
+                  { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                ]
+              },
+              "metadata": { "designer": { "x": 900, "y": -150 } }
+            }
+          ]
+        },
+        {
+          "flow": [
+            {
+              "id": 5,
+              "module": "http:ActionSendData",
+              "version": 3,
+              "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+              "filter": {
+                "name": "TikTok",
+                "conditions": [[{ "a": "{{1.platform}}", "o": "text:equal", "b": "TikTok" }]]
+              },
+              "mapper": {
+                "url": "https://api.apify.com/v2/acts/clockworks~tiktok-scraper/run-sync-get-dataset-items?token=YOUR_APIFY_TOKEN",
+                "method": "post",
+                "headers": [{ "name": "Content-Type", "value": "application/json" }],
+                "qs": [],
+                "bodyType": "raw",
+                "parseResponse": true,
+                "contentType": "application/json",
+                "data": "{\n  \"hashtags\": [\"{{if(1.keyword; 1.keyword; 1.interest)}}\"],\n  \"resultsPerPage\": {{ifempty(1.limit; 25)}},\n  \"shouldDownloadVideos\": false\n}"
+              },
+              "metadata": { "designer": { "x": 600, "y": 0 } }
+            },
+            {
+              "id": 6,
+              "module": "gateway:WebhookRespond",
+              "version": 1,
+              "parameters": {},
+              "mapper": {
+                "status": "200",
+                "body": "{{5.data}}",
+                "headers": [
+                  { "name": "Content-Type", "value": "application/json" },
+                  { "name": "Access-Control-Allow-Origin", "value": "*" },
+                  { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                ]
+              },
+              "metadata": { "designer": { "x": 900, "y": 0 } }
+            }
+          ]
+        },
+        {
+          "flow": [
+            {
+              "id": 7,
+              "module": "http:ActionSendData",
+              "version": 3,
+              "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+              "filter": {
+                "name": "YouTube",
+                "conditions": [[{ "a": "{{1.platform}}", "o": "text:equal", "b": "YouTube" }]]
+              },
+              "mapper": {
+                "url": "https://api.apify.com/v2/acts/streamers~youtube-scraper/run-sync-get-dataset-items?token=YOUR_APIFY_TOKEN",
+                "method": "post",
+                "headers": [{ "name": "Content-Type", "value": "application/json" }],
+                "qs": [],
+                "bodyType": "raw",
+                "parseResponse": true,
+                "contentType": "application/json",
+                "data": "{\n  \"searchKeywords\": \"{{if(1.keyword; 1.keyword; 1.interest)}}\",\n  \"maxResults\": {{ifempty(1.limit; 25)}}\n}"
+              },
+              "metadata": { "designer": { "x": 600, "y": 150 } }
+            },
+            {
+              "id": 8,
+              "module": "gateway:WebhookRespond",
+              "version": 1,
+              "parameters": {},
+              "mapper": {
+                "status": "200",
+                "body": "{{7.data}}",
+                "headers": [
+                  { "name": "Content-Type", "value": "application/json" },
+                  { "name": "Access-Control-Allow-Origin", "value": "*" },
+                  { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                ]
+              },
+              "metadata": { "designer": { "x": 900, "y": 150 } }
+            }
+          ]
+        },
+        {
+          "flow": [
+            {
+              "id": 9,
+              "module": "http:ActionSendData",
+              "version": 3,
+              "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+              "filter": {
+                "name": "All / default (Instagram)",
+                "conditions": [[{ "a": "{{1.platform}}", "o": "text:notequal", "b": "TikTok" }, { "a": "{{1.platform}}", "o": "text:notequal", "b": "YouTube" }, { "a": "{{1.platform}}", "o": "text:notequal", "b": "Instagram" }]]
+              },
+              "mapper": {
+                "url": "https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items?token=YOUR_APIFY_TOKEN",
+                "method": "post",
+                "headers": [{ "name": "Content-Type", "value": "application/json" }],
+                "qs": [],
+                "bodyType": "raw",
+                "parseResponse": true,
+                "contentType": "application/json",
+                "data": "{\n  \"search\": \"{{if(1.keyword; 1.keyword; 1.interest)}}\",\n  \"searchType\": \"hashtag\",\n  \"resultsType\": \"details\",\n  \"resultsLimit\": {{ifempty(1.limit; 25)}}\n}"
+              },
+              "metadata": { "designer": { "x": 600, "y": 300 } }
+            },
+            {
+              "id": 10,
+              "module": "gateway:WebhookRespond",
+              "version": 1,
+              "parameters": {},
+              "mapper": {
+                "status": "200",
+                "body": "{{9.data}}",
+                "headers": [
+                  { "name": "Content-Type", "value": "application/json" },
+                  { "name": "Access-Control-Allow-Origin", "value": "*" },
+                  { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                ]
+              },
+              "metadata": { "designer": { "x": 900, "y": 300 } }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "instant": true,
+    "version": 1,
+    "scenario": {
+      "roundtrips": 1,
+      "maxErrors": 3,
+      "autoCommit": true,
+      "autoCommitTriggerLast": true,
+      "sequential": false,
+      "confidential": false,
+      "dataloss": false,
+      "dlq": false
+    },
+    "designer": { "orphans": [] },
+    "zone": "eu2.make.com"
+  }
+}

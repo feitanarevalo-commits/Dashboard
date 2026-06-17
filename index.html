@@ -77,6 +77,39 @@ function pseudoStat(seed, lo, hi) {
   return lo + h % 1000 / 1000 * (hi - lo);
 }
 
+// Map a raw result from the Make/Apify scraper into a dashboard lead.
+// Tolerant of field-name variations across Apify actors/platforms.
+function mapDiscoveryResult(item, fallbackPlatform, i) {
+  item = item || {};
+  const get = (...keys) => {
+    for (const k of keys) {
+      const v = item[k];
+      if (v != null && v !== '') return v;
+    }
+    return '';
+  };
+  const name = get('username', 'handle', 'ownerUsername', 'name', 'channelName', 'title', 'fullName');
+  const url = get('url', 'profileUrl', 'channelUrl', 'inputUrl', 'link', 'webUrl');
+  const followers = get('followersCount', 'followers', 'subscriberCount', 'subscribers', 'fansCount', 'fans');
+  const niche = get('niche', 'category', 'businessCategoryName', 'categoryName');
+  const email = get('email', 'publicEmail', 'businessEmail');
+  return {
+    id: Date.now() + Math.floor(Math.random() * 1e6) + i,
+    channelName: String(name || 'influencer_' + (i + 1)),
+    url: String(url || ''),
+    platform: item.platform || fallbackPlatform || 'Instagram',
+    niche: String(niche || ''),
+    followers: typeof followers === 'number' ? fmtFollowers(followers) : String(followers || ''),
+    emails: email ? [String(email)] : [],
+    tags: [],
+    campaigns: [],
+    assignedTo: null,
+    dateAssigned: null,
+    lastContactDate: null,
+    channels: []
+  };
+}
+
 // ─── PERMISSIONS ──────────────────────────────────────────
 function userRole(name, config) {
   const u = (config.users || []).find(x => x.name === name);
@@ -2987,6 +3020,7 @@ function DiscoveryView({
   onSave,
   onDelete,
   onBulkAssign,
+  onResults,
   addToast,
   config
 }) {
@@ -2994,6 +3028,7 @@ function DiscoveryView({
   const campColorMap = {};
   (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
   const PLAT_TABS = ['All', ...PLATFORMS, 'Amazon'];
+  const [searching, setSearching] = useState(false);
 
   // Functional filters
   const [platTab, setPlatTab] = useState('All');
@@ -3054,6 +3089,62 @@ function DiscoveryView({
       audLanguage: 'All'
     });
     addToast('Filters reset', 'info');
+  }
+
+  // Builds the search payload sent to the Make webhook (see make-scenario/README.md).
+  function buildPayload() {
+    return {
+      platform: platTab,
+      keyword: keyword.trim(),
+      interest: interest === 'All' ? '' : interest,
+      minFollowers: minF ? parseFollowers(minF) : null,
+      maxFollowers: maxF ? parseFollowers(maxF) : null,
+      gender: ph.gender,
+      age: ph.age,
+      location: ph.location,
+      language: ph.language,
+      engagementRate: ph.er,
+      growthRate: ph.growth,
+      lastPost: ph.lastPost,
+      mediaCount: ph.mediaCount,
+      accountType: ph.accountType,
+      verified: ph.verified,
+      sponsorship: ph.sponsorship,
+      contact: ph.contact,
+      audience: {
+        gender: ph.audGender,
+        age: ph.audAge,
+        location: ph.audLocation,
+        language: ph.audLanguage
+      },
+      sortBy,
+      limit: 25
+    };
+  }
+  function findInfluencers() {
+    const wh = (config.scrapeWebhook || '').trim();
+    // No real webhook configured yet → just report local mock matches.
+    if (!wh || wh.includes('your-') || wh.includes('webhook-id')) {
+      addToast(`${pool.length} influencer(s) match your filters (connect a scraper webhook to fetch live)`, 'info');
+      return;
+    }
+    setSearching(true);
+    addToast('Searching influencers via scraper…', 'info');
+    fetch(wh, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(buildPayload())
+    }).then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(data => {
+      const items = Array.isArray(data) ? data : data.results || data.items || data.data || [];
+      const mapped = items.map((it, i) => mapDiscoveryResult(it, platTab === 'All' ? null : platTab, i));
+      if (onResults) onResults(mapped);
+      addToast(`✓ ${mapped.length} influencer(s) fetched from scraper`, 'success');
+    }).catch(e => addToast(`Search failed: ${e.message}`, 'error')).finally(() => setSearching(false));
   }
 
   // The discovery queue = leads not yet worked (no status tag), like the old scraper queue.
@@ -3313,11 +3404,13 @@ function DiscoveryView({
     }
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost",
-    onClick: reset
+    onClick: reset,
+    disabled: searching
   }, "Reset Filters"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary",
-    onClick: () => addToast(`${pool.length} influencer(s) match your filters`, 'success')
-  }, "🔎 Find Influencer")))), /*#__PURE__*/React.createElement("div", {
+    onClick: findInfluencers,
+    disabled: searching
+  }, searching ? '⏳ Searching…' : '🔎 Find Influencer')))), /*#__PURE__*/React.createElement("div", {
     className: "disc-results-label"
   }, pool.length, " profile", pool.length !== 1 ? 's' : ''), /*#__PURE__*/React.createElement(LeadsTable, {
     leads: pool,
@@ -4458,6 +4551,15 @@ function App() {
     });
     setTab('scraper');
   }
+  function addDiscovered(items) {
+    const arr = Array.isArray(items) ? items : [];
+    setLeads(existing => {
+      const seen = new Set(existing.map(l => (l.url || '').toLowerCase()).filter(Boolean));
+      const fresh = arr.filter(l => !l.url || !seen.has(l.url.toLowerCase()));
+      logH('🔎', `Discovery: ${fresh.length} influencer(s) added from scraper`);
+      return [...existing, ...fresh];
+    });
+  }
   function importToClose(rep, repLeads) {
     const CLOSE_WEBHOOK = config.closeWebhook || 'https://app.n8n.cloud/webhook/your-close-import-webhook';
     const payload = {
@@ -4628,6 +4730,7 @@ function App() {
       onSave: saveL,
       onDelete: delL,
       onBulkAssign: bulkAssign,
+      onResults: addDiscovered,
       addToast: addToast,
       config: config
     });
