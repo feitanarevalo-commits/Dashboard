@@ -112,5 +112,44 @@ var DEFAULT_CONFIG = {
 //   platform: 'YouTube', niche: 'Finance', followers: '50K',
 //   emails: ['test@gmail.com'], tags: [], campaigns: [],
 //   assignedTo: null, dateAssigned: null, lastContactDate: null, channels: [] }
-var SAMPLE_LEADS   = [];
-var SAMPLE_HISTORY = [];
+// Demo data so every view has something to show. Set back to [] for production.
+// Dates are relative to mid-2026 so the Home Daily/Weekly/Monthly/Yearly views differ.
+var SAMPLE_LEADS = [
+  // ── Fresh discovery queue (untagged → show in Influencer Discovery) ──
+  { id: 1001, channelName: 'glowwithava',     url: 'https://instagram.com/glowwithava',  platform: 'Instagram', niche: 'Beauty & Cosmetics', followers: '1.5M', emails: ['ava@glowmail.com'],        tags: [], campaigns: [], assignedTo: null,   dateAssigned: null,         lastContactDate: null,         channels: [] },
+  { id: 1002, channelName: 'pautips',          url: 'https://youtube.com/@pautips',       platform: 'YouTube',   niche: 'Fashion',            followers: '780K', emails: ['pautips@hotmail.com'],       tags: [], campaigns: [], assignedTo: null,   dateAssigned: null,         lastContactDate: null,         channels: [] },
+  { id: 1003, channelName: 'trailmikedaily',   url: 'https://tiktok.com/@trailmikedaily',  platform: 'TikTok',    niche: 'Travel',             followers: '240K', emails: [],                            tags: [], campaigns: [], assignedTo: null,   dateAssigned: null,         lastContactDate: null,         channels: [] },
+  { id: 1004, channelName: 'liftwithleo',      url: 'https://instagram.com/liftwithleo',  platform: 'Instagram', niche: 'Fitness',            followers: '95K',  emails: ['leo@fitmail.com'],          tags: [], campaigns: [], assignedTo: null,   dateAssigned: null,         lastContactDate: null,         channels: [] },
+  { id: 1005, channelName: 'thefinanceguy',    url: 'https://youtube.com/@thefinanceguy', platform: 'YouTube',   niche: 'Finance',            followers: '430K', emails: ['hello@financeguy.io'],       tags: [], campaigns: [], assignedTo: null,   dateAssigned: null,         lastContactDate: null,         channels: [] },
+  { id: 1006, channelName: 'pixelpawsgaming',  url: 'https://tiktok.com/@pixelpawsgaming', platform: 'TikTok',    niche: 'Gaming',             followers: '1.2M', emails: [],                            tags: [], campaigns: [], assignedTo: null,   dateAssigned: null,         lastContactDate: null,         channels: [] },
+  { id: 1007, channelName: 'cocinaconmaria',   url: 'https://instagram.com/cocinaconmaria',platform: 'Instagram', niche: 'Food & Drink',       followers: '58K',  emails: ['maria@cocina.com'],         tags: [], campaigns: [], assignedTo: null,   dateAssigned: null,         lastContactDate: null,         channels: [] },
+
+  // ── Potential (assigned, recent) ──
+  { id: 1008, channelName: 'styledbysam',      url: 'https://instagram.com/styledbysam',  platform: 'Instagram', niche: 'Fashion',            followers: '320K', emails: ['sam@styled.co'],            tags: ['Potential'],      campaigns: ['VVV'],        assignedTo: 'Pen',   dateAssigned: '2026-06-17', lastContactDate: null,         channels: [] },
+  { id: 1009, channelName: 'wanderwithzoe',    url: 'https://youtube.com/@wanderwithzoe', platform: 'YouTube',   niche: 'Travel',             followers: '610K', emails: ['zoe@wander.tv'],            tags: ['Potential','HT'], campaigns: ['MSN'],        assignedTo: 'Rein',  dateAssigned: '2026-06-16', lastContactDate: null,         channels: [] },
+  { id: 1010, channelName: 'gymrattyler',      url: 'https://tiktok.com/@gymrattyler',     platform: 'TikTok',    niche: 'Fitness',            followers: '880K', emails: ['tyler@gymrat.fit'],         tags: ['Potential'],      campaigns: ['VVV'],        assignedTo: 'Chase', dateAssigned: '2026-06-15', lastContactDate: null,         channels: [] },
+  { id: 1011, channelName: 'artbyjuno',        url: 'https://instagram.com/artbyjuno',    platform: 'Instagram', niche: 'Art & Design',       followers: '47K',  emails: ['juno@artjuno.com'],         tags: ['Potential'],      campaigns: [],             assignedTo: 'Mikka', dateAssigned: '2026-06-12', lastContactDate: null,         channels: [] },
+
+  // ── Contacted (assigned, has lastContactDate → Imported origin) ──
+  { id: 1012, channelName: 'dailydoseofdan',   url: 'https://youtube.com/@dailydoseofdan', platform: 'YouTube',   niche: 'Business & Careers', followers: '210K', emails: ['dan@dose.co'],              tags: ['Contacted'],      campaigns: ['MSN'],        assignedTo: 'Pen',   dateAssigned: '2026-06-08', lastContactDate: '2026-06-10', channels: [] },
+  { id: 1013, channelName: 'beautybybella',    url: 'https://instagram.com/beautybybella',platform: 'Instagram', niche: 'Beauty & Cosmetics', followers: '1.1M', emails: ['bella@bbeauty.com'],        tags: ['Contacted','HT'], campaigns: ['VVV'],        assignedTo: 'Rein',  dateAssigned: '2026-06-05', lastContactDate: '2026-06-09', channels: [] },
+  { id: 1014, channelName: 'roadtripruby',     url: 'https://tiktok.com/@roadtripruby',    platform: 'TikTok',    niche: 'Travel',             followers: '156K', emails: ['ruby@rtr.travel'],          tags: ['Contacted'],      campaigns: ['MSN'],        assignedTo: 'Chase', dateAssigned: '2026-06-02', lastContactDate: '2026-06-06', channels: [] },
+  { id: 1015, channelName: 'techtipstom',      url: 'https://youtube.com/@techtipstom',   platform: 'YouTube',   niche: 'Camera & Photography',followers:'520K', emails: ['tom@techtips.dev'],         tags: ['Contacted'],      campaigns: [],             assignedTo: 'Mikka', dateAssigned: '2026-05-28', lastContactDate: '2026-05-30', channels: [] },
+
+  // ── For Recycle (recycled → counts as Recycled in graph) ──
+  { id: 1016, channelName: 'fitfoodiefran',    url: 'https://instagram.com/fitfoodiefran',platform: 'Instagram', niche: 'Food & Drink',       followers: '290K', emails: ['fran@fitfoodie.com'],       tags: ['For Recycle'],    campaigns: ['VVV'],        assignedTo: 'Pen',   dateAssigned: '2026-05-20', lastContactDate: '2026-04-15', channels: [] },
+  { id: 1017, channelName: 'vanlifevera',      url: 'https://youtube.com/@vanlifevera',   platform: 'YouTube',   niche: 'Travel',             followers: '74K',  emails: ['vera@vanlife.co'],          tags: ['For Recycle'],    campaigns: ['MSN'],        assignedTo: 'Rein',  dateAssigned: '2026-04-22', lastContactDate: '2026-03-01', channels: [] },
+  { id: 1018, channelName: 'makeupmaverick',   url: 'https://tiktok.com/@makeupmaverick',  platform: 'TikTok',    niche: 'Beauty & Cosmetics', followers: '2.1M', emails: ['hi@maverick.beauty'],       tags: ['For Recycle','HT'],campaigns: ['VVV'],       assignedTo: 'Chase', dateAssigned: '2026-03-15', lastContactDate: '2026-02-10', channels: [] },
+
+  // ── Existing Leads / Not Qualified / Duplicate (mixed) ──
+  { id: 1019, channelName: 'investingisaac',   url: 'https://youtube.com/@investingisaac', platform: 'YouTube',   niche: 'Finance',            followers: '340K', emails: ['isaac@invest.io'],          tags: ['Existing Leads'], campaigns: ['MSN'],        assignedTo: 'Mikka', dateAssigned: '2026-02-10', lastContactDate: '2026-02-12', channels: [] },
+  { id: 1020, channelName: 'crochetcorner',    url: 'https://instagram.com/crochetcorner',platform: 'Instagram', niche: 'Art & Design',       followers: '12K',  emails: [],                            tags: ['Not Qualified'],  campaigns: [],             assignedTo: 'Pen',   dateAssigned: '2025-12-01', lastContactDate: null,         channels: [] },
+  { id: 1021, channelName: 'petsofpaige',      url: 'https://tiktok.com/@petsofpaige',     platform: 'TikTok',    niche: 'Food & Drink',       followers: '8K',   emails: ['paige@pets.com'],           tags: ['Not Qualified'],  campaigns: [],             assignedTo: 'Rein',  dateAssigned: '2025-09-10', lastContactDate: null,         channels: [] },
+  { id: 1022, channelName: 'duplicatedave',    url: 'https://youtube.com/@duplicatedave',  platform: 'YouTube',   niche: 'Gaming',             followers: '60K',  emails: ['dave@dup.com'],             tags: ['Duplicate'],      campaigns: [],             assignedTo: null,    dateAssigned: null,         lastContactDate: null,         channels: [] },
+];
+var SAMPLE_HISTORY = [
+  { id: 9001, icon: '📊', text: 'Google Sheets import: 22 leads added',        time: '2026-06-17 09:14:02', restorable: false },
+  { id: 9002, icon: '✅', text: 'Bulk: 4 leads → Pen',                          time: '2026-06-17 09:20:41', restorable: true  },
+  { id: 9003, icon: '✏️', text: 'Lead "beautybybella" updated',                 time: '2026-06-09 14:02:11', restorable: true  },
+  { id: 9004, icon: '♻️', text: 'Auto-recycled 1 lead(s): makeupmaverick',      time: '2026-05-12 06:00:00', restorable: false },
+];
