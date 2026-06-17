@@ -52,6 +52,30 @@ function leadOrigin(lead) {
 function isRecycled(lead) {
   return (lead.tags || []).includes('For Recycle') || lead.recycled === true;
 }
+// Parse "1.5M" / "23K" / "12000" → a number for range filtering.
+function parseFollowers(v) {
+  if (v == null) return 0;
+  const s = String(v).trim().toUpperCase();
+  const n = parseFloat(s.replace(/[^0-9.]/g, '')) || 0;
+  if (s.includes('M')) return n * 1e6;
+  if (s.includes('K')) return n * 1e3;
+  return n;
+}
+function fmtFollowers(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(n % 1e3 ? 1 : 0) + 'K';
+  return String(n);
+}
+// Deterministic pseudo stat so placeholder ER/Growth look stable per lead
+// (clearly cosmetic until real audience data is wired in).
+function pseudoStat(seed, lo, hi) {
+  let h = 0;
+  const s = String(seed || 'x');
+  for (let i = 0; i < s.length; i++) {
+    h = h * 31 + s.charCodeAt(i) >>> 0;
+  }
+  return lo + h % 1000 / 1000 * (hi - lo);
+}
 
 // ─── PERMISSIONS ──────────────────────────────────────────
 function userRole(name, config) {
@@ -1059,6 +1083,7 @@ function LeadsTable({
   showAssigned = false,
   showCampaign = true,
   showOrigin = false,
+  onRowOpen = null,
   config,
   feats,
   campColorMap,
@@ -1417,7 +1442,8 @@ function LeadsTable({
     className: "thumb",
     title: `Visit ${lead.channelName}`
   }, avatarLetter(lead.channelName)))), cols.channelName && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
-    className: "channel-name"
+    className: `channel-name${onRowOpen ? ' channel-name-link' : ''}`,
+    onClick: onRowOpen ? () => onRowOpen(lead) : undefined
   }, lead.channelName), lead.channels && lead.channels.length > 1 && /*#__PURE__*/React.createElement("div", {
     className: "channel-sub"
   }, lead.channels.length, " channels")), cols.url && /*#__PURE__*/React.createElement("td", {
@@ -1521,9 +1547,9 @@ function LeadsTable({
     }
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn-icon",
-    onClick: () => setEditLead(lead),
-    title: "Edit lead"
-  }, "✏"), onDelete && /*#__PURE__*/React.createElement("button", {
+    onClick: () => onRowOpen ? onRowOpen(lead) : setEditLead(lead),
+    title: onRowOpen ? 'View profile' : 'Edit lead'
+  }, onRowOpen ? '👁' : '✏'), onDelete && /*#__PURE__*/React.createElement("button", {
     className: "btn-icon",
     style: {
       color: 'var(--danger)',
@@ -2703,8 +2729,260 @@ function GoogleImportView({
   }, a)))))));
 }
 
-// ─── SCRAPER VIEW ─────────────────────────────────────────
-function ScraperView({
+// ─── PROFILE SIDE PANEL ───────────────────────────────────
+// Gleemo-style right drawer. Stats marked "~" are cosmetic placeholders
+// (engagement / growth / audience) until real metrics are wired in.
+function ProfilePanel({
+  lead,
+  config,
+  campColorMap,
+  onClose,
+  onSave,
+  onDelete,
+  addToast
+}) {
+  const [form, setForm] = useState({
+    ...lead,
+    tags: [...(lead.tags || [])],
+    campaigns: [...(lead.campaigns || [])]
+  });
+  useEffect(() => {
+    setForm({
+      ...lead,
+      tags: [...(lead.tags || [])],
+      campaigns: [...(lead.campaigns || [])]
+    });
+  }, [lead.id]);
+  function upd(k, v) {
+    setForm(f => ({
+      ...f,
+      [k]: v
+    }));
+  }
+  function toggleTag(t) {
+    setForm(f => ({
+      ...f,
+      tags: f.tags.includes(t) ? f.tags.filter(x => x !== t) : [...f.tags, t]
+    }));
+  }
+  function toggleCamp(c) {
+    setForm(f => ({
+      ...f,
+      campaigns: f.campaigns.includes(c) ? f.campaigns.filter(x => x !== c) : [...f.campaigns, c]
+    }));
+  }
+  function save() {
+    onSave(form);
+    addToast('Profile saved', 'success');
+    onClose();
+  }
+  const followersN = parseFollowers(lead.followers);
+  const er = pseudoStat(lead.channelName, 0.4, 6.5).toFixed(1);
+  const growth = pseudoStat(lead.url || lead.channelName, -2, 8).toFixed(1);
+  const bars = Array.from({
+    length: 18
+  }, (_, i) => pseudoStat((lead.channelName || '') + i, 8, 100));
+  const peakIdx = bars.indexOf(Math.max(...bars));
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-overlay",
+    onClick: onClose
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "profile-panel"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "profile-panel-head"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "thumb",
+    style: {
+      width: 42,
+      height: 42,
+      fontSize: 16
+    }
+  }, avatarLetter(lead.channelName)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      fontSize: 15
+    }
+  }, lead.channelName), /*#__PURE__*/React.createElement("span", {
+    className: "platform-badge"
+  }, PLATFORM_ICON[lead.platform], " ", lead.platform)), lead.url && /*#__PURE__*/React.createElement("a", {
+    href: lead.url,
+    target: "_blank",
+    rel: "noopener noreferrer",
+    className: "profile-handle"
+  }, lead.url.replace(/https?:\/\/(www\.)?/, '')))), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: onClose,
+    style: {
+      fontSize: 16,
+      padding: '4px 8px'
+    }
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "profile-panel-body"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "profile-stats"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "ps-val"
+  }, fmtFollowers(followersN) || '—'), /*#__PURE__*/React.createElement("div", {
+    className: "ps-lab"
+  }, "Followers")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "ps-val"
+  }, er, "%", /*#__PURE__*/React.createElement("span", {
+    className: "ps-approx"
+  }, "~")), /*#__PURE__*/React.createElement("div", {
+    className: "ps-lab"
+  }, "Engagement")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "ps-val"
+  }, growth, "%", /*#__PURE__*/React.createElement("span", {
+    className: "ps-approx"
+  }, "~")), /*#__PURE__*/React.createElement("div", {
+    className: "ps-lab"
+  }, "Growth"))), /*#__PURE__*/React.createElement("div", {
+    className: "profile-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "profile-section-title"
+  }, "Basic Information"), /*#__PURE__*/React.createElement("div", {
+    className: "profile-kv"
+  }, /*#__PURE__*/React.createElement("span", null, "Niche"), /*#__PURE__*/React.createElement("b", null, lead.niche || '—')), /*#__PURE__*/React.createElement("div", {
+    className: "profile-kv"
+  }, /*#__PURE__*/React.createElement("span", null, "Email"), /*#__PURE__*/React.createElement("b", null, lead.emails && lead.emails[0] ? lead.emails[0] : '—')), lead.url && /*#__PURE__*/React.createElement("div", {
+    className: "profile-kv"
+  }, /*#__PURE__*/React.createElement("span", null, "Link"), /*#__PURE__*/React.createElement("a", {
+    href: lead.url,
+    target: "_blank",
+    rel: "noopener noreferrer"
+  }, lead.url.replace(/https?:\/\/(www\.)?/, '').slice(0, 32))), /*#__PURE__*/React.createElement("div", {
+    className: "profile-kv"
+  }, /*#__PURE__*/React.createElement("span", null, "Origin"), leadOrigin(lead) === 'Fresh' ? /*#__PURE__*/React.createElement("span", {
+    className: "origin-badge fresh"
+  }, "● Fresh") : /*#__PURE__*/React.createElement("span", {
+    className: "origin-badge imported"
+  }, "↻ Imported"))), /*#__PURE__*/React.createElement("div", {
+    className: "profile-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "profile-section-title"
+  }, "Engagement Distribution ", /*#__PURE__*/React.createElement("span", {
+    className: "ps-approx"
+  }, "~ sample")), /*#__PURE__*/React.createElement("div", {
+    className: "eng-chart"
+  }, bars.map((h, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "eng-bar",
+    style: {
+      height: `${h}%`,
+      background: i === peakIdx ? 'var(--accent)' : 'var(--border)'
+    }
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "eng-axis"
+  }, /*#__PURE__*/React.createElement("span", null, "Low"), /*#__PURE__*/React.createElement("span", null, "median"), /*#__PURE__*/React.createElement("span", null, "High"))), /*#__PURE__*/React.createElement("div", {
+    className: "profile-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "profile-section-title"
+  }, "Status Tags"), /*#__PURE__*/React.createElement("div", {
+    className: "tag-grid"
+  }, [...STATUSES, 'HT'].map(t => {
+    const on = form.tags.includes(t);
+    const c = TAG_COLORS[t] || {
+      bg: '#F0F2F5',
+      color: '#68737D'
+    };
+    return /*#__PURE__*/React.createElement("button", {
+      key: t,
+      type: "button",
+      className: `tag-btn${on ? ' on' : ''}`,
+      style: on ? {
+        background: c.bg,
+        color: c.color,
+        borderColor: c.color
+      } : {},
+      onClick: () => toggleTag(t)
+    }, t === 'HT' ? '⚡ HT' : t);
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "profile-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "profile-section-title"
+  }, "Campaign"), /*#__PURE__*/React.createElement("div", {
+    className: "tag-grid"
+  }, (config.campaigns || []).map(c => {
+    const on = form.campaigns.includes(c.id);
+    return /*#__PURE__*/React.createElement("button", {
+      key: c.id,
+      type: "button",
+      className: `tag-btn${on ? ' on' : ''}`,
+      style: on ? {
+        background: c.color,
+        color: '#fff',
+        borderColor: c.color
+      } : {},
+      onClick: () => toggleCamp(c.id)
+    }, "● ", c.label);
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "profile-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "profile-section-title"
+  }, "Assign to Rep"), /*#__PURE__*/React.createElement("select", {
+    value: form.assignedTo || '',
+    onChange: e => {
+      upd('assignedTo', e.target.value || null);
+      if (e.target.value && !form.dateAssigned) upd('dateAssigned', new Date().toISOString().split('T')[0]);
+    },
+    style: {
+      width: '100%'
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "— Unassigned —"), (config.salesReps || []).map(r => /*#__PURE__*/React.createElement("option", {
+    key: r
+  }, r))))), /*#__PURE__*/React.createElement("div", {
+    className: "profile-panel-foot"
+  }, onDelete && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-danger btn-sm",
+    onClick: () => {
+      if (window.confirm(`Delete "${lead.channelName}"?`)) {
+        onDelete(lead.id);
+        onClose();
+      }
+    }
+  }, "🗑 Delete"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    style: {
+      marginLeft: 'auto'
+    },
+    onClick: onClose
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: save
+  }, "★ Save"))));
+}
+
+// ─── INFLUENCER DISCOVERY (was Scraper) ───────────────────
+const DISCOVERY_PLACEHOLDERS = {
+  gender: ['All', 'Female', 'Male'],
+  age: ['All', '0-18', '19-25', '26-35', '36-45', '46+'],
+  location: ['All', 'America', 'Europe', 'Asia', 'Worldwide'],
+  language: ['All', 'English', 'Spanish', 'French', 'Other'],
+  er: ['Any', '>0.5%', '>1%', '>3%', '>5%'],
+  growth: ['Any', '1m / >5%', '1m / >20%'],
+  lastPost: ['Any', '7 days', '30 days', '3 months', '6 months'],
+  mediaCount: ['Any', '1-100', '100-500', '500+'],
+  accountType: ['Any', 'Regular', 'Business', 'Creator'],
+  verified: ['Any', 'Verified', 'Not verified'],
+  sponsorship: ['Any', 'Has sponsored posts', 'No sponsored posts'],
+  contact: ['Any', 'Email', 'Email + YouTube']
+};
+const INTEREST_OPTIONS = ['Activewear', 'Art & Design', 'Beauty & Cosmetics', 'Business & Careers', 'Camera & Photography', 'Cars & Motorbikes', 'Finance', 'Fitness', 'Food & Drink', 'Gaming', 'Healthcare', 'Music', 'Travel'];
+function DiscoveryView({
   leads,
   onSave,
   onDelete,
@@ -2712,128 +2990,357 @@ function ScraperView({
   addToast,
   config
 }) {
-  const [webhook, setWebhook] = useState('https://app.n8n.cloud/webhook/your-webhook-id');
-  const [platform, setPlatform] = useState('YouTube');
-  const [niche, setNiche] = useState('');
-  const [minF, setMinF] = useState('10K');
-  const [loading, setLoading] = useState(false);
   const feats = config.features || {};
   const campColorMap = {};
   (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
-  function scrape() {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      addToast('Webhook triggered — scrape job sent to n8n', 'success');
-    }, 2000);
+  const PLAT_TABS = ['All', ...PLATFORMS, 'Amazon'];
+
+  // Functional filters
+  const [platTab, setPlatTab] = useState('All');
+  const [keyword, setKeyword] = useState('');
+  const [minF, setMinF] = useState('');
+  const [maxF, setMaxF] = useState('');
+  const [interest, setInterest] = useState('All');
+  const [sortBy, setSortBy] = useState('relevance');
+  // Cosmetic placeholder filters (UI only)
+  const [ph, setPh] = useState({
+    gender: 'All',
+    age: 'All',
+    location: 'All',
+    language: 'All',
+    er: 'Any',
+    growth: 'Any',
+    lastPost: 'Any',
+    mediaCount: 'Any',
+    accountType: 'Any',
+    verified: 'Any',
+    sponsorship: 'Any',
+    contact: 'Any',
+    audGender: 'All',
+    audAge: 'All',
+    audLocation: 'All',
+    audLanguage: 'All'
+  });
+  function setP(k, v) {
+    setPh(p => ({
+      ...p,
+      [k]: v
+    }));
+  }
+  const [profileLead, setProfileLead] = useState(null);
+  function reset() {
+    setPlatTab('All');
+    setKeyword('');
+    setMinF('');
+    setMaxF('');
+    setInterest('All');
+    setSortBy('relevance');
+    setPh({
+      gender: 'All',
+      age: 'All',
+      location: 'All',
+      language: 'All',
+      er: 'Any',
+      growth: 'Any',
+      lastPost: 'Any',
+      mediaCount: 'Any',
+      accountType: 'Any',
+      verified: 'Any',
+      sponsorship: 'Any',
+      contact: 'Any',
+      audGender: 'All',
+      audAge: 'All',
+      audLocation: 'All',
+      audLanguage: 'All'
+    });
+    addToast('Filters reset', 'info');
+  }
+
+  // The discovery queue = leads not yet worked (no status tag), like the old scraper queue.
+  let pool = leads.filter(l => !hasStatusTag(l));
+  if (platTab !== 'All' && platTab !== 'Amazon') pool = pool.filter(l => l.platform === platTab);
+  if (keyword.trim()) {
+    const k = keyword.toLowerCase();
+    pool = pool.filter(l => (l.channelName || '').toLowerCase().includes(k) || (l.niche || '').toLowerCase().includes(k));
+  }
+  if (interest !== 'All') pool = pool.filter(l => (l.niche || '').toLowerCase().includes(interest.toLowerCase()));
+  const minN = parseFollowers(minF),
+    maxN = parseFollowers(maxF);
+  if (minF) pool = pool.filter(l => parseFollowers(l.followers) >= minN);
+  if (maxF) pool = pool.filter(l => parseFollowers(l.followers) <= maxN);
+  if (sortBy === 'followers') pool = [...pool].sort((a, b) => parseFollowers(b.followers) - parseFollowers(a.followers));
+  if (sortBy === 'name') pool = [...pool].sort((a, b) => (a.channelName || '').localeCompare(b.channelName || ''));
+  const credit = Math.min(pool.length, 300);
+  function Field({
+    label,
+    hint,
+    children
+  }) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "disc-field"
+    }, /*#__PURE__*/React.createElement("label", {
+      className: "form-label"
+    }, label, hint && /*#__PURE__*/React.createElement("span", {
+      className: "disc-hint",
+      title: hint
+    }, "ⓘ")), children);
+  }
+  function PHSelect({
+    k,
+    opts
+  }) {
+    return /*#__PURE__*/React.createElement("select", {
+      value: ph[k],
+      onChange: e => setP(k, e.target.value)
+    }, opts.map(o => /*#__PURE__*/React.createElement("option", {
+      key: o
+    }, o)));
   }
   return /*#__PURE__*/React.createElement("div", {
+    className: "discovery",
     style: {
       display: 'flex',
       flexDirection: 'column',
       flex: 1,
-      overflow: 'hidden'
+      overflow: 'auto'
     }
   }, /*#__PURE__*/React.createElement("div", {
+    className: "disc-head"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
     style: {
-      background: 'var(--card)',
-      borderBottom: '1px solid var(--border)',
-      padding: '16px 24px',
-      flexShrink: 0
+      margin: 0,
+      fontSize: 18
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, "Influencer Discovery"), /*#__PURE__*/React.createElement("p", {
     style: {
-      display: 'flex',
-      gap: 10,
-      flexWrap: 'wrap',
-      alignItems: 'flex-end'
-    }
-  }, feats.webhookTrigger && /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 4
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "form-label"
-  }, "Webhook URL"), /*#__PURE__*/React.createElement("input", {
-    value: webhook,
-    onChange: e => setWebhook(e.target.value),
-    style: {
-      width: 280
-    },
-    placeholder: "https://app.n8n.cloud/webhook/..."
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 4
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "form-label"
-  }, "Platform"), /*#__PURE__*/React.createElement("select", {
-    value: platform,
-    onChange: e => setPlatform(e.target.value)
-  }, PLATFORMS.map(p => /*#__PURE__*/React.createElement("option", {
-    key: p
-  }, p)))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 4
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "form-label"
-  }, "Niche / Keyword"), /*#__PURE__*/React.createElement("input", {
-    value: niche,
-    onChange: e => setNiche(e.target.value),
-    placeholder: "e.g. Finance, Fitness...",
-    style: {
-      width: 160
-    }
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 4
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "form-label"
-  }, "Min Followers"), /*#__PURE__*/React.createElement("select", {
-    value: minF,
-    onChange: e => setMinF(e.target.value)
-  }, ['1K', '10K', '50K', '100K', '500K', '1M'].map(v => /*#__PURE__*/React.createElement("option", {
-    key: v
-  }, v)))), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-primary",
-    onClick: scrape,
-    disabled: loading,
-    style: {
-      alignSelf: 'flex-end'
-    }
-  }, loading ? '⏳ Scraping...' : '▶ Run Scraper')), feats.dailyRefresh && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 12,
-      fontSize: 11,
+      fontSize: 12,
       color: 'var(--text-dim)',
+      margin: '2px 0 0'
+    }
+  }, "Discover & filter influencers across Instagram, YouTube, TikTok, and Amazon.")), /*#__PURE__*/React.createElement("div", {
+    className: "disc-credit"
+  }, "Search Credit: ", /*#__PURE__*/React.createElement("b", null, credit, "/300"))), /*#__PURE__*/React.createElement("div", {
+    className: "disc-tabs"
+  }, PLAT_TABS.map(p => /*#__PURE__*/React.createElement("button", {
+    key: p,
+    className: `disc-tab${platTab === p ? ' active' : ''}`,
+    onClick: () => setPlatTab(p)
+  }, p === 'All' ? '◎ All' : `${PLATFORM_ICON[p] || '🛒'} ${p}`))), /*#__PURE__*/React.createElement("div", {
+    className: "disc-panel"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "disc-group-label"
+  }, "Influencer"), /*#__PURE__*/React.createElement("div", {
+    className: "disc-grid"
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Gender"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "gender",
+    opts: DISCOVERY_PLACEHOLDERS.gender
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Age"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "age",
+    opts: DISCOVERY_PLACEHOLDERS.age
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Location"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "location",
+    opts: DISCOVERY_PLACEHOLDERS.location
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Language"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "language",
+    opts: DISCOVERY_PLACEHOLDERS.language
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Interest"
+  }, /*#__PURE__*/React.createElement("select", {
+    value: interest,
+    onChange: e => setInterest(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", null, "All"), INTEREST_OPTIONS.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o
+  }, o)))), /*#__PURE__*/React.createElement(Field, {
+    label: "Followers"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
       display: 'flex',
-      alignItems: 'center',
-      gap: 8
+      gap: 6,
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: minF,
+    onChange: e => setMinF(e.target.value),
+    placeholder: "min (1K)",
+    style: {
+      width: '100%'
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-light)'
+    }
+  }, "–"), /*#__PURE__*/React.createElement("input", {
+    value: maxF,
+    onChange: e => setMaxF(e.target.value),
+    placeholder: "max (1M)",
+    style: {
+      width: '100%'
+    }
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "disc-group-label"
+  }, "Engagement ", /*#__PURE__*/React.createElement("span", {
+    className: "disc-soon"
+  }, "placeholder")), /*#__PURE__*/React.createElement("div", {
+    className: "disc-grid"
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Engagement Rate"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "er",
+    opts: DISCOVERY_PLACEHOLDERS.er
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Growth Rate"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "growth",
+    opts: DISCOVERY_PLACEHOLDERS.growth
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Last Post"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "lastPost",
+    opts: DISCOVERY_PLACEHOLDERS.lastPost
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Media Count"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "mediaCount",
+    opts: DISCOVERY_PLACEHOLDERS.mediaCount
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "disc-group-label"
+  }, "Account ", /*#__PURE__*/React.createElement("span", {
+    className: "disc-soon"
+  }, "placeholder")), /*#__PURE__*/React.createElement("div", {
+    className: "disc-grid"
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Account Type"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "accountType",
+    opts: DISCOVERY_PLACEHOLDERS.accountType
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Verified Status"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "verified",
+    opts: DISCOVERY_PLACEHOLDERS.verified
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Sponsorship"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "sponsorship",
+    opts: DISCOVERY_PLACEHOLDERS.sponsorship
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Contact Information"
+  }, /*#__PURE__*/React.createElement(PHSelect, {
+    k: "contact",
+    opts: DISCOVERY_PLACEHOLDERS.contact
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "disc-group-label"
+  }, "Audience ", /*#__PURE__*/React.createElement("span", {
+    className: "disc-soon"
+  }, "placeholder")), /*#__PURE__*/React.createElement("div", {
+    className: "disc-grid"
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Gender"
+  }, /*#__PURE__*/React.createElement("select", {
+    value: ph.audGender,
+    onChange: e => setP('audGender', e.target.value)
+  }, DISCOVERY_PLACEHOLDERS.gender.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o
+  }, o)))), /*#__PURE__*/React.createElement(Field, {
+    label: "Age"
+  }, /*#__PURE__*/React.createElement("select", {
+    value: ph.audAge,
+    onChange: e => setP('audAge', e.target.value)
+  }, DISCOVERY_PLACEHOLDERS.age.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o
+  }, o)))), /*#__PURE__*/React.createElement(Field, {
+    label: "Location"
+  }, /*#__PURE__*/React.createElement("select", {
+    value: ph.audLocation,
+    onChange: e => setP('audLocation', e.target.value)
+  }, DISCOVERY_PLACEHOLDERS.location.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o
+  }, o)))), /*#__PURE__*/React.createElement(Field, {
+    label: "Language"
+  }, /*#__PURE__*/React.createElement("select", {
+    value: ph.audLanguage,
+    onChange: e => setP('audLanguage', e.target.value)
+  }, DISCOVERY_PLACEHOLDERS.language.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o
+  }, o))))), /*#__PURE__*/React.createElement("div", {
+    className: "disc-footer-row"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "disc-keyword"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-dim)',
+      fontWeight: 600
+    }
+  }, "Keyword"), /*#__PURE__*/React.createElement("input", {
+    value: keyword,
+    onChange: e => setKeyword(e.target.value),
+    placeholder: "Search name or niche..."
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "disc-field",
+    style: {
+      minWidth: 150
     }
   }, /*#__PURE__*/React.createElement("span", {
-    className: "webhook-dot"
-  }), "Auto-refresh daily at 06:00 UTC — Last run: Today 06:00")), /*#__PURE__*/React.createElement(LeadsTable, {
-    leads: leads.filter(l => !hasStatusTag(l)),
+    style: {
+      fontSize: 12,
+      color: 'var(--text-dim)',
+      fontWeight: 600
+    }
+  }, "Sort By"), /*#__PURE__*/React.createElement("select", {
+    value: sortBy,
+    onChange: e => setSortBy(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "relevance"
+  }, "Relevance"), /*#__PURE__*/React.createElement("option", {
+    value: "followers"
+  }, "Followers (high→low)"), /*#__PURE__*/React.createElement("option", {
+    value: "name"
+  }, "Name (A→Z)"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginLeft: 'auto',
+      display: 'flex',
+      gap: 8,
+      alignItems: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: reset
+  }, "Reset Filters"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: () => addToast(`${pool.length} influencer(s) match your filters`, 'success')
+  }, "🔎 Find Influencer")))), /*#__PURE__*/React.createElement("div", {
+    className: "disc-results-label"
+  }, pool.length, " profile", pool.length !== 1 ? 's' : ''), /*#__PURE__*/React.createElement(LeadsTable, {
+    leads: pool,
     onEdit: onSave,
     onDelete: onDelete,
     onBulkAssign: onBulkAssign,
     showAssigned: true,
     showCampaign: true,
+    showOrigin: true,
+    onRowOpen: setProfileLead,
     config: config,
     feats: feats,
     campColorMap: campColorMap,
-    filename: "scraper_queue",
-    printTitle: "Scraper Queue"
+    filename: "discovery",
+    printTitle: "Influencer Discovery"
+  }), profileLead && /*#__PURE__*/React.createElement(ProfilePanel, {
+    lead: profileLead,
+    config: config,
+    campColorMap: campColorMap,
+    onClose: () => setProfileLead(null),
+    onSave: onSave,
+    onDelete: onDelete,
+    addToast: addToast
   }));
 }
 
@@ -4040,7 +4547,7 @@ function App() {
   }, {
     id: 'scraper',
     icon: '◎',
-    label: 'Scraper'
+    label: 'Influencer Discovery'
   }, {
     id: 'history',
     icon: '◷',
@@ -4116,7 +4623,7 @@ function App() {
       leads: vLeads,
       config: config
     });
-    if (tab === 'scraper') return /*#__PURE__*/React.createElement(ScraperView, {
+    if (tab === 'scraper') return /*#__PURE__*/React.createElement(DiscoveryView, {
       leads: vLeads,
       onSave: saveL,
       onDelete: delL,
@@ -4232,7 +4739,7 @@ function App() {
   }
   const PAGE_TITLE = {
     home: 'Home',
-    scraper: 'Scraper',
+    scraper: 'Influencer Discovery',
     history: 'History',
     'prev-scraped': 'Previously Scraped Leads',
     'lead-mgmt': 'Lead Management',
