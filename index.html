@@ -4767,7 +4767,6 @@ function App() {
   const [showChangePw, setShowChangePw] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchLead, setSearchLead] = useState(null);
-  const [platformFilter, setPlatformFilter] = useState(() => localStorage.getItem('platformFilter') || 'All');
   const isAdmin = isAdminUser(currentUser);
   function login(u) {
     setCurrentUser(u);
@@ -4780,9 +4779,6 @@ function App() {
     setActiveRep(null);
     setTab('home');
   }
-  useEffect(() => {
-    localStorage.setItem('platformFilter', platformFilter);
-  }, [platformFilter]);
   useEffect(() => {
     function key(e) {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
@@ -4952,9 +4948,7 @@ function App() {
   }, []);
   const campColorMap = {};
   (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
-
-  // Platform filter — restricts every view to the chosen primary platform.
-  const vLeads = platformFilter === 'All' ? leads : leads.filter(l => l.platform === platformFilter);
+  const vLeads = leads;
   const recentCutoff = new Date();
   recentCutoff.setDate(recentCutoff.getDate() - 7);
   const counts = {
@@ -5225,17 +5219,7 @@ function App() {
     className: "topbar-badge"
   }, /*#__PURE__*/React.createElement("span", {
     className: "webhook-dot"
-  }), " n8n Live"), /*#__PURE__*/React.createElement("select", {
-    className: "platform-select",
-    value: platformFilter,
-    onChange: e => setPlatformFilter(e.target.value),
-    title: "Primary platform shown across the dashboard"
-  }, /*#__PURE__*/React.createElement("option", {
-    value: "All"
-  }, "All Platforms"), PLATFORMS.map(p => /*#__PURE__*/React.createElement("option", {
-    key: p,
-    value: p
-  }, PLATFORM_ICON[p], " ", p))), /*#__PURE__*/React.createElement("div", {
+  }), " n8n Live"), /*#__PURE__*/React.createElement("div", {
     className: "topbar-user-pill",
     title: `Signed in as ${currentUser.name} (${currentUser.role})`
   }, /*#__PURE__*/React.createElement(RepAvatar, {
