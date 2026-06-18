@@ -535,3 +535,8 @@ textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(19,102,
 .profile-panel-foot { display:flex; align-items:center; gap:8px; padding:14px 18px; border-top:1px solid var(--border); }
 
 @media print { .disc-panel, .disc-tabs, .disc-head, .profile-panel, .drawer-overlay { display:none !important; } }
+
+/* ── Discovery: let the results table flow in the page scroll (no nested scroll) ── */
+.lt-embedded { flex:none !important; overflow:visible !important; }
+.lt-embedded .table-container { flex:none; overflow:visible; }
+.lt-embedded thead { position:static; }

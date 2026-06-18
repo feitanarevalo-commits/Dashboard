@@ -1117,6 +1117,7 @@ function LeadsTable({
   showCampaign = true,
   showOrigin = false,
   onRowOpen = null,
+  embedded = false,
   config,
   feats,
   campColorMap,
@@ -1262,7 +1263,11 @@ function LeadsTable({
     setOpenFilterCol
   };
   return /*#__PURE__*/React.createElement("div", {
-    style: {
+    className: embedded ? 'lt-embedded' : '',
+    style: embedded ? {
+      display: 'flex',
+      flexDirection: 'column'
+    } : {
       display: 'flex',
       flexDirection: 'column',
       flex: 1,
@@ -3421,6 +3426,7 @@ function DiscoveryView({
     showCampaign: true,
     showOrigin: true,
     onRowOpen: setProfileLead,
+    embedded: true,
     config: config,
     feats: feats,
     campColorMap: campColorMap,
