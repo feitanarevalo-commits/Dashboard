@@ -627,7 +627,15 @@ function ContextMenu({
   function openAll() {
     const targets = isBulk ? (allLeads || []).filter(l => sel.includes(l.id)) : [live];
     const urls = targets.map(l => l.url).filter(Boolean);
-    urls.forEach(u => window.open(u, '_blank', 'noopener'));
+    urls.forEach(u => {
+      const a = document.createElement('a');
+      a.href = u;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
     onClose();
   }
   const openCount = isBulk ? (allLeads || []).filter(l => sel.includes(l.id) && l.url).length : live.url ? 1 : 0;
@@ -798,6 +806,7 @@ function InlinePicker({
     onChange(next);
   }
   return /*#__PURE__*/React.createElement("div", {
+    className: "inline-picker",
     style: {
       position: 'relative',
       minWidth: 80
@@ -1194,6 +1203,32 @@ function LeadsTable({
   function toggleOne(id) {
     setSel(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
   }
+  const lastIdx = useRef(null);
+  function rowClick(e, lead, idx) {
+    // Ignore clicks on interactive cell content (links, inputs, pickers, buttons).
+    if (e.target.closest('input,select,button,a,.inline-picker,.channel-name-link')) return;
+    if (e.shiftKey && lastIdx.current != null) {
+      const a = Math.min(lastIdx.current, idx),
+        b = Math.max(lastIdx.current, idx);
+      const ids = paginated.slice(a, b + 1).map(l => l.id);
+      setSel(s => Array.from(new Set([...s, ...ids])));
+    } else {
+      toggleOne(lead.id);
+      lastIdx.current = idx;
+    }
+  }
+  function openSelected() {
+    const targets = filtered.filter(l => sel.includes(l.id));
+    targets.map(l => l.url).filter(Boolean).forEach(u => {
+      const a = document.createElement('a');
+      a.href = u;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+  }
   function doSaveBulk() {
     const today = new Date().toISOString().split('T')[0];
     sel.forEach(id => {
@@ -1381,6 +1416,10 @@ function LeadsTable({
     onClick: doSaveBulk,
     disabled: !bulkRep && bulkTags.length === 0 && bulkCamps.length === 0
   }, "Save Changes"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: openSelected,
+    title: "Open each selected lead's URL in a new tab"
+  }, "🔗 Open ", sel.length), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost btn-sm",
     onClick: () => {
       setSel([]);
@@ -1449,12 +1488,13 @@ function LeadsTable({
       width: 80
     },
     className: "no-print"
-  }, "Actions"))), /*#__PURE__*/React.createElement("tbody", null, paginated.map(lead => /*#__PURE__*/React.createElement("tr", {
+  }, "Actions"))), /*#__PURE__*/React.createElement("tbody", null, paginated.map((lead, idx) => /*#__PURE__*/React.createElement("tr", {
     key: lead.id,
-    className: getRowClass(lead),
+    className: `${getRowClass(lead)}${sel.includes(lead.id) ? ' row-selected' : ''}`,
     onContextMenu: e => handleCtx(e, lead),
+    onClick: e => rowClick(e, lead, idx),
     style: {
-      cursor: 'context-menu'
+      cursor: 'pointer'
     }
   }, feats.bulkAssign && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",

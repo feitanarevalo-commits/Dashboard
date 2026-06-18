@@ -580,3 +580,8 @@ textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(19,102,
 .cmdk-lead-meta { font-size:11px; color:var(--text-dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .cmdk-lead-tags { display:flex; gap:4px; margin-top:5px; flex-wrap:wrap; }
 .cmdk-lead-tags span { font-size:9px; font-weight:700; padding:2px 7px; border-radius:20px; }
+
+/* ── Row click-to-select highlight ── */
+tbody tr.row-selected { background: var(--accent-light) !important; box-shadow: inset 3px 0 0 var(--accent); }
+tbody tr.row-selected:hover { filter: brightness(.98); }
+tbody tr { user-select: none; }
