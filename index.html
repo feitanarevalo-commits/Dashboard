@@ -1115,6 +1115,8 @@ function LeadsTable({
   embedded = false,
   toolbarStart = null,
   toolbarAfterSearch = null,
+  searchValue = null,
+  onSearchChange = null,
   config,
   feats,
   campColorMap,
@@ -1122,7 +1124,11 @@ function LeadsTable({
   printTitle = 'Lead Report'
 }) {
   const [sel, setSel] = useState([]);
-  const [search, setSearch] = useState('');
+  const [searchState, setSearchState] = useState('');
+  // When the parent provides search control (e.g. Scraper uses it as the
+  // scrape keyword), the box is controlled by the parent; otherwise local.
+  const search = onSearchChange != null ? searchValue || '' : searchState;
+  const setSearch = onSearchChange != null ? onSearchChange : setSearchState;
   const [filterStatus, setFilterStatus] = useState('');
   const [filterRep, setFilterRep] = useState('');
   const [sortCol, setSortCol] = useState('');
@@ -3528,6 +3534,7 @@ function ScraperView({
   const [platform, setPlatform] = useState('All');
   const [minF, setMinF] = useState('10K');
   const [language, setLanguage] = useState('All');
+  const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(false);
   const feats = config.features || {};
   const campColorMap = {};
@@ -3541,7 +3548,7 @@ function ScraperView({
     const payload = {
       type: 'search',
       platform,
-      keyword: '',
+      keyword: keyword.trim(),
       interest: '',
       language,
       minFollowers: parseFollowers(minF),
@@ -3620,6 +3627,8 @@ function ScraperView({
     showOrigin: true,
     toolbarStart: runBtn,
     toolbarAfterSearch: scraperFilters,
+    searchValue: keyword,
+    onSearchChange: setKeyword,
     config: config,
     feats: feats,
     campColorMap: campColorMap,
