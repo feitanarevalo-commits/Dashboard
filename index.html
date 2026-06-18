@@ -4546,6 +4546,206 @@ function ChangePasswordModal({
   }, "Save Password"))))));
 }
 
+// ─── GLOBAL SEARCH (command palette) ──────────────────────
+function GlobalSearch({
+  leads,
+  config,
+  isAdmin,
+  onClose,
+  onNavigate,
+  onOpenRep,
+  onOpenLead,
+  onOpenSettings,
+  onOpenChangePw,
+  onToggleDark,
+  onLogout
+}) {
+  const [q, setQ] = useState('');
+  const inputRef = useRef(null);
+  useEffect(() => {
+    inputRef.current && inputRef.current.focus();
+    function key(e) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, []);
+  const ql = q.trim().toLowerCase();
+  const match = s => String(s || '').toLowerCase().includes(ql);
+
+  // Pages
+  const PAGE_DEFS = [{
+    id: 'home',
+    label: 'Home',
+    icon: '⊟'
+  }, {
+    id: 'scraper',
+    label: 'Scraper',
+    icon: '◎'
+  }, {
+    id: 'history',
+    label: 'History',
+    icon: '◷'
+  }, {
+    id: 'prev-scraped',
+    label: 'Previously Scraped',
+    icon: '◈'
+  }, {
+    id: 'lead-mgmt',
+    label: 'Lead Management',
+    icon: '◉'
+  }, {
+    id: 'google-import',
+    label: 'Google Sheets Import',
+    icon: '◫'
+  }, {
+    id: 'potential',
+    label: 'Potential Leads',
+    icon: '★'
+  }, {
+    id: 'nq',
+    label: 'NQ Leads',
+    icon: '✕'
+  }, {
+    id: 'contacted',
+    label: 'Contacted Leads',
+    icon: '✉'
+  }, {
+    id: 'recycle',
+    label: 'For Recycle',
+    icon: '↻'
+  }, {
+    id: 'recent',
+    label: 'Recently Assigned',
+    icon: '◑'
+  }].filter(p => (config.tabs || {})[p.id]);
+  (config.campaigns || []).forEach(c => PAGE_DEFS.push({
+    id: c.id.toLowerCase(),
+    label: `${c.label} Campaign`,
+    icon: '●'
+  }));
+  const pages = PAGE_DEFS.filter(p => !ql || match(p.label)).map(p => ({
+    ...p,
+    kind: 'Pages',
+    run: () => {
+      onNavigate(p.id);
+      onClose();
+    }
+  }));
+  const reps = (config.salesReps || []).filter(r => !ql || match(r)).map(r => ({
+    label: `${r}'s Dashboard`,
+    icon: '👤',
+    kind: 'Sales Reps',
+    run: () => {
+      onOpenRep(r);
+      onClose();
+    }
+  }));
+  const leadHits = (!ql ? [] : leads.filter(l => match(l.channelName) || match(l.niche) || match(l.platform) || (l.emails || []).some(match)).slice(0, 8)).map(l => ({
+    label: l.channelName,
+    sub: `${l.platform || ''}${l.niche ? ' · ' + l.niche : ''}`,
+    icon: '🔎',
+    kind: 'Leads',
+    run: () => {
+      onOpenLead(l);
+      onClose();
+    }
+  }));
+  const ACTION_DEFS = [...(isAdmin ? [{
+    label: 'Open Customize / Settings',
+    icon: '⚙',
+    run: () => {
+      onOpenSettings();
+      onClose();
+    }
+  }] : []), {
+    label: 'Change Password',
+    icon: '🔑',
+    run: () => {
+      onOpenChangePw();
+      onClose();
+    }
+  }, {
+    label: 'Toggle Dark Mode',
+    icon: '🌙',
+    run: () => {
+      onToggleDark();
+      onClose();
+    }
+  }, {
+    label: 'Logout',
+    icon: '⎋',
+    run: () => {
+      onLogout();
+      onClose();
+    }
+  }];
+  const actions = ACTION_DEFS.filter(a => !ql || match(a.label)).map(a => ({
+    ...a,
+    kind: 'Actions'
+  }));
+  const groups = [['Pages', pages], ['Sales Reps', reps], ['Leads', leadHits], ['Actions', actions]].filter(([, arr]) => arr.length);
+  const flat = groups.flatMap(([, arr]) => arr);
+  function onKeyDown(e) {
+    if (e.key === 'Enter' && flat.length) {
+      e.preventDefault();
+      flat[0].run();
+    }
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "cmdk-overlay",
+    onClick: e => e.target === e.currentTarget && onClose()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "cmdk"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "cmdk-input-row"
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "16",
+    height: "16",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2"
+  }, /*#__PURE__*/React.createElement("circle", {
+    cx: "11",
+    cy: "11",
+    r: "8"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "m21 21-4.35-4.35"
+  })), /*#__PURE__*/React.createElement("input", {
+    ref: inputRef,
+    value: q,
+    onChange: e => setQ(e.target.value),
+    onKeyDown: onKeyDown,
+    placeholder: "Search pages, leads, reps, settings…"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "cmdk-esc"
+  }, "ESC")), /*#__PURE__*/React.createElement("div", {
+    className: "cmdk-results"
+  }, flat.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "cmdk-empty"
+  }, "No matches", ql ? ` for “${q}”` : ''), groups.map(([name, arr]) => /*#__PURE__*/React.createElement("div", {
+    key: name,
+    className: "cmdk-group"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "cmdk-group-label"
+  }, name), arr.map((it, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: `cmdk-item${flat[0] === it ? ' cmdk-active' : ''}`,
+    onClick: it.run
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "cmdk-icon"
+  }, it.icon), /*#__PURE__*/React.createElement("span", {
+    className: "cmdk-label"
+  }, it.label, it.sub && /*#__PURE__*/React.createElement("span", {
+    className: "cmdk-sub"
+  }, " — ", it.sub)), /*#__PURE__*/React.createElement("span", {
+    className: "cmdk-kind"
+  }, it.kind)))))), /*#__PURE__*/React.createElement("div", {
+    className: "cmdk-foot"
+  }, /*#__PURE__*/React.createElement("b", null, "Enter"), " to open first result · ", /*#__PURE__*/React.createElement("b", null, "Esc"), " to close")));
+}
+
 // ─── APP ──────────────────────────────────────────────────
 function App() {
   const [tab, setTab] = useState('home');
@@ -4565,6 +4765,8 @@ function App() {
     }
   });
   const [showChangePw, setShowChangePw] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchLead, setSearchLead] = useState(null);
   const [platformFilter, setPlatformFilter] = useState(() => localStorage.getItem('platformFilter') || 'All');
   const isAdmin = isAdminUser(currentUser);
   function login(u) {
@@ -4581,6 +4783,16 @@ function App() {
   useEffect(() => {
     localStorage.setItem('platformFilter', platformFilter);
   }, [platformFilter]);
+  useEffect(() => {
+    function key(e) {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setShowSearch(s => !s);
+      }
+    }
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, []);
   useEffect(() => {
     document.documentElement.setAttribute('data-dark', darkMode ? 'true' : '');
     if (!darkMode) document.documentElement.removeAttribute('data-dark');
@@ -4986,12 +5198,30 @@ function App() {
   }, "E"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", null, "Enfinity"), /*#__PURE__*/React.createElement("div", {
     className: "tagline"
   }, "Sales Dashboard"))), /*#__PURE__*/React.createElement("div", {
-    className: "topbar-search"
-  }, /*#__PURE__*/React.createElement("input", {
-    placeholder: "Search leads, channels, niches..."
-  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("div", {
     className: "topbar-right"
-  }, (config.features || {}).webhookTrigger && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "topbar-icon-btn",
+    onClick: () => setShowSearch(true),
+    title: "Search dashboard (Ctrl/⌘ + K)",
+    "aria-label": "Search dashboard"
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "17",
+    height: "17",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2"
+  }, /*#__PURE__*/React.createElement("circle", {
+    cx: "11",
+    cy: "11",
+    r: "8"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "m21 21-4.35-4.35"
+  }))), (config.features || {}).webhookTrigger && /*#__PURE__*/React.createElement("div", {
     className: "topbar-badge"
   }, /*#__PURE__*/React.createElement("span", {
     className: "webhook-dot"
@@ -5158,6 +5388,31 @@ function App() {
     user: currentUser,
     onClose: () => setShowChangePw(false),
     addToast: addToast
+  }), showSearch && /*#__PURE__*/React.createElement(GlobalSearch, {
+    leads: leads,
+    config: config,
+    isAdmin: isAdmin,
+    onClose: () => setShowSearch(false),
+    onNavigate: id => {
+      setShowRepSelect(false);
+      setTab(id);
+    },
+    onOpenRep: r => {
+      setShowRepSelect(false);
+      setActiveRep(r);
+      setTab('rep-home');
+    },
+    onOpenLead: l => setSearchLead(l),
+    onOpenSettings: () => setShowSettings(true),
+    onOpenChangePw: () => setShowChangePw(true),
+    onToggleDark: () => setDarkMode(d => !d),
+    onLogout: logout
+  }), searchLead && /*#__PURE__*/React.createElement(LeadModal, {
+    lead: searchLead,
+    config: config,
+    onClose: () => setSearchLead(null),
+    onSave: saveL,
+    onDelete: delL
   }));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
