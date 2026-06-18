@@ -94,6 +94,7 @@ function mapDiscoveryResult(item, fallbackPlatform, i) {
   const niche = get('niche', 'category', 'businessCategoryName', 'categoryName');
   const email = get('email', 'publicEmail', 'businessEmail');
   const thumb = get('thumbnail', 'thumbnailUrl', 'avatar', 'profilePic', 'profilePicUrl', 'profilePicUrlHD', 'displayUrl', 'image', 'picture', 'imageUrl');
+  const channelId = get('channel_id', 'channelId', 'channelID', 'ownerId', 'authorId', 'userId', 'user_id');
   // Determine platform: explicit field → infer from URL → searched tab → fallback.
   let platform = item.platform || fallbackPlatform || '';
   if (!platform || platform === 'All') {
@@ -109,6 +110,7 @@ function mapDiscoveryResult(item, fallbackPlatform, i) {
     followers: typeof followers === 'number' ? fmtFollowers(followers) : String(followers || ''),
     emails: email ? [String(email)] : [],
     thumbnail: thumb ? String(thumb) : '',
+    channelId: channelId ? String(channelId) : '',
     tags: [],
     campaigns: [],
     assignedTo: null,
@@ -116,6 +118,10 @@ function mapDiscoveryResult(item, fallbackPlatform, i) {
     lastContactDate: null,
     channels: []
   };
+}
+// Stable identity key for de-duplicating leads: channel ID > URL > name.
+function leadKey(l) {
+  return String(l.channelId || l.url || l.channelName || '').trim().toLowerCase();
 }
 
 // ─── PERMISSIONS ──────────────────────────────────────────
@@ -5014,9 +5020,17 @@ function App() {
   function addDiscovered(items) {
     const arr = Array.isArray(items) ? items : [];
     setLeads(existing => {
-      const seen = new Set(existing.map(l => (l.url || '').toLowerCase()).filter(Boolean));
-      const fresh = arr.filter(l => !l.url || !seen.has(l.url.toLowerCase()));
-      logH('🔎', `Discovery: ${fresh.length} influencer(s) added from scraper`);
+      // De-dupe by channel (ID > URL > name), both within the batch and vs existing leads.
+      const seen = new Set(existing.map(leadKey).filter(Boolean));
+      const fresh = [];
+      arr.forEach(l => {
+        const k = leadKey(l);
+        if (k && seen.has(k)) return; // same channel already in the list
+        if (k) seen.add(k);
+        fresh.push(l);
+      });
+      const dropped = arr.length - fresh.length;
+      logH('🔎', `Discovery: ${fresh.length} unique channel(s) added${dropped > 0 ? ` · ${dropped} duplicate(s) skipped` : ''}`);
       return [...existing, ...fresh];
     });
   }
