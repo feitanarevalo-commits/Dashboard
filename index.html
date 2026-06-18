@@ -4643,8 +4643,7 @@ function GlobalSearch({
   }));
   const leadHits = (!ql ? [] : leads.filter(l => match(l.channelName) || match(l.niche) || match(l.platform) || (l.emails || []).some(match)).slice(0, 8)).map(l => ({
     label: l.channelName,
-    sub: `${l.platform || ''}${l.niche ? ' · ' + l.niche : ''}`,
-    icon: '🔎',
+    lead: l,
     kind: 'Leads',
     run: () => {
       onOpenLead(l);
@@ -4684,7 +4683,7 @@ function GlobalSearch({
     ...a,
     kind: 'Actions'
   }));
-  const groups = [['Pages', pages], ['Sales Reps', reps], ['Leads', leadHits], ['Actions', actions]].filter(([, arr]) => arr.length);
+  const groups = [['Leads', leadHits], ['Pages', pages], ['Sales Reps', reps], ['Actions', actions]].filter(([, arr]) => arr.length);
   const flat = groups.flatMap(([, arr]) => arr);
   function onKeyDown(e) {
     if (e.key === 'Enter' && flat.length) {
@@ -4729,19 +4728,56 @@ function GlobalSearch({
     className: "cmdk-group"
   }, /*#__PURE__*/React.createElement("div", {
     className: "cmdk-group-label"
-  }, name), arr.map((it, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    className: `cmdk-item${flat[0] === it ? ' cmdk-active' : ''}`,
-    onClick: it.run
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "cmdk-icon"
-  }, it.icon), /*#__PURE__*/React.createElement("span", {
-    className: "cmdk-label"
-  }, it.label, it.sub && /*#__PURE__*/React.createElement("span", {
-    className: "cmdk-sub"
-  }, " — ", it.sub)), /*#__PURE__*/React.createElement("span", {
-    className: "cmdk-kind"
-  }, it.kind)))))), /*#__PURE__*/React.createElement("div", {
+  }, name), arr.map((it, i) => {
+    const active = flat[0] === it;
+    if (it.lead) {
+      const l = it.lead;
+      return /*#__PURE__*/React.createElement("div", {
+        key: i,
+        className: `cmdk-item cmdk-lead${active ? ' cmdk-active' : ''}`,
+        onClick: it.run
+      }, /*#__PURE__*/React.createElement("div", {
+        className: "cmdk-lead-av"
+      }, avatarLetter(l.channelName)), /*#__PURE__*/React.createElement("div", {
+        className: "cmdk-lead-main"
+      }, /*#__PURE__*/React.createElement("div", {
+        className: "cmdk-lead-name"
+      }, l.channelName, /*#__PURE__*/React.createElement("span", {
+        className: "cmdk-lead-plat"
+      }, PLATFORM_ICON[l.platform] || '', " ", l.platform)), /*#__PURE__*/React.createElement("div", {
+        className: "cmdk-lead-meta"
+      }, l.niche || '—', " · ", l.followers || '—', " followers · ", l.assignedTo ? '@' + l.assignedTo : 'Unassigned', leadOrigin(l) === 'Fresh' ? ' · Fresh' : ' · Imported'), (l.tags || []).length > 0 && /*#__PURE__*/React.createElement("div", {
+        className: "cmdk-lead-tags"
+      }, l.tags.slice(0, 4).map(t => {
+        const c = TAG_COLORS[t] || {
+          bg: '#F0F2F5',
+          color: '#68737D'
+        };
+        return /*#__PURE__*/React.createElement("span", {
+          key: t,
+          style: {
+            background: c.bg,
+            color: c.color
+          }
+        }, t === 'HT' ? '⚡ HT' : t);
+      }))), /*#__PURE__*/React.createElement("span", {
+        className: "cmdk-kind"
+      }, "Open ↵"));
+    }
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      className: `cmdk-item${active ? ' cmdk-active' : ''}`,
+      onClick: it.run
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "cmdk-icon"
+    }, it.icon), /*#__PURE__*/React.createElement("span", {
+      className: "cmdk-label"
+    }, it.label, it.sub && /*#__PURE__*/React.createElement("span", {
+      className: "cmdk-sub"
+    }, " — ", it.sub)), /*#__PURE__*/React.createElement("span", {
+      className: "cmdk-kind"
+    }, it.kind));
+  })))), /*#__PURE__*/React.createElement("div", {
     className: "cmdk-foot"
   }, /*#__PURE__*/React.createElement("b", null, "Enter"), " to open first result · ", /*#__PURE__*/React.createElement("b", null, "Esc"), " to close")));
 }

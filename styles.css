@@ -568,3 +568,15 @@ textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(19,102,
 .cmdk-sub { font-weight:400; color:var(--text-dim); }
 .cmdk-kind { font-size:10px; color:var(--text-light); flex-shrink:0; }
 .cmdk-foot { padding:8px 14px; border-top:1px solid var(--border); font-size:11px; color:var(--text-light); }
+
+/* ── Command palette: rich lead preview rows ── */
+.cmdk-lead { align-items:flex-start; gap:11px; }
+.cmdk-lead-av { width:30px; height:30px; border-radius:50%; background:var(--accent); color:#fff;
+  display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; flex-shrink:0; }
+.cmdk-lead-main { flex:1; min-width:0; }
+.cmdk-lead-name { font-size:13px; font-weight:700; color:var(--text); display:flex; align-items:center; gap:8px; }
+.cmdk-lead-plat { font-size:10px; font-weight:600; color:var(--text-dim); background:var(--bg);
+  border:1px solid var(--border); border-radius:20px; padding:1px 7px; white-space:nowrap; }
+.cmdk-lead-meta { font-size:11px; color:var(--text-dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cmdk-lead-tags { display:flex; gap:4px; margin-top:5px; flex-wrap:wrap; }
+.cmdk-lead-tags span { font-size:9px; font-weight:700; padding:2px 7px; border-radius:20px; }
