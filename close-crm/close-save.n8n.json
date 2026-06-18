@@ -1,0 +1,92 @@
+{
+  "name": "Enfinity — Close SAVE (push leads from dashboard)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "close-save",
+        "responseMode": "onReceived",
+        "responseCode": 200,
+        "options": { "allowedOrigins": "*" }
+      },
+      "id": "eeee1111-1111-1111-1111-111111111111",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "enfinity-close-save"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Explode the {leads:[...]} payload into one item per lead and stash the\n// whole dashboard lead as JSON in 'description' (round-trips on load).\nconst body = ($input.first().json.body) || $input.first().json || {};\nconst leads = body.leads || [];\nreturn leads.map(l => ({ json: {\n  closeLeadId: l.closeLeadId || '',\n  name: l.channelName || 'Lead',\n  url: l.url || '',\n  description: JSON.stringify(l)\n}}));"
+      },
+      "id": "ffff2222-2222-2222-2222-222222222222",
+      "name": "Prepare leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            { "id": "cond1", "leftValue": "={{ $json.closeLeadId }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty", "singleValue": true } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "gggg3333-3333-3333-3333-333333333333",
+      "name": "Has Close ID?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://api.close.com/api/v1/lead/{{ $json.closeLeadId }}/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: $json.name, url: $json.url, description: $json.description }) }}",
+        "options": {}
+      },
+      "id": "hhhh4444-4444-4444-4444-444444444444",
+      "name": "Close - Update Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 200],
+      "credentials": { "httpBasicAuth": { "id": "REPLACE_WITH_CREDENTIAL", "name": "Close API (key as username)" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/lead/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: $json.name, url: $json.url, description: $json.description }) }}",
+        "options": {}
+      },
+      "id": "iiii5555-5555-5555-5555-555555555555",
+      "name": "Close - Create Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 400],
+      "credentials": { "httpBasicAuth": { "id": "REPLACE_WITH_CREDENTIAL", "name": "Close API (key as username)" } }
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Prepare leads", "type": "main", "index": 0 }]] },
+    "Prepare leads": { "main": [[{ "node": "Has Close ID?", "type": "main", "index": 0 }]] },
+    "Has Close ID?": { "main": [
+      [{ "node": "Close - Update Lead", "type": "main", "index": 0 }],
+      [{ "node": "Close - Create Lead", "type": "main", "index": 0 }]
+    ] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

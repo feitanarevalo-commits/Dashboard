@@ -4129,11 +4129,27 @@ function SettingsDrawer({
       color: 'var(--text-dim)',
       marginBottom: 4
     }
-  }, "Close.io Import Webhook"), /*#__PURE__*/React.createElement("input", {
+  }, "Close — Save Webhook (push leads → Close)"), /*#__PURE__*/React.createElement("input", {
     value: local.closeWebhook || '',
     onChange: e => setLocal(l => ({
       ...l,
       closeWebhook: e.target.value
+    })),
+    placeholder: "https://app.n8n.cloud/webhook/...",
+    style: {
+      width: '100%'
+    }
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-dim)',
+      marginBottom: 4
+    }
+  }, "Close — Load Webhook (pull leads ← Close)"), /*#__PURE__*/React.createElement("input", {
+    value: local.closeLoadWebhook || '',
+    onChange: e => setLocal(l => ({
+      ...l,
+      closeLoadWebhook: e.target.value
     })),
     placeholder: "https://app.n8n.cloud/webhook/...",
     style: {
@@ -4915,6 +4931,8 @@ function App() {
   const [showChangePw, setShowChangePw] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchLead, setSearchLead] = useState(null);
+  const [closeSyncing, setCloseSyncing] = useState(false);
+  const closeLoadedRef = useRef(false);
   const isAdmin = isAdminUser(currentUser);
   function login(u) {
     setCurrentUser(u);
@@ -5034,6 +5052,127 @@ function App() {
       return [...existing, ...fresh];
     });
   }
+
+  // Normalize a lead object coming back from Close (via n8n) into the shape
+  // the dashboard expects, so missing fields don't crash the UI.
+  function normalizeLead(x, i) {
+    x = x || {};
+    return {
+      id: x.id || Date.now() + Math.floor(Math.random() * 1e6) + i,
+      closeLeadId: x.closeLeadId || x.close_id || null,
+      channelName: x.channelName || x.name || 'lead_' + (i + 1),
+      url: x.url || '',
+      platform: x.platform || 'YouTube',
+      niche: x.niche || '',
+      followers: x.followers || '',
+      emails: Array.isArray(x.emails) ? x.emails : x.email ? [x.email] : [],
+      thumbnail: x.thumbnail || '',
+      channelId: x.channelId || '',
+      tags: Array.isArray(x.tags) ? x.tags : [],
+      campaigns: Array.isArray(x.campaigns) ? x.campaigns : [],
+      assignedTo: x.assignedTo || null,
+      dateAssigned: x.dateAssigned || null,
+      lastContactDate: x.lastContactDate || null,
+      channels: Array.isArray(x.channels) ? x.channels : [],
+      source: x.source
+    };
+  }
+  function loadFromClose(opts) {
+    opts = opts || {};
+    const wh = (config.closeLoadWebhook || '').trim();
+    if (!wh || wh.includes('your-')) {
+      if (!opts.silent) addToast('Set the Close Load Webhook in ⚙ Customize', 'info');
+      return;
+    }
+    setCloseSyncing(true);
+    if (!opts.silent) addToast('Loading leads from Close…', 'info');
+    fetch(wh, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: '{}'
+    }).then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).then(text => {
+      if (!text || !text.trim()) {
+        if (!opts.silent) addToast('Close returned no leads', 'info');
+        return;
+      }
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        addToast('Close load: response was not JSON', 'error');
+        return;
+      }
+      const arr = Array.isArray(data) ? data : data.leads || data.results || data.data || [];
+      const loaded = arr.map(normalizeLead);
+      setLeads(loaded);
+      logH('☁️', `Loaded ${loaded.length} lead(s) from Close`);
+      if (!opts.silent) addToast(`✓ Loaded ${loaded.length} lead(s) from Close`, 'success');
+    }).catch(e => {
+      if (!opts.silent) addToast('Close load failed: ' + e.message, 'error');
+    }).finally(() => setCloseSyncing(false));
+  }
+  function saveToClose() {
+    const wh = (config.closeWebhook || '').trim();
+    if (!wh || wh.includes('your-')) {
+      addToast('Set the Close Save Webhook in ⚙ Customize', 'info');
+      return;
+    }
+    if (!leads.length) {
+      addToast('No leads to save', 'info');
+      return;
+    }
+    setCloseSyncing(true);
+    addToast(`Saving ${leads.length} lead(s) to Close…`, 'info');
+    fetch(wh, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        leads
+      })
+    }).then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).then(text => {
+      // Optional: Close returns [{id, closeLeadId}] so we can update without duplicating next time.
+      let data = null;
+      try {
+        data = text && text.trim() ? JSON.parse(text) : null;
+      } catch (e) {}
+      const idMap = Array.isArray(data) ? data : data && Array.isArray(data.saved) ? data.saved : null;
+      if (idMap) {
+        const byId = {};
+        idMap.forEach(m => {
+          if (m && m.id != null) byId[m.id] = m.closeLeadId || m.close_id;
+        });
+        setLeads(ls => ls.map(l => byId[l.id] ? {
+          ...l,
+          closeLeadId: byId[l.id]
+        } : l));
+      }
+      logH('☁️', `Saved ${leads.length} lead(s) to Close`);
+      addToast(`✓ Saved ${leads.length} lead(s) to Close`, 'success');
+    }).catch(e => addToast('Close save failed: ' + e.message, 'error')).finally(() => setCloseSyncing(false));
+  }
+
+  // Auto-load from Close once after login, if a load webhook is configured.
+  useEffect(() => {
+    if (currentUser && !closeLoadedRef.current) {
+      const wh = (config.closeLoadWebhook || '').trim();
+      if (wh && !wh.includes('your-')) {
+        closeLoadedRef.current = true;
+        loadFromClose({
+          silent: true
+        });
+      }
+    }
+  }, [currentUser]);
   function importToClose(rep, repLeads) {
     const CLOSE_WEBHOOK = config.closeWebhook || 'https://app.n8n.cloud/webhook/your-close-import-webhook';
     const payload = {
@@ -5494,6 +5633,16 @@ function App() {
   }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-footer"
   }, isAdmin && /*#__PURE__*/React.createElement("div", {
+    className: "nav-item settings",
+    onClick: () => closeSyncing ? null : loadFromClose()
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "nav-icon"
+  }, "☁"), closeSyncing ? 'Syncing…' : 'Load from Close'), isAdmin && /*#__PURE__*/React.createElement("div", {
+    className: "nav-item settings",
+    onClick: () => closeSyncing ? null : saveToClose()
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "nav-icon"
+  }, "⬆"), "Save to Close"), isAdmin && /*#__PURE__*/React.createElement("div", {
     className: "nav-item settings",
     onClick: () => setShowSettings(true)
   }, /*#__PURE__*/React.createElement("span", {

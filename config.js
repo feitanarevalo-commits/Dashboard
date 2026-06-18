@@ -68,8 +68,9 @@ var DEFAULT_CONFIG = {
   },
 
   // ── Webhook URLs ── paste your n8n webhook URLs here
-  closeWebhook:  'https://app.n8n.cloud/webhook/your-close-import-webhook',
-  scrapeWebhook: 'https://app.n8n.cloud/webhook/your-scrape-webhook',
+  closeWebhook:     'https://app.n8n.cloud/webhook/your-close-import-webhook', // SAVE leads → Close
+  closeLoadWebhook: 'https://app.n8n.cloud/webhook/your-close-load-webhook',   // LOAD leads ← Close
+  scrapeWebhook:    'https://app.n8n.cloud/webhook/your-scrape-webhook',
 
   // ── Campaigns ── add as many as you need
   campaigns: [

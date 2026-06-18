@@ -1,0 +1,66 @@
+{
+  "name": "Enfinity — Close LOAD (pull leads to dashboard)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "close-load",
+        "responseMode": "responseNode",
+        "options": { "allowedOrigins": "*" }
+      },
+      "id": "aaaa1111-1111-1111-1111-111111111111",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300],
+      "webhookId": "enfinity-close-load"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.close.com/api/v1/lead/?_limit=200&query=*",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "id": "bbbb2222-2222-2222-2222-222222222222",
+      "name": "Close - List Leads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "credentials": { "httpBasicAuth": { "id": "REPLACE_WITH_CREDENTIAL", "name": "Close API (key as username)" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Each Close lead stores the dashboard lead JSON in its description.\n// Pull it back out; fall back to basic fields if no JSON is present.\nconst out = [];\nconst data = $input.first().json;\nconst leads = (data && data.data) ? data.data : [];\nfor (const L of leads) {\n  let parsed = null;\n  try { if (L.description) parsed = JSON.parse(L.description); } catch (e) {}\n  if (parsed && typeof parsed === 'object') {\n    parsed.closeLeadId = L.id;\n    out.push({ json: parsed });\n  } else {\n    out.push({ json: {\n      closeLeadId: L.id,\n      channelName: L.display_name || L.name || 'Lead',\n      url: (L.url || ''),\n      platform: 'YouTube', niche: '', followers: '', emails: [],\n      tags: [], campaigns: [], assignedTo: null, dateAssigned: null,\n      lastContactDate: null, channels: []\n    }});\n  }\n}\nreturn out;"
+      },
+      "id": "cccc3333-3333-3333-3333-333333333333",
+      "name": "Extract dashboard leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {
+          "responseHeaders": { "entries": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Access-Control-Allow-Origin", "value": "*" }
+          ] }
+        }
+      },
+      "id": "dddd4444-4444-4444-4444-444444444444",
+      "name": "Respond to Dashboard",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Close - List Leads", "type": "main", "index": 0 }]] },
+    "Close - List Leads": { "main": [[{ "node": "Extract dashboard leads", "type": "main", "index": 0 }]] },
+    "Extract dashboard leads": { "main": [[{ "node": "Respond to Dashboard", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
