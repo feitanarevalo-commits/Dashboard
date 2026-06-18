@@ -3558,12 +3558,23 @@ function ScraperView({
       body: JSON.stringify(payload)
     }).then(r => {
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    }).then(data => {
+      return r.text();
+    }).then(text => {
+      if (!text || !text.trim()) {
+        addToast('Scraper returned an empty response — in n8n set Respond to Webhook → "Respond With: All Incoming Items" and connect it after Get dataset items', 'error');
+        return;
+      }
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (err) {
+        addToast('Scraper response was not valid JSON (got: ' + text.slice(0, 60) + '…)', 'error');
+        return;
+      }
       const items = Array.isArray(data) ? data : data.results || data.items || data.data || [];
       const mapped = items.map((it, i) => mapDiscoveryResult(it, platform === 'All' ? null : platform, i));
       if (onResults) onResults(mapped);
-      addToast(`✓ ${mapped.length} lead(s) scraped`, 'success');
+      addToast(mapped.length ? `✓ ${mapped.length} lead(s) scraped` : 'Scraper ran but returned 0 profiles', 'success');
     }).catch(e => {
       const cors = (e && e.message || '').toLowerCase().includes('failed to fetch');
       addToast(cors ? 'Scrape blocked (CORS): set the n8n Webhook "Allowed Origins" to * and add Access-Control-Allow-Origin in Respond to Webhook' : `Scrape failed: ${e.message}`, 'error');
