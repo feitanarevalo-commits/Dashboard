@@ -3443,6 +3443,157 @@ function DiscoveryView({
   }));
 }
 
+// ─── SCRAPER VIEW (restored) ──────────────────────────────
+// Simple scraper queue. "Run Scraper" POSTs to the Make/Apify webhook
+// (config.scrapeWebhook) and ingests results; falls back to a notice if
+// no webhook is configured. The richer DiscoveryView above is kept dormant.
+function ScraperView({
+  leads,
+  onSave,
+  onDelete,
+  onBulkAssign,
+  onResults,
+  addToast,
+  config
+}) {
+  const [platform, setPlatform] = useState('All');
+  const [niche, setNiche] = useState('');
+  const [minF, setMinF] = useState('10K');
+  const [loading, setLoading] = useState(false);
+  const feats = config.features || {};
+  const campColorMap = {};
+  (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
+  function scrape() {
+    const wh = (config.scrapeWebhook || '').trim();
+    if (!wh || wh.includes('your-') || wh.includes('webhook-id')) {
+      addToast('No scraper webhook set — add it in ⚙ Customize → Scraper Webhook', 'info');
+      return;
+    }
+    const payload = {
+      platform,
+      keyword: niche.trim(),
+      interest: '',
+      minFollowers: parseFollowers(minF),
+      maxFollowers: null,
+      sortBy: 'relevance',
+      limit: 25
+    };
+    setLoading(true);
+    addToast('Running scraper…', 'info');
+    fetch(wh, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    }).then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(data => {
+      const items = Array.isArray(data) ? data : data.results || data.items || data.data || [];
+      const mapped = items.map((it, i) => mapDiscoveryResult(it, platform === 'All' ? null : platform, i));
+      if (onResults) onResults(mapped);
+      addToast(`✓ ${mapped.length} lead(s) scraped`, 'success');
+    }).catch(e => addToast(`Scrape failed: ${e.message}`, 'error')).finally(() => setLoading(false));
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'var(--card)',
+      borderBottom: '1px solid var(--border)',
+      padding: '16px 24px',
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      flexWrap: 'wrap',
+      alignItems: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Platform"), /*#__PURE__*/React.createElement("select", {
+    value: platform,
+    onChange: e => setPlatform(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "All"
+  }, "All"), PLATFORMS.map(p => /*#__PURE__*/React.createElement("option", {
+    key: p
+  }, p)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Niche / Keyword"), /*#__PURE__*/React.createElement("input", {
+    value: niche,
+    onChange: e => setNiche(e.target.value),
+    placeholder: "e.g. Finance, Fitness...",
+    style: {
+      width: 160
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Min Followers"), /*#__PURE__*/React.createElement("select", {
+    value: minF,
+    onChange: e => setMinF(e.target.value)
+  }, ['1K', '10K', '50K', '100K', '500K', '1M'].map(v => /*#__PURE__*/React.createElement("option", {
+    key: v
+  }, v)))), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: scrape,
+    disabled: loading,
+    style: {
+      alignSelf: 'flex-end'
+    }
+  }, loading ? '⏳ Scraping...' : '▶ Run Scraper')), feats.dailyRefresh && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12,
+      fontSize: 11,
+      color: 'var(--text-dim)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "webhook-dot"
+  }), "Auto-refresh daily at 06:00 UTC — Last run: Today 06:00")), /*#__PURE__*/React.createElement(LeadsTable, {
+    leads: leads.filter(l => !hasStatusTag(l)),
+    onEdit: onSave,
+    onDelete: onDelete,
+    onBulkAssign: onBulkAssign,
+    showAssigned: true,
+    showCampaign: true,
+    showOrigin: true,
+    config: config,
+    feats: feats,
+    campColorMap: campColorMap,
+    filename: "scraper_queue",
+    printTitle: "Scraper Queue"
+  }));
+}
+
 // ─── CAMPAIGN VIEW ────────────────────────────────────────
 function CampaignView({
   campaign,
@@ -4655,7 +4806,7 @@ function App() {
   }, {
     id: 'scraper',
     icon: '◎',
-    label: 'Influencer Discovery'
+    label: 'Scraper'
   }, {
     id: 'history',
     icon: '◷',
@@ -4731,7 +4882,7 @@ function App() {
       leads: vLeads,
       config: config
     });
-    if (tab === 'scraper') return /*#__PURE__*/React.createElement(DiscoveryView, {
+    if (tab === 'scraper') return /*#__PURE__*/React.createElement(ScraperView, {
       leads: vLeads,
       onSave: saveL,
       onDelete: delL,
@@ -4848,7 +4999,7 @@ function App() {
   }
   const PAGE_TITLE = {
     home: 'Home',
-    scraper: 'Influencer Discovery',
+    scraper: 'Scraper',
     history: 'History',
     'prev-scraped': 'Previously Scraped Leads',
     'lead-mgmt': 'Lead Management',
