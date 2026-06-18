@@ -11,7 +11,7 @@
       "source": "/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=3600" },
-        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://corsproxy.io; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://docs.google.com https://corsproxy.io https://*.n8n.cloud https://*.make.com https://hook.eu1.make.com https://hook.eu2.make.com https://hook.us1.make.com https://hook.us2.make.com https://api.apify.com; img-src 'self' data: https://yt3.ggpht.com https://yt3.googleusercontent.com https://*.ytimg.com;" }
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://corsproxy.io; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://docs.google.com https://corsproxy.io https://*.n8n.cloud https://*.app.n8n.cloud https://*.make.com https://hook.eu1.make.com https://hook.eu2.make.com https://hook.us1.make.com https://hook.us2.make.com https://api.apify.com; img-src 'self' data: https://yt3.ggpht.com https://yt3.googleusercontent.com https://*.ytimg.com;" }
       ]
     }
   ]
