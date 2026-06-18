@@ -451,30 +451,6 @@ function LeadModal({
     className: "btn btn-outline btn-xs",
     onClick: addEmail
   }, "+ Add")))), /*#__PURE__*/React.createElement("div", {
-    className: "form-group"
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "form-label"
-  }, "Tags / Status"), /*#__PURE__*/React.createElement("div", {
-    className: "tag-grid"
-  }, [...STATUSES, 'HT'].map(t => {
-    const tags = form.tags || [];
-    const on = tags.includes(t);
-    const c = TAG_COLORS[t] || {
-      bg: '#F0F2F5',
-      color: '#68737D'
-    };
-    return /*#__PURE__*/React.createElement("button", {
-      key: t,
-      type: "button",
-      className: `tag-btn${on ? ' on' : ''}`,
-      style: on ? {
-        background: c.bg,
-        color: c.color,
-        borderColor: c.color
-      } : {},
-      onClick: () => toggleTag(t)
-    }, t === 'HT' ? '⚡ HT' : t);
-  }))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: '1fr 1fr',
@@ -648,6 +624,13 @@ function ContextMenu({
     onEdit(u);
     onClose();
   }
+  function openAll() {
+    const targets = isBulk ? (allLeads || []).filter(l => sel.includes(l.id)) : [live];
+    const urls = targets.map(l => l.url).filter(Boolean);
+    urls.forEach(u => window.open(u, '_blank', 'noopener'));
+    onClose();
+  }
+  const openCount = isBulk ? (allLeads || []).filter(l => sel.includes(l.id) && l.url).length : live.url ? 1 : 0;
   return /*#__PURE__*/React.createElement("div", {
     className: "ctx-menu",
     ref: ref,
@@ -670,7 +653,10 @@ function ContextMenu({
       onOpenEdit(live);
       onClose();
     }
-  }, /*#__PURE__*/React.createElement("span", null, "✏"), " Edit Lead"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, "✏"), " Edit Lead"), openCount > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "ctx-item",
+    onClick: openAll
+  }, /*#__PURE__*/React.createElement("span", null, "🔗"), " ", isBulk ? `Open ${openCount} profile${openCount !== 1 ? 's' : ''} in new tabs` : 'Open profile in new tab'), /*#__PURE__*/React.createElement("div", {
     className: "ctx-sep"
   }), /*#__PURE__*/React.createElement("div", {
     className: "ctx-section-label"
