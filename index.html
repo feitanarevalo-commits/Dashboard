@@ -3457,7 +3457,6 @@ function ScraperView({
   config
 }) {
   const [platform, setPlatform] = useState('All');
-  const [niche, setNiche] = useState('');
   const [minF, setMinF] = useState('10K');
   const [loading, setLoading] = useState(false);
   const feats = config.features || {};
@@ -3471,7 +3470,7 @@ function ScraperView({
     }
     const payload = {
       platform,
-      keyword: niche.trim(),
+      keyword: '',
       interest: '',
       minFollowers: parseFollowers(minF),
       maxFollowers: null,
@@ -3533,21 +3532,6 @@ function ScraperView({
   }, "All"), PLATFORMS.map(p => /*#__PURE__*/React.createElement("option", {
     key: p
   }, p)))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 4
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "form-label"
-  }, "Niche / Keyword"), /*#__PURE__*/React.createElement("input", {
-    value: niche,
-    onChange: e => setNiche(e.target.value),
-    placeholder: "e.g. Finance, Fitness...",
-    style: {
-      width: 160
-    }
-  })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
