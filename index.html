@@ -3564,7 +3564,10 @@ function ScraperView({
       const mapped = items.map((it, i) => mapDiscoveryResult(it, platform === 'All' ? null : platform, i));
       if (onResults) onResults(mapped);
       addToast(`✓ ${mapped.length} lead(s) scraped`, 'success');
-    }).catch(e => addToast(`Scrape failed: ${e.message}`, 'error')).finally(() => setLoading(false));
+    }).catch(e => {
+      const cors = (e && e.message || '').toLowerCase().includes('failed to fetch');
+      addToast(cors ? 'Scrape blocked (CORS): set the n8n Webhook "Allowed Origins" to * and add Access-Control-Allow-Origin in Respond to Webhook' : `Scrape failed: ${e.message}`, 'error');
+    }).finally(() => setLoading(false));
   }
   const runBtn = /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary btn-sm",
