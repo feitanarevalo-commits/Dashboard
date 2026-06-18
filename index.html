@@ -88,17 +88,23 @@ function mapDiscoveryResult(item, fallbackPlatform, i) {
     }
     return '';
   };
-  const name = get('username', 'handle', 'ownerUsername', 'name', 'channelName', 'title', 'fullName');
-  const url = get('url', 'profileUrl', 'channelUrl', 'inputUrl', 'link', 'webUrl');
-  const followers = get('followersCount', 'followers', 'subscriberCount', 'subscribers', 'fansCount', 'fans');
+  const name = get('channel_name', 'channelName', 'username', 'handle', 'ownerUsername', 'name', 'fullName', 'title');
+  const url = get('url', 'channel_url', 'channelUrl', 'profile_url', 'profileUrl', 'webUrl', 'link', 'video_url', 'videoUrl', 'inputUrl');
+  const followers = get('followersCount', 'followers', 'subscriberCount', 'subscribers', 'subscribers_count', 'fansCount', 'fans');
   const niche = get('niche', 'category', 'businessCategoryName', 'categoryName');
   const email = get('email', 'publicEmail', 'businessEmail');
   const thumb = get('thumbnail', 'thumbnailUrl', 'avatar', 'profilePic', 'profilePicUrl', 'profilePicUrlHD', 'displayUrl', 'image', 'picture', 'imageUrl');
+  // Determine platform: explicit field → infer from URL → searched tab → fallback.
+  let platform = item.platform || fallbackPlatform || '';
+  if (!platform || platform === 'All') {
+    const u = String(url).toLowerCase();
+    platform = u.includes('youtube') || u.includes('youtu.be') ? 'YouTube' : u.includes('tiktok') ? 'TikTok' : u.includes('instagram') ? 'Instagram' : fallbackPlatform || 'YouTube';
+  }
   return {
     id: Date.now() + Math.floor(Math.random() * 1e6) + i,
     channelName: String(name || 'influencer_' + (i + 1)),
     url: String(url || ''),
-    platform: item.platform || fallbackPlatform || 'Instagram',
+    platform: platform,
     niche: String(niche || ''),
     followers: typeof followers === 'number' ? fmtFollowers(followers) : String(followers || ''),
     emails: email ? [String(email)] : [],
