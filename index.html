@@ -1204,9 +1204,46 @@ function LeadsTable({
     setSel(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
   }
   const lastIdx = useRef(null);
+  // Drag-to-select (marquee): press on a row/empty area and sweep across rows.
+  const dragging = useRef(false);
+  const dragStart = useRef(null);
+  const didDrag = useRef(false);
+  const INTERACTIVE = 'input,select,button,a,.inline-picker,.channel-name-link';
+  useEffect(() => {
+    function up() {
+      dragging.current = false;
+    }
+    document.addEventListener('mouseup', up);
+    return () => document.removeEventListener('mouseup', up);
+  }, []);
+  function rowMouseDown(e, idx) {
+    if (e.button !== 0 || e.target.closest(INTERACTIVE)) return;
+    dragging.current = true;
+    didDrag.current = false;
+    dragStart.current = idx;
+  }
+  function containerMouseDown(e) {
+    if (e.button !== 0) return;
+    if (e.target.closest('tr') || e.target.closest('thead') || e.target.closest(INTERACTIVE)) return;
+    dragging.current = true;
+    didDrag.current = false;
+    dragStart.current = null;
+  }
+  function rowMouseEnter(idx) {
+    if (!dragging.current) return;
+    if (dragStart.current == null) dragStart.current = idx;
+    if (idx !== dragStart.current) didDrag.current = true;
+    const a = Math.min(dragStart.current, idx),
+      b = Math.max(dragStart.current, idx);
+    setSel(paginated.slice(a, b + 1).map(l => l.id));
+  }
   function rowClick(e, lead, idx) {
     // Ignore clicks on interactive cell content (links, inputs, pickers, buttons).
-    if (e.target.closest('input,select,button,a,.inline-picker,.channel-name-link')) return;
+    if (e.target.closest(INTERACTIVE)) return;
+    if (didDrag.current) {
+      didDrag.current = false;
+      return;
+    } // was a drag-select, not a click
     if (e.shiftKey && lastIdx.current != null) {
       const a = Math.min(lastIdx.current, idx),
         b = Math.max(lastIdx.current, idx);
@@ -1430,7 +1467,8 @@ function LeadsTable({
   }, "✕ Clear")), /*#__PURE__*/React.createElement("div", {
     className: "print-header"
   }, printTitle, " — ", filtered.length, " leads — ", new Date().toLocaleDateString()), /*#__PURE__*/React.createElement("div", {
-    className: "table-container"
+    className: "table-container",
+    onMouseDown: containerMouseDown
   }, filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "empty"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1493,6 +1531,8 @@ function LeadsTable({
     className: `${getRowClass(lead)}${sel.includes(lead.id) ? ' row-selected' : ''}`,
     onContextMenu: e => handleCtx(e, lead),
     onClick: e => rowClick(e, lead, idx),
+    onMouseDown: e => rowMouseDown(e, idx),
+    onMouseEnter: () => rowMouseEnter(idx),
     style: {
       cursor: 'pointer'
     }
