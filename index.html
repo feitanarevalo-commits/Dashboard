@@ -2152,10 +2152,13 @@ function RepDashboard({
   function importToClose(r, ls) {
     if (onImportClose) onImportClose(r, ls);
   }
-  const myLeads = leads.filter(l => l.assignedTo === rep && !l.tags.includes('Contacted'));
+  // All leads assigned to this rep (incl. Contacted), so the rep can see and
+  // filter their full book of business — Contacted ones no longer disappear.
+  const myLeads = leads.filter(l => l.assignedTo === rep);
   const campColorMap = {};
   (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
   const total = myLeads.length;
+  const active = myLeads.filter(l => !l.tags.includes('Contacted')).length;
   const potential = myLeads.filter(l => l.tags.includes('Potential')).length;
   const contacted = myLeads.filter(l => l.tags.includes('Contacted')).length;
   const ht = myLeads.filter(l => l.tags.includes('HT')).length;
@@ -2185,7 +2188,7 @@ function RepDashboard({
       fontSize: 11,
       color: 'var(--text-dim)'
     }
-  }, total, " active leads")), /*#__PURE__*/React.createElement("div", {
+  }, total, " lead", total !== 1 ? 's' : '', " · ", active, " active")), /*#__PURE__*/React.createElement("div", {
     style: {
       marginLeft: 'auto',
       display: 'flex',
@@ -5656,8 +5659,8 @@ function App() {
   }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
   }, "Sales Reps"), (config.salesReps || []).map(r => {
-    // Active leads (matches the rep dashboard): assigned & not yet Contacted.
-    const cnt = vLeads.filter(l => l.assignedTo === r && !l.tags.includes('Contacted')).length;
+    // Total leads assigned to the rep (matches their dashboard's Total).
+    const cnt = vLeads.filter(l => l.assignedTo === r).length;
     return /*#__PURE__*/React.createElement("div", {
       key: r,
       className: `nav-item ${tab === 'rep-home' && activeRep === r ? 'active' : ''}`,
