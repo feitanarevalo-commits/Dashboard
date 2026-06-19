@@ -1116,6 +1116,60 @@ function ColHeader({
   }, "✕ Clear filter"))));
 }
 
+// ─── INLINE EMAIL (paste/edit email directly in the table) ──
+function InlineEmail({
+  emails,
+  onSave
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState('');
+  const list = Array.isArray(emails) ? emails : [];
+  const rest = list.slice(1);
+  function start(e) {
+    e.stopPropagation();
+    setVal(list[0] || '');
+    setEditing(true);
+  }
+  function commit() {
+    const v = val.trim();
+    onSave(v ? [v, ...rest] : rest);
+    setEditing(false);
+  }
+  const stop = e => e.stopPropagation();
+  if (editing) {
+    return /*#__PURE__*/React.createElement("input", {
+      className: "inline-email-input",
+      autoFocus: true,
+      value: val,
+      onClick: stop,
+      onMouseDown: stop,
+      onChange: e => setVal(e.target.value),
+      onBlur: commit,
+      onKeyDown: e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commit();
+        } else if (e.key === 'Escape') {
+          setEditing(false);
+        }
+      },
+      placeholder: "paste email…"
+    });
+  }
+  return /*#__PURE__*/React.createElement("span", {
+    className: "inline-picker",
+    onMouseDown: stop,
+    onClick: start,
+    title: "Click to add / edit email"
+  }, list[0] ? /*#__PURE__*/React.createElement("span", {
+    className: "inline-email"
+  }, list[0]) : /*#__PURE__*/React.createElement("span", {
+    className: "inline-email-empty"
+  }, "+ email"), list.length > 1 && /*#__PURE__*/React.createElement("span", {
+    className: "more-emails"
+  }, "+", list.length - 1));
+}
+
 // ─── LEADS TABLE ──────────────────────────────────────────
 function LeadsTable({
   leads,
@@ -1613,13 +1667,12 @@ function LeadsTable({
     className: "followers-val"
   }, lead.followers)), cols.emails && /*#__PURE__*/React.createElement("td", {
     className: "email-cell"
-  }, lead.emails[0] || /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: 'var(--text-light)'
-    }
-  }, "—"), lead.emails.length > 1 && /*#__PURE__*/React.createElement("span", {
-    className: "more-emails"
-  }, "+", lead.emails.length - 1)), cols.tags && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(InlinePicker, {
+  }, /*#__PURE__*/React.createElement(InlineEmail, {
+    emails: lead.emails || [],
+    onSave: arr => patchLead(lead.id, {
+      emails: arr
+    })
+  })), cols.tags && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(InlinePicker, {
     type: "tag",
     selected: lead.tags,
     options: [...STATUSES, 'HT'],
