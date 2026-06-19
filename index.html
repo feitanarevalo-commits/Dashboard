@@ -573,11 +573,23 @@ function ContextMenu({
     left: x
   };
   useEffect(() => {
-    if (ref.current) {
-      const r = ref.current.getBoundingClientRect();
-      if (r.right > window.innerWidth) ref.current.style.left = x - r.width + 'px';
-      if (r.bottom > window.innerHeight) ref.current.style.top = y - r.height + 'px';
-    }
+    const el = ref.current;
+    if (!el) return;
+    const m = 8,
+      vw = window.innerWidth,
+      vh = window.innerHeight;
+    const w = el.offsetWidth,
+      fullH = el.scrollHeight;
+    // Clamp horizontally, choose a top that keeps the menu on-screen, then cap
+    // its height to the space below that top so it scrolls instead of overflowing.
+    let left = x,
+      top = y;
+    if (left + w > vw - m) left = Math.max(m, vw - w - m);
+    const h = Math.min(fullH, vh - 2 * m);
+    if (top + h > vh - m) top = Math.max(m, vh - h - m);
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    el.style.maxHeight = vh - top - m + 'px';
   }, []);
   function applyToTargets(patch) {
     if (isBulk) {
