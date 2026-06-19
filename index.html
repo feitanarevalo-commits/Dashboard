@@ -2164,13 +2164,15 @@ function RepDashboard({
   function importToClose(r, ls) {
     if (onImportClose) onImportClose(r, ls);
   }
-  // All leads assigned to this rep (incl. Contacted), so the rep can see and
-  // filter their full book of business — Contacted ones no longer disappear.
+  // myLeads = everything assigned to the rep (drives the stat cards & counts).
+  // activeLeads = the rep's work queue shown in the table; once a lead is tagged
+  // Contacted it leaves this queue and appears under the global Contacted tab.
   const myLeads = leads.filter(l => l.assignedTo === rep);
+  const activeLeads = myLeads.filter(l => !l.tags.includes('Contacted'));
   const campColorMap = {};
   (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
   const total = myLeads.length;
-  const active = myLeads.filter(l => !l.tags.includes('Contacted')).length;
+  const active = activeLeads.length;
   const potential = myLeads.filter(l => l.tags.includes('Potential')).length;
   const contacted = myLeads.filter(l => l.tags.includes('Contacted')).length;
   const ht = myLeads.filter(l => l.tags.includes('HT')).length;
@@ -2268,7 +2270,7 @@ function RepDashboard({
   }, "High Ticket"), /*#__PURE__*/React.createElement("div", {
     className: "stat-value"
   }, ht))), /*#__PURE__*/React.createElement(LeadsTable, {
-    leads: myLeads,
+    leads: activeLeads,
     onEdit: onEdit,
     onDelete: onDelete,
     onBulkAssign: onBulkAssign,
