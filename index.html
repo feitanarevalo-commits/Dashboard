@@ -5656,7 +5656,8 @@ function App() {
   }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
   }, "Sales Reps"), (config.salesReps || []).map(r => {
-    const cnt = vLeads.filter(l => l.assignedTo === r).length;
+    // Active leads (matches the rep dashboard): assigned & not yet Contacted.
+    const cnt = vLeads.filter(l => l.assignedTo === r && !l.tags.includes('Contacted')).length;
     return /*#__PURE__*/React.createElement("div", {
       key: r,
       className: `nav-item ${tab === 'rep-home' && activeRep === r ? 'active' : ''}`,
