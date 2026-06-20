@@ -1197,6 +1197,8 @@ function LeadsTable({
   toolbarAfterSearch = null,
   searchValue = null,
   onSearchChange = null,
+  searchFilters = true,
+  searchPlaceholder = 'Search channels, niches, platforms...',
   config,
   feats,
   campColorMap,
@@ -1231,7 +1233,7 @@ function LeadsTable({
 
   // Apply column filters on top of search/status/rep filters
   const filtered = leads.filter(l => {
-    const s = search.toLowerCase();
+    const s = (searchFilters ? search : '').toLowerCase();
     if (s && !l.channelName.toLowerCase().includes(s) && !l.niche.toLowerCase().includes(s) && !l.platform.toLowerCase().includes(s)) return false;
     if (filterStatus && !l.tags.includes(filterStatus)) return false;
     if (filterRep && l.assignedTo !== filterRep) return false;
@@ -1437,7 +1439,7 @@ function LeadsTable({
   }), /*#__PURE__*/React.createElement("path", {
     d: "m21 21-4.35-4.35"
   })), /*#__PURE__*/React.createElement("input", {
-    placeholder: "Search channels, niches, platforms...",
+    placeholder: searchPlaceholder,
     value: search,
     onChange: e => setSearch(e.target.value)
   })), toolbarAfterSearch, /*#__PURE__*/React.createElement("select", {
@@ -3721,6 +3723,8 @@ function ScraperView({
     toolbarAfterSearch: scraperFilters,
     searchValue: keyword,
     onSearchChange: setKeyword,
+    searchFilters: false,
+    searchPlaceholder: "Search query (sent to scraper)…",
     config: config,
     feats: feats,
     campColorMap: campColorMap,
