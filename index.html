@@ -608,7 +608,8 @@ function ContextMenu({
     }
   }
   function toggleTag(t) {
-    const nextTags = tags => tags.includes(t) ? tags.filter(x => x !== t) : [...tags, t];
+    // Single-select: choosing a tag replaces any existing one (toggles off if same).
+    const nextTags = tags => tags.includes(t) ? [] : [t];
     if (isBulk) {
       applyToTargets({
         tags: nextTags
@@ -816,7 +817,8 @@ function InlinePicker({
   selected,
   options,
   campColorMap,
-  onChange
+  onChange,
+  single = false
 }) {
   const [open, setOpen] = useState(false);
   const ref = React.useRef(null);
@@ -828,8 +830,10 @@ function InlinePicker({
     return () => document.removeEventListener('mousedown', outside);
   }, []);
   function toggle(val) {
-    const next = selected.includes(val) ? selected.filter(x => x !== val) : [...selected, val];
+    // single = only one selection allowed (replace); else multi-select toggle.
+    const next = single ? selected.includes(val) ? [] : [val] : selected.includes(val) ? selected.filter(x => x !== val) : [...selected, val];
     onChange(next);
+    if (single) setOpen(false);
   }
   return /*#__PURE__*/React.createElement("div", {
     className: "inline-picker",
@@ -1366,9 +1370,9 @@ function LeadsTable({
         u.assignedTo = bulkRep;
         u.dateAssigned = today;
       }
-      bulkTags.forEach(t => {
-        if (!u.tags.includes(t)) u.tags = [...u.tags, t];
-      });
+      if (bulkTags.length) {
+        u.tags = [...bulkTags];
+      } // single-select: replace tag
       bulkCamps.forEach(c => {
         if (!u.campaigns.includes(c)) u.campaigns = [...u.campaigns, c];
       });
@@ -1380,7 +1384,7 @@ function LeadsTable({
     setBulkCamps([]);
   }
   function toggleBulkTag(t) {
-    setBulkTags(ts => ts.includes(t) ? ts.filter(x => x !== t) : [...ts, t]);
+    setBulkTags(ts => ts.includes(t) ? [] : [t]);
   }
   function toggleBulkCamp(c) {
     setBulkCamps(cs => cs.includes(c) ? cs.filter(x => x !== c) : [...cs, c]);
@@ -1693,7 +1697,8 @@ function LeadsTable({
     campColorMap: campColorMap,
     onChange: tags => patchLead(lead.id, {
       tags
-    })
+    }),
+    single: true
   })), showOrigin && /*#__PURE__*/React.createElement("td", null, leadOrigin(lead) === 'Fresh' ? /*#__PURE__*/React.createElement("span", {
     className: "origin-badge fresh"
   }, "● Fresh") : /*#__PURE__*/React.createElement("span", {
@@ -2968,7 +2973,7 @@ function ProfilePanel({
   function toggleTag(t) {
     setForm(f => ({
       ...f,
-      tags: f.tags.includes(t) ? f.tags.filter(x => x !== t) : [...f.tags, t]
+      tags: f.tags.includes(t) ? [] : [t]
     }));
   }
   function toggleCamp(c) {
@@ -3883,10 +3888,11 @@ function LeadMgmtView({
     }
   }, "Unassigned (", unassigned.length, ")")), /*#__PURE__*/React.createElement(LeadsTable, {
     leads: display,
-    onEdit: l => {},
+    onEdit: onSave,
     onBulkAssign: onBulkAssign,
     showAssigned: true,
     showCampaign: true,
+    showOrigin: true,
     config: config,
     feats: feats,
     campColorMap: campColorMap,
@@ -5677,8 +5683,8 @@ function App() {
   }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
   }, "Sales Reps"), (config.salesReps || []).map(r => {
-    // Total leads assigned to the rep (matches their dashboard's Total).
-    const cnt = vLeads.filter(l => l.assignedTo === r).length;
+    // Active (non-contacted) leads — the rep's remaining work queue.
+    const cnt = vLeads.filter(l => l.assignedTo === r && !l.tags.includes('Contacted')).length;
     return /*#__PURE__*/React.createElement("div", {
       key: r,
       className: `nav-item ${tab === 'rep-home' && activeRep === r ? 'active' : ''}`,
