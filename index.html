@@ -2527,8 +2527,14 @@ function GoogleImportView({
     key: 'tags',
     label: 'Tags / Status'
   }, {
+    key: 'campaigns',
+    label: 'Campaign / Services'
+  }, {
     key: 'assignedTo',
-    label: 'Assigned To'
+    label: 'Assigned To / Scraper'
+  }, {
+    key: 'dateAssigned',
+    label: 'Date (of Dump)'
   }];
   function extractSheetId(raw) {
     const m = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
@@ -2616,13 +2622,15 @@ function GoogleImportView({
   function autoMap(headers) {
     const ALIASES = {
       channelName: ['channel name', 'channel', 'name', 'creator', 'creator name', 'handle'],
-      url: ['url', 'link', 'channel url', 'profile url', 'youtube url', 'youtube link'],
+      url: ['url', 'channel url', 'profile url', 'youtube url', 'youtube link'],
       platform: ['platform', 'social', 'network'],
       niche: ['niche', 'category', 'topic', 'industry', 'vertical'],
       followers: ['followers', 'subscribers', 'subs', 'audience', 'reach', 'follower count'],
-      emails: ['email', 'emails', 'email address', 'contact email', 'contact'],
+      emails: ['email', 'emails', 'email address', 'contact email'],
       tags: ['tags', 'tag', 'status', 'label', 'stage'],
-      assignedTo: ['assigned to', 'assigned', 'rep', 'sales rep', 'owner', 'agent']
+      campaigns: ['services', 'service', 'campaign', 'campaigns'],
+      assignedTo: ['assigned to', 'assigned', 'sales rep', 'lg scraper', 'scraper', 'rep', 'owner', 'agent'],
+      dateAssigned: ['date of dump', 'date assigned', 'dump date', 'date']
     };
     const r = {};
     headers.forEach((h, i) => {
@@ -2693,8 +2701,10 @@ function GoogleImportView({
     const imported = preview.rows.filter(r => r.some(c => c.trim())).map((row, i) => {
       const emails = get(row, 'emails').split(/[;,]/).map(e => e.trim()).filter(Boolean);
       const tags = get(row, 'tags').split(/[;,]/).map(t => t.trim()).filter(Boolean);
+      const campaigns = get(row, 'campaigns').split(/[;,]/).map(c => c.trim()).filter(Boolean);
       const name = get(row, 'channelName') || `Row ${i + 1}`;
       const rep = get(row, 'assignedTo') || null;
+      const dateRaw = get(row, 'dateAssigned');
       return {
         id: Date.now() + i,
         channelName: name,
@@ -2704,9 +2714,9 @@ function GoogleImportView({
         followers: get(row, 'followers'),
         emails,
         tags,
-        campaigns: [],
+        campaigns,
         assignedTo: rep,
-        dateAssigned: rep ? today : null,
+        dateAssigned: dateRaw || (rep ? today : null),
         lastContactDate: null,
         channels: [name]
       };
@@ -5113,7 +5123,7 @@ function App() {
       logH('📊', `Google Sheets import: ${fresh.length} leads added`);
       return [...existing, ...fresh];
     });
-    setTab('scraper');
+    setTab('lead-mgmt');
   }
   function addDiscovered(items) {
     const arr = Array.isArray(items) ? items : [];
