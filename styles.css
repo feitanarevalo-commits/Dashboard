@@ -597,3 +597,64 @@ tbody tr { user-select: none; }
 .inline-email-empty { font-size: 11px; color: var(--text-light); border: 1px dashed var(--border); border-radius: 4px; padding: 1px 6px; cursor: text; }
 .inline-email-empty:hover { border-color: var(--accent); color: var(--accent); }
 .inline-email-input { font-size: 11px; padding: 3px 6px; border: 1px solid var(--accent); border-radius: 4px; width: 170px; max-width: 100%; outline: none; box-shadow: 0 0 0 3px var(--accent-light); }
+
+/* ═══════════════════════════════════════════════════════════
+   SLACK-STYLE POLISH — smooth motion, soft panels, nice hovers
+   ═══════════════════════════════════════════════════════════ */
+:root { --ease: cubic-bezier(.4,0,.2,1); --ease-spring: cubic-bezier(.34,1.56,.64,1); }
+
+/* Buttons: subtle lift + press feedback */
+.btn { transition: transform .12s var(--ease), box-shadow .15s var(--ease), background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease); }
+.btn:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(17,24,39,.10); }
+.btn:active { transform: translateY(0) scale(.98); box-shadow: none; }
+.btn-ghost:hover { box-shadow: none; }
+.btn-icon, .topbar-icon-btn { transition: transform .12s var(--ease), background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease); }
+.btn-icon:hover, .topbar-icon-btn:hover { transform: translateY(-1px); }
+
+/* Sidebar nav: smooth hover + animated active accent bar */
+.nav-item { position: relative; transition: background .15s var(--ease), color .15s var(--ease), padding-left .15s var(--ease); }
+.nav-item:hover { background: var(--sidebar-hover); padding-left: 15px; }
+.nav-item.active { background: var(--sidebar-active); color: var(--sidebar-text-active); font-weight: 600; }
+.nav-item.active::before { content:""; position:absolute; left:-8px; top:6px; bottom:6px; width:3px; border-radius:0 3px 3px 0; background: var(--accent); animation: navBar .2s var(--ease); }
+@keyframes navBar { from { transform: scaleY(0); opacity:0; } to { transform: scaleY(1); opacity:1; } }
+
+/* Cards & stat cards: softer shadow + gentle hover elevation */
+.card, .stat-card { transition: transform .16s var(--ease), box-shadow .16s var(--ease), border-color .16s var(--ease); box-shadow: 0 1px 2px rgba(17,24,39,.04), 0 4px 14px rgba(17,24,39,.05); }
+.card:hover, .stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 22px rgba(17,24,39,.10); }
+.kpi-table tbody tr, .leads-table tbody tr, table tbody tr { transition: background .12s var(--ease); }
+
+/* Inputs & selects: smooth focus ring */
+input, select, textarea { transition: border-color .15s var(--ease), box-shadow .15s var(--ease), background .15s var(--ease); }
+input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px var(--accent-light); }
+
+/* Tag pills / badges: tiny pop on hover */
+.tag, .nav-badge, .platform-badge, .origin-badge { transition: transform .12s var(--ease), filter .12s var(--ease); }
+.tag-btn { transition: transform .12s var(--ease), background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease); }
+.tag-btn:hover { transform: translateY(-1px); }
+
+/* Modal: fade overlay + spring pop-in */
+.modal-overlay { animation: overlayFade .16s var(--ease); }
+.modal { animation: modalPop .22s var(--ease-spring); }
+@keyframes overlayFade { from { opacity:0; } to { opacity:1; } }
+@keyframes modalPop { from { opacity:0; transform: translateY(8px) scale(.97); } to { opacity:1; transform: translateY(0) scale(1); } }
+
+/* Drawer & profile panel: smoother slide + overlay fade */
+.drawer-overlay { animation: overlayFade .16s var(--ease); }
+.drawer { animation: slideInRight .24s var(--ease); }
+
+/* Toasts: slide up + fade, gentle */
+.toast { animation: toastIn .26s var(--ease-spring); }
+@keyframes toastIn { from { opacity:0; transform: translateY(14px) scale(.98); } to { opacity:1; transform: translateY(0) scale(1); } }
+
+/* Command palette & context menu: soften */
+.cmdk { animation: modalPop .18s var(--ease-spring); }
+.cmdk-item, .ctx-item, .col-filter-item { transition: background .12s var(--ease); }
+
+/* Page content fade-in on view switch */
+.home-content, .table-container, .discovery { animation: contentFade .22s var(--ease); }
+@keyframes contentFade { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform: translateY(0); } }
+
+/* Respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
