@@ -704,3 +704,14 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px var(--accent-l
   from { opacity:0; transform: perspective(1200px) rotateX(14deg) translateY(-10px) scale(.97); }
   to   { opacity:1; transform: perspective(1200px) rotateX(0) translateY(0) scale(1); }
 }
+
+/* ── DARK MODE: catch-all for inputs without an explicit type attribute ── */
+html[data-dark] input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=file]),
+html[data-dark] textarea,
+html[data-dark] select {
+  background: var(--card);
+  color: var(--text);
+  border-color: var(--border);
+}
+html[data-dark] input::placeholder,
+html[data-dark] textarea::placeholder { color: var(--text-light); }
