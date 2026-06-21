@@ -45,6 +45,9 @@ function hasStatusTag(lead) {
 // Imported= has been contacted / recycled / brought in from a sheet
 //           or external import (i.e. previously worked).
 function leadOrigin(lead) {
+  // Explicit flag (e.g. the sheet's IMPORTED Yes/No column) always wins.
+  if (lead.imported === true) return 'Imported';
+  if (lead.imported === false) return 'Fresh';
   const t = lead.tags || [];
   const worked = !!lead.lastContactDate || t.includes('Contacted') || t.includes('For Recycle') || t.includes('Existing Leads') || lead.source === 'import' || lead.recycled === true;
   return worked ? 'Imported' : 'Fresh';
@@ -2535,6 +2538,9 @@ function GoogleImportView({
   }, {
     key: 'dateAssigned',
     label: 'Date (of Dump)'
+  }, {
+    key: 'imported',
+    label: 'Imported (Yes/No)'
   }];
   function extractSheetId(raw) {
     const m = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
@@ -2630,7 +2636,8 @@ function GoogleImportView({
       tags: ['tags', 'tag', 'status', 'label', 'stage'],
       campaigns: ['services', 'service', 'campaign', 'campaigns'],
       assignedTo: ['assigned to', 'assigned', 'sales rep', 'lg scraper', 'scraper', 'rep', 'owner', 'agent'],
-      dateAssigned: ['date of dump', 'date assigned', 'dump date', 'date']
+      dateAssigned: ['date of dump', 'date assigned', 'dump date', 'date'],
+      imported: ['imported', 'is imported', 'import status']
     };
     const r = {};
     headers.forEach((h, i) => {
@@ -2705,6 +2712,8 @@ function GoogleImportView({
       const name = get(row, 'channelName') || `Row ${i + 1}`;
       const rep = get(row, 'assignedTo') || null;
       const dateRaw = get(row, 'dateAssigned');
+      const impRaw = get(row, 'imported').trim().toLowerCase();
+      const imported = ['yes', 'y', 'true', '1'].includes(impRaw) ? true : ['no', 'n', 'false', '0'].includes(impRaw) ? false : undefined;
       return {
         id: Date.now() + i,
         channelName: name,
@@ -2718,7 +2727,8 @@ function GoogleImportView({
         assignedTo: rep,
         dateAssigned: dateRaw || (rep ? today : null),
         lastContactDate: null,
-        channels: [name]
+        channels: [name],
+        imported
       };
     });
     onImport(imported);
