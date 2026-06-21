@@ -658,3 +658,49 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px var(--accent-l
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   3D PANEL ANIMATIONS — perspective entrances + depth on hover
+   ═══════════════════════════════════════════════════════════ */
+
+/* Login card: 3D tilt-in */
+.login-card { animation: panelIn3d .5s var(--ease) backwards; transform-style: preserve-3d; }
+@keyframes panelIn3d {
+  from { opacity:0; transform: perspective(1200px) rotateX(12deg) translateY(26px) scale(.95); }
+  to   { opacity:1; transform: perspective(1200px) rotateX(0deg) translateY(0) scale(1); }
+}
+/* Login profile tiles: 3D pop on hover + soft stagger-in */
+.login-user { transition: transform .18s var(--ease), box-shadow .18s var(--ease), border-color .14s var(--ease), background .14s var(--ease); transform-style: preserve-3d; }
+.login-user:hover { transform: perspective(600px) translateY(-3px) rotateX(5deg) scale(1.02); box-shadow: 0 14px 28px rgba(17,24,39,.20); }
+
+/* Stat cards: 3D entrance + depth hover */
+.stat-card { animation: cardIn3d .45s var(--ease) backwards; }
+@keyframes cardIn3d {
+  from { opacity:0; transform: perspective(1000px) rotateX(10deg) translateY(16px); }
+  to   { opacity:1; transform: perspective(1000px) rotateX(0) translateY(0); }
+}
+.stat-card:hover { transform: perspective(900px) translateY(-3px) rotateX(3.5deg) scale(1.012); box-shadow: 0 16px 34px rgba(17,24,39,.14); }
+
+/* Panels/cards: subtle 3D tilt-lift on hover */
+.card:hover { transform: perspective(1100px) translateY(-3px) rotateX(2.2deg); box-shadow: 0 16px 34px rgba(17,24,39,.13); }
+
+/* Modal: 3D pop from top */
+.modal { animation: modalPop3d .28s var(--ease-spring); transform-origin: center top; }
+@keyframes modalPop3d {
+  from { opacity:0; transform: perspective(1300px) rotateX(12deg) translateY(12px) scale(.95); }
+  to   { opacity:1; transform: perspective(1300px) rotateX(0) translateY(0) scale(1); }
+}
+
+/* Drawer & profile panel: 3D swing-in from the right edge */
+.drawer, .profile-panel { animation: panelSwing3d .3s var(--ease); transform-origin: right center; }
+@keyframes panelSwing3d {
+  from { opacity:.35; transform: perspective(1500px) rotateY(-14deg) translateX(46px); }
+  to   { opacity:1; transform: perspective(1500px) rotateY(0) translateX(0); }
+}
+
+/* Command palette: 3D drop-in */
+.cmdk { animation: cmdkDrop3d .22s var(--ease-spring); transform-origin: center top; }
+@keyframes cmdkDrop3d {
+  from { opacity:0; transform: perspective(1200px) rotateX(14deg) translateY(-10px) scale(.97); }
+  to   { opacity:1; transform: perspective(1200px) rotateX(0) translateY(0) scale(1); }
+}
