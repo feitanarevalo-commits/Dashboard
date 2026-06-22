@@ -39,6 +39,43 @@ function avatarLetter(name) {
 function hasStatusTag(lead) {
   return STATUS_TAGS.some(t => lead.tags.includes(t));
 }
+// Normalize a raw status/tag string from a sheet into a canonical STATUS_TAGS
+// value, so tag-based routing (Potential → rep, Contacted → Contacted tab, …)
+// works no matter how the sheet spells or cases it. Unknown tags pass through.
+function canonTag(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const k = s.toLowerCase().replace(/[^a-z]/g, '');
+  const MAP = {
+    potential: 'Potential',
+    potentials: 'Potential',
+    potentiallead: 'Potential',
+    potentialleads: 'Potential',
+    contacted: 'Contacted',
+    contact: 'Contacted',
+    contacting: 'Contacted',
+    notqualified: 'Not Qualified',
+    nq: 'Not Qualified',
+    unqualified: 'Not Qualified',
+    disqualified: 'Not Qualified',
+    existingleads: 'Existing Leads',
+    existinglead: 'Existing Leads',
+    existing: 'Existing Leads',
+    forrecycle: 'For Recycle',
+    recycle: 'For Recycle',
+    recycled: 'For Recycle',
+    recycling: 'For Recycle',
+    duplicate: 'Duplicate',
+    duplicates: 'Duplicate',
+    dupe: 'Duplicate',
+    dup: 'Duplicate',
+    ht: 'HT',
+    hot: 'HT',
+    hotlead: 'HT',
+    hottlead: 'HT'
+  };
+  return MAP[k] || s;
+}
 
 // ─── LEAD ORIGIN: Fresh vs Imported ───────────────────────
 // Fresh   = never contacted on any campaign (a brand-new lead).
@@ -2728,7 +2765,7 @@ function GoogleImportView({
     const get = (row, key) => mapping[key] !== undefined ? (row[parseInt(mapping[key])] || '').trim() : '';
     const imported = preview.rows.filter(r => r.some(c => c.trim())).map((row, i) => {
       const emails = get(row, 'emails').split(/[;,]/).map(e => e.trim()).filter(Boolean);
-      const tags = get(row, 'tags').split(/[;,]/).map(t => t.trim()).filter(Boolean);
+      const tags = [...new Set(get(row, 'tags').split(/[;,]/).map(canonTag).filter(Boolean))];
       const campaigns = get(row, 'campaigns').split(/[;,]/).map(c => c.trim()).filter(Boolean);
       const name = get(row, 'channelName') || `Row ${i + 1}`;
       const rep = get(row, 'assignedTo') || null;
@@ -3773,7 +3810,7 @@ function ScraperView({
     value: l
   }, l === 'All' ? 'All Languages' : l))));
   return /*#__PURE__*/React.createElement(LeadsTable, {
-    leads: leads.filter(l => !hasStatusTag(l)),
+    leads: leads.filter(l => !hasStatusTag(l) && leadOrigin(l) !== 'Imported'),
     onEdit: onSave,
     onDelete: onDelete,
     onBulkAssign: onBulkAssign,
