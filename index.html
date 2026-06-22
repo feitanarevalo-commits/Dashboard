@@ -3948,6 +3948,214 @@ function ScraperView({
   });
 }
 
+// ─── DUPLICATES VIEW ──────────────────────────────────────
+// Surfaces channels that exist in more than one lead record — e.g. when two
+// reps import the same channel from their own sheets. Each group lists every
+// copy with its rep, so an admin can reassign or remove the extras.
+function DuplicatesView({
+  groups,
+  config,
+  onSave,
+  onDelete,
+  addToast
+}) {
+  const reps = config.salesReps || [];
+  const crossRep = groups.filter(g => g.reps.length >= 2).length;
+  const totalRecords = groups.reduce((s, g) => s + g.leads.length, 0);
+  if (groups.length === 0) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "home-content"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "card"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "card-body",
+      style: {
+        textAlign: 'center',
+        padding: '48px 24px',
+        color: 'var(--text-dim)'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 34,
+        marginBottom: 8
+      }
+    }, "✓"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 700,
+        fontSize: 16,
+        color: 'var(--text)'
+      }
+    }, "No duplicate leads"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 4
+      }
+    }, "No channel is currently held by more than one sales rep."))));
+  }
+  function reassign(l, rep) {
+    if (onSave) onSave({
+      ...l,
+      assignedTo: rep || null
+    });
+  }
+  function remove(l) {
+    if (onDelete) onDelete(l.id);
+    if (addToast) addToast(`Removed duplicate of "${l.channelName}"`, 'success');
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "home-content"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 12,
+      flexWrap: 'wrap',
+      marginBottom: 4
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-card red"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Duplicate Channels"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, groups.length), /*#__PURE__*/React.createElement("div", {
+    className: "stat-sub"
+  }, totalRecords, " lead records")), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card orange"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Cross-Rep Conflicts"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, crossRep), /*#__PURE__*/React.createElement("div", {
+    className: "stat-sub"
+  }, "held by 2+ reps"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '10px 14px',
+      borderRadius: 10,
+      background: 'var(--warn-light,#FFF4E5)',
+      color: 'var(--warn,#B25E00)',
+      fontSize: 13,
+      fontWeight: 500
+    }
+  }, "⚠ These channels appear under more than one record. Reassign them to a single rep or remove the extras so two reps don't work the same lead."), groups.map(g => {
+    const head = g.leads[0];
+    const conflict = g.reps.length >= 2;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "card",
+      key: g.key,
+      style: {
+        borderLeft: `3px solid ${conflict ? 'var(--danger,#DE350B)' : 'var(--warn,#FF8B00)'}`
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "card-header",
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        flexWrap: 'wrap'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "card-title",
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8
+      }
+    }, head.thumbnail ? /*#__PURE__*/React.createElement("img", {
+      src: head.thumbnail,
+      alt: "",
+      style: {
+        width: 26,
+        height: 26,
+        borderRadius: '50%',
+        objectFit: 'cover'
+      }
+    }) : /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 26,
+        height: 26,
+        borderRadius: '50%',
+        background: 'var(--accent-light)',
+        color: 'var(--accent)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 12,
+        fontWeight: 700
+      }
+    }, avatarLetter(head.channelName)), head.channelName, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        fontWeight: 500,
+        color: 'var(--text-dim)'
+      }
+    }, PLATFORM_ICON[head.platform] || '', " ", head.platform, " · ", head.followers || '—', " followers")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginLeft: 'auto',
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center'
+      }
+    }, conflict ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11,
+        fontWeight: 700,
+        color: 'var(--danger,#DE350B)',
+        background: 'var(--danger-light,#FFEBE6)',
+        padding: '3px 8px',
+        borderRadius: 20
+      }
+    }, "⚠ ", g.reps.length, " reps") : /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11,
+        fontWeight: 700,
+        color: 'var(--warn,#B25E00)',
+        background: 'var(--warn-light,#FFF4E5)',
+        padding: '3px 8px',
+        borderRadius: 20
+      }
+    }, g.leads.length, " copies"))), /*#__PURE__*/React.createElement("div", {
+      className: "card-body",
+      style: {
+        padding: 0,
+        overflowX: 'auto'
+      }
+    }, /*#__PURE__*/React.createElement("table", {
+      className: "kpi-table"
+    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Assigned To"), /*#__PURE__*/React.createElement("th", null, "Status"), /*#__PURE__*/React.createElement("th", null, "Campaign"), /*#__PURE__*/React.createElement("th", null, "Origin"), /*#__PURE__*/React.createElement("th", null, "Date Assigned"), /*#__PURE__*/React.createElement("th", null, "Email(s)"), /*#__PURE__*/React.createElement("th", {
+      className: "no-print"
+    }, "Action"))), /*#__PURE__*/React.createElement("tbody", null, g.leads.map(l => /*#__PURE__*/React.createElement("tr", {
+      key: l.id
+    }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("select", {
+      value: l.assignedTo || '',
+      onChange: e => reassign(l, e.target.value),
+      style: {
+        minWidth: 120
+      }
+    }, /*#__PURE__*/React.createElement("option", {
+      value: ""
+    }, "Unassigned"), reps.map(r => /*#__PURE__*/React.createElement("option", {
+      key: r,
+      value: r
+    }, r)))), /*#__PURE__*/React.createElement("td", null, (l.tags || []).length ? l.tags.map(t => /*#__PURE__*/React.createElement(TagBadge, {
+      key: t,
+      tag: t
+    })) : /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--text-dim)'
+      }
+    }, "—")), /*#__PURE__*/React.createElement("td", null, (l.campaigns || []).join(', ') || '—'), /*#__PURE__*/React.createElement("td", null, leadOrigin(l)), /*#__PURE__*/React.createElement("td", null, l.dateAssigned || '—'), /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontSize: 12
+      }
+    }, (l.emails || []).join(', ') || '—'), /*#__PURE__*/React.createElement("td", {
+      className: "no-print"
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost btn-xs",
+      title: "Remove this duplicate record",
+      onClick: () => remove(l)
+    }, "🗑 Remove"))))))));
+  }));
+}
+
 // ─── CAMPAIGN VIEW ────────────────────────────────────────
 function CampaignView({
   campaign,
@@ -5315,12 +5523,22 @@ function App() {
   }
   function importLeads(newLeads) {
     setLeads(existing => {
-      const existingUrls = new Set(existing.map(l => l.url).filter(Boolean));
-      const fresh = newLeads.filter(l => !l.url || !existingUrls.has(l.url)).map(l => ({
-        ...l,
-        source: 'import'
-      }));
-      logH('📊', `Google Sheets import: ${fresh.length} leads added`);
+      // Dedupe per (channel + rep): skip a lead only if the SAME rep already has
+      // that channel. The same channel under a DIFFERENT rep is kept on purpose,
+      // so the Duplicates tab can flag that two reps are working the same lead.
+      const seen = new Set(existing.map(l => leadKey(l) + '|' + (l.assignedTo || '')));
+      const fresh = [];
+      newLeads.forEach(l => {
+        const k = leadKey(l) + '|' + (l.assignedTo || '');
+        if (leadKey(l) && seen.has(k)) return; // same channel already under this rep
+        seen.add(k);
+        fresh.push({
+          ...l,
+          source: 'import'
+        });
+      });
+      const skipped = newLeads.length - fresh.length;
+      logH('📊', `Google Sheets import: ${fresh.length} lead(s) added${skipped > 0 ? ` · ${skipped} same-rep duplicate(s) skipped` : ''}`);
       return [...existing, ...fresh];
     });
     setTab('lead-mgmt');
@@ -5534,6 +5752,27 @@ function App() {
   const campColorMap = {};
   (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
   const vLeads = leads;
+
+  // Duplicate detection: group leads by channel identity (channelId>url>name);
+  // a group is a duplicate when the same channel exists in 2+ lead records.
+  // These are surfaced in the Duplicates tab so two reps don't unknowingly work
+  // the same lead. Cross-rep conflicts (2+ distinct reps) are sorted to the top.
+  const dupGroups = function () {
+    const byKey = {};
+    vLeads.forEach(l => {
+      const k = leadKey(l);
+      if (!k) return;
+      (byKey[k] = byKey[k] || []).push(l);
+    });
+    return Object.keys(byKey).map(k => {
+      const ls = byKey[k];
+      return {
+        key: k,
+        leads: ls,
+        reps: [...new Set(ls.map(l => l.assignedTo).filter(Boolean))]
+      };
+    }).filter(g => g.leads.length > 1).sort((a, b) => b.reps.length - a.reps.length || b.leads.length - a.leads.length);
+  }();
   const recentCutoff = new Date();
   recentCutoff.setDate(recentCutoff.getDate() - 7);
   const counts = {
@@ -5541,7 +5780,8 @@ function App() {
     nq: vLeads.filter(l => l.tags.includes('Not Qualified')).length,
     contacted: vLeads.filter(l => l.tags.includes('Contacted')).length,
     recycle: vLeads.filter(l => l.tags.includes('For Recycle')).length,
-    recent: vLeads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff).length
+    recent: vLeads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff).length,
+    duplicates: dupGroups.length
   };
   const NAV_MAIN = [{
     id: 'home',
@@ -5598,6 +5838,12 @@ function App() {
     label: 'Recently Assigned',
     count: counts.recent,
     cls: ''
+  }, {
+    id: 'duplicates',
+    icon: '⧉',
+    label: 'Duplicates',
+    count: counts.duplicates,
+    cls: 'red'
   }];
   function renderMain() {
     if (showRepSelect) return /*#__PURE__*/React.createElement(RepSelectScreen, {
@@ -5725,6 +5971,13 @@ function App() {
       filename: "recent_leads",
       printTitle: "Recently Assigned Leads"
     });
+    if (tab === 'duplicates') return /*#__PURE__*/React.createElement(DuplicatesView, {
+      groups: dupGroups,
+      config: config,
+      onSave: saveL,
+      onDelete: delL,
+      addToast: addToast
+    });
     if (tab === 'google-import') return /*#__PURE__*/React.createElement(GoogleImportView, {
       onImport: importLeads,
       addToast: addToast
@@ -5753,6 +6006,7 @@ function App() {
     contacted: 'Contacted Leads',
     recycle: 'For Recycle',
     recent: 'Recently Assigned',
+    duplicates: 'Duplicate Leads',
     ...Object.fromEntries((config.campaigns || []).map(c => [c.id.toLowerCase(), `${c.label} Campaign`]))
   };
 

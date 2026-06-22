@@ -50,7 +50,7 @@ var DEFAULT_CONFIG = {
     home: true, scraper: true, history: true,
     'prev-scraped': true, 'lead-mgmt': true, 'google-import': true,
     potential: true, nq: true, contacted: true,
-    recycle: true, recent: true, msn: true, vvv: true,
+    recycle: true, recent: true, duplicates: true, msn: true, vvv: true,
   },
 
   // Which table columns are shown by default
