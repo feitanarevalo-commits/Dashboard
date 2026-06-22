@@ -198,30 +198,76 @@ function effectivePassword(user) {
   } catch (e) {}
   return user.password;
 }
-function exportCSV(leads, filename = 'leads.csv') {
-  const rows = ['Channel,Platform,Niche,Followers,Email,Tags,Origin,Campaign,Assigned To,Date Assigned', ...leads.map(l => [`"${l.channelName}"`, l.platform, l.niche, l.followers, `"${l.emails.join('; ')}"`, `"${l.tags.join('; ')}"`, leadOrigin(l), `"${l.campaigns.join(', ')}"`, l.assignedTo || '', l.dateAssigned || ''].join(','))].join('\n');
-  const blob = new Blob([rows], {
-    type: 'text/csv'
+
+// CSV-safe cell: quote + escape only when the value contains a comma, quote,
+// or newline. Keeps numbers/plain text unquoted so spreadsheets parse cleanly.
+function csvCell(v) {
+  const s = v == null ? '' : String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function csvRow(arr) {
+  return arr.map(csvCell).join(',');
+}
+function downloadFile(text, filename, type = 'text/csv;charset=utf-8') {
+  const blob = new Blob([text], {
+    type
   });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
   a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function pct(n, d) {
+  return d ? Math.round(n / d * 1000) / 10 : 0;
+} // one-decimal %
+function daysSince(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d)) return '';
+  return Math.max(0, Math.round((Date.now() - d.getTime()) / 864e5));
 }
 
-// Export a KPI summary table (one row per rep) to CSV.
-function exportKpiCSV(repRows, period, filename = 'rep_kpis.csv') {
-  const head = `Enfinity Sales Dashboard — Rep KPI Report (${period})`;
-  const cols = 'Sales Rep,Total Assigned,Fresh,Recycled,Potential,Contacted,High Ticket,Not Qualified';
-  const body = repRows.map(r => [`"${r.rep}"`, r.total, r.fresh, r.recycled, r.potential, r.contacted, r.ht, r.nq].join(','));
-  const csv = [head, '', cols, ...body].join('\n');
-  const blob = new Blob([csv], {
-    type: 'text/csv'
-  });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
+// Per-lead export — one row per lead with the full detail set (raw + derived
+// fields) so the download is useful for offline analysis, not just a name list.
+function exportCSV(leads, filename = 'leads.csv') {
+  const cols = ['Channel', 'Platform', 'Niche', 'URL', 'Followers', 'Followers (#)', 'Email(s)', '# Emails', 'Status Tags', 'Origin', 'Recycled', 'Campaign(s)', 'Assigned To', 'Date Assigned', 'Last Contact', 'Days Since Assigned', '# Channels'];
+  const rows = [csvRow(cols), ...leads.map(l => csvRow([l.channelName, l.platform, l.niche, l.url, l.followers, parseFollowers(l.followers) || '', (l.emails || []).join('; '), (l.emails || []).length, (l.tags || []).join('; '), leadOrigin(l), isRecycled(l) ? 'Yes' : 'No', (l.campaigns || []).join(', '), l.assignedTo || '', l.dateAssigned || '', l.lastContactDate || '', daysSince(l.dateAssigned), (l.channels || []).length]))].join('\n');
+  downloadFile(rows, filename);
+}
+
+// Comprehensive Sales KPI report (one row per rep + a totals row). Includes
+// raw counts, derived conversion rates, email coverage, average audience size,
+// and per-campaign / per-platform splits, under a titled header block.
+function exportKpiCSV(repRows, info, filename = 'enfinity_sales_kpis.csv') {
+  info = info || {};
+  const camps = info.campaigns || []; // [{id,label}]
+  const plats = info.platforms || []; // ['YouTube',...]
+  const fmtRow = r => {
+    const qualified = r.total - r.nq;
+    return csvRow([r.rep, r.total, r.fresh, r.recycled, r.potential, r.contacted, r.ht, r.nq, pct(r.contacted, r.total), pct(r.potential, r.total), pct(qualified, r.total), r.withEmail, pct(r.withEmail, r.total), r.avgFoll || 0, ...camps.map(c => r.byCampaign && r.byCampaign[c.id] || 0), ...plats.map(p => r.byPlatform && r.byPlatform[p] || 0)]);
+  };
+  // Totals row: sum counts, recompute rates/averages on the aggregate.
+  const sum = k => repRows.reduce((s, r) => s + (r[k] || 0), 0);
+  const tFoll = repRows.reduce((s, r) => s + (r.avgFoll || 0) * (r.follKnown || 0), 0);
+  const tFollKnown = sum('follKnown');
+  const totals = {
+    rep: 'All Reps',
+    total: sum('total'),
+    fresh: sum('fresh'),
+    recycled: sum('recycled'),
+    potential: sum('potential'),
+    contacted: sum('contacted'),
+    ht: sum('ht'),
+    nq: sum('nq'),
+    withEmail: sum('withEmail'),
+    avgFoll: tFollKnown ? Math.round(tFoll / tFollKnown) : 0,
+    byCampaign: Object.fromEntries(camps.map(c => [c.id, repRows.reduce((s, r) => s + (r.byCampaign && r.byCampaign[c.id] || 0), 0)])),
+    byPlatform: Object.fromEntries(plats.map(p => [p, repRows.reduce((s, r) => s + (r.byPlatform && r.byPlatform[p] || 0), 0)]))
+  };
+  const cols = ['Sales Rep', 'Total Assigned', 'Fresh', 'Recycled', 'Potential', 'Contacted', 'High Ticket', 'Not Qualified', 'Contact Rate %', 'Potential Rate %', 'Qualified Rate %', 'With Email', 'Email Coverage %', 'Avg Followers', ...camps.map(c => `Campaign: ${c.label}`), ...plats.map(p => `Platform: ${p}`)];
+  const lines = ['Enfinity Sales Dashboard — Sales KPI Report', `Period:,${info.period || ''}`, `Date range:,${info.rangeStart || ''} to ${info.rangeEnd || ''}`, `Generated:,${new Date().toISOString().replace('T', ' ').slice(0, 16)}`, '', csvRow(cols), ...repRows.map(fmtRow), fmtRow(totals)];
+  downloadFile(lines.join('\n'), filename);
 }
 function exportPDF(repName) {
   const style = document.createElement('style');
@@ -1925,8 +1971,17 @@ function HomeView({
 
   // Per-rep KPI rows for the selected period (based on dateAssigned).
   const reps = config.salesReps || [];
+  const campDefs = (config.campaigns || []).map(c => ({
+    id: c.id,
+    label: c.label
+  }));
   const repRows = reps.map(r => {
     const mine = leads.filter(l => l.assignedTo === r && inPeriod(l));
+    const follNums = mine.map(l => parseFollowers(l.followers)).filter(n => n > 0);
+    const byCampaign = {};
+    campDefs.forEach(c => byCampaign[c.id] = mine.filter(l => l.campaigns.includes(c.id)).length);
+    const byPlatform = {};
+    PLATFORMS.forEach(p => byPlatform[p] = mine.filter(l => l.platform === p).length);
     return {
       rep: r,
       total: mine.length,
@@ -1935,16 +1990,47 @@ function HomeView({
       potential: mine.filter(l => l.tags.includes('Potential')).length,
       contacted: mine.filter(l => l.tags.includes('Contacted')).length,
       ht: mine.filter(l => l.tags.includes('HT')).length,
-      nq: mine.filter(l => l.tags.includes('Not Qualified')).length
+      nq: mine.filter(l => l.tags.includes('Not Qualified')).length,
+      withEmail: mine.filter(l => (l.emails || []).length > 0).length,
+      follKnown: follNums.length,
+      avgFoll: follNums.length ? Math.round(follNums.reduce((a, b) => a + b, 0) / follNums.length) : 0,
+      byCampaign,
+      byPlatform
     };
   });
   const maxRep = Math.max(1, ...repRows.map(r => r.total));
+  // Aggregate across reps for the table's "All Reps" footer row.
+  const sumRep = k => repRows.reduce((s, r) => s + (r[k] || 0), 0);
+  const repTot = {
+    total: sumRep('total'),
+    fresh: sumRep('fresh'),
+    recycled: sumRep('recycled'),
+    potential: sumRep('potential'),
+    contacted: sumRep('contacted'),
+    ht: sumRep('ht'),
+    nq: sumRep('nq'),
+    withEmail: sumRep('withEmail')
+  };
+  const repTotFollKnown = sumRep('follKnown');
+  repTot.avgFoll = repTotFollKnown ? Math.round(repRows.reduce((s, r) => s + (r.avgFoll || 0) * (r.follKnown || 0), 0) / repTotFollKnown) : 0;
   const periodLeads = leads.filter(inPeriod);
   const total = periodLeads.length;
   const freshTot = periodLeads.filter(l => leadOrigin(l) === 'Fresh').length;
   const recycledTot = periodLeads.filter(l => isRecycled(l)).length;
   const potentialTot = periodLeads.filter(l => l.tags.includes('Potential')).length;
   const contactedTot = periodLeads.filter(l => l.tags.includes('Contacted')).length;
+  const withEmailTot = periodLeads.filter(l => (l.emails || []).length > 0).length;
+  const htTot = periodLeads.filter(l => l.tags.includes('HT')).length;
+  const nqTot = periodLeads.filter(l => l.tags.includes('Not Qualified')).length;
+  const follAll = periodLeads.map(l => parseFollowers(l.followers)).filter(n => n > 0);
+  const avgFollTot = follAll.length ? Math.round(follAll.reduce((a, b) => a + b, 0) / follAll.length) : 0;
+  const kpiInfo = {
+    period: pDef.label,
+    rangeStart: cutoff.toISOString().split('T')[0],
+    rangeEnd: new Date().toISOString().split('T')[0],
+    campaigns: campDefs,
+    platforms: PLATFORMS
+  };
   return /*#__PURE__*/React.createElement("div", {
     className: "home-content",
     ref: pdfRef
@@ -1973,7 +2059,7 @@ function HomeView({
     }
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
-    onClick: () => exportKpiCSV(repRows, pDef.label, `enfinity_rep_kpis_${period}.csv`)
+    onClick: () => exportKpiCSV(repRows, kpiInfo, `enfinity_sales_kpis_${period}.csv`)
   }, "⬇ Download CSV"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
     onClick: () => exportPDF('Rep KPI Report')
@@ -2015,7 +2101,31 @@ function HomeView({
     className: "stat-value"
   }, contactedTot), /*#__PURE__*/React.createElement("div", {
     className: "stat-sub"
-  }, potentialTot, " potential"))), /*#__PURE__*/React.createElement("div", {
+  }, pct(contactedTot, total), "% contact rate")), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card green"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Potential"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, potentialTot), /*#__PURE__*/React.createElement("div", {
+    className: "stat-sub"
+  }, pct(potentialTot, total), "% · ", htTot, " high ticket")), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "With Email"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, withEmailTot), /*#__PURE__*/React.createElement("div", {
+    className: "stat-sub"
+  }, pct(withEmailTot, total), "% coverage")), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card accent"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Avg Followers"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, fmtFollowers(avgFollTot)), /*#__PURE__*/React.createElement("div", {
+    className: "stat-sub"
+  }, nqTot, " not qualified"))), /*#__PURE__*/React.createElement("div", {
     className: "card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-header"
@@ -2070,11 +2180,18 @@ function HomeView({
   }, "Per-Rep KPI Breakdown (", pDef.label, ")")), /*#__PURE__*/React.createElement("div", {
     className: "card-body",
     style: {
-      padding: 0
+      padding: 0,
+      overflowX: 'auto'
     }
   }, /*#__PURE__*/React.createElement("table", {
     className: "kpi-table"
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Sales Rep"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Fresh"), /*#__PURE__*/React.createElement("th", null, "Recycled"), /*#__PURE__*/React.createElement("th", null, "Potential"), /*#__PURE__*/React.createElement("th", null, "Contacted"), /*#__PURE__*/React.createElement("th", null, "High Ticket"), /*#__PURE__*/React.createElement("th", null, "NQ"), /*#__PURE__*/React.createElement("th", {
+    title: "Contacted ÷ Total"
+  }, "Contact %"), /*#__PURE__*/React.createElement("th", {
+    title: "Potential ÷ Total"
+  }, "Pot %"), /*#__PURE__*/React.createElement("th", {
+    title: "Leads with at least one email ÷ Total"
+  }, "Email %"), /*#__PURE__*/React.createElement("th", null, "Avg Followers"), /*#__PURE__*/React.createElement("th", {
     className: "no-print"
   }, "Report"))), /*#__PURE__*/React.createElement("tbody", null, repRows.map(r => /*#__PURE__*/React.createElement("tr", {
     key: r.rep
@@ -2092,7 +2209,7 @@ function HomeView({
       color: 'var(--warn)',
       fontWeight: 600
     }
-  }, r.recycled), /*#__PURE__*/React.createElement("td", null, r.potential), /*#__PURE__*/React.createElement("td", null, r.contacted), /*#__PURE__*/React.createElement("td", null, r.ht), /*#__PURE__*/React.createElement("td", null, r.nq), /*#__PURE__*/React.createElement("td", {
+  }, r.recycled), /*#__PURE__*/React.createElement("td", null, r.potential), /*#__PURE__*/React.createElement("td", null, r.contacted), /*#__PURE__*/React.createElement("td", null, r.ht), /*#__PURE__*/React.createElement("td", null, r.nq), /*#__PURE__*/React.createElement("td", null, pct(r.contacted, r.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(r.potential, r.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(r.withEmail, r.total), "%"), /*#__PURE__*/React.createElement("td", null, fmtFollowers(r.avgFoll || 0)), /*#__PURE__*/React.createElement("td", {
     className: "no-print"
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost btn-xs",
@@ -2103,15 +2220,15 @@ function HomeView({
       borderTop: '2px solid var(--border)',
       fontWeight: 700
     }
-  }, /*#__PURE__*/React.createElement("td", null, "All Reps"), /*#__PURE__*/React.createElement("td", null, repRows.reduce((s, r) => s + r.total, 0)), /*#__PURE__*/React.createElement("td", {
+  }, /*#__PURE__*/React.createElement("td", null, "All Reps"), /*#__PURE__*/React.createElement("td", null, repTot.total), /*#__PURE__*/React.createElement("td", {
     style: {
       color: 'var(--accent)'
     }
-  }, repRows.reduce((s, r) => s + r.fresh, 0)), /*#__PURE__*/React.createElement("td", {
+  }, repTot.fresh), /*#__PURE__*/React.createElement("td", {
     style: {
       color: 'var(--warn)'
     }
-  }, repRows.reduce((s, r) => s + r.recycled, 0)), /*#__PURE__*/React.createElement("td", null, repRows.reduce((s, r) => s + r.potential, 0)), /*#__PURE__*/React.createElement("td", null, repRows.reduce((s, r) => s + r.contacted, 0)), /*#__PURE__*/React.createElement("td", null, repRows.reduce((s, r) => s + r.ht, 0)), /*#__PURE__*/React.createElement("td", null, repRows.reduce((s, r) => s + r.nq, 0)), /*#__PURE__*/React.createElement("td", {
+  }, repTot.recycled), /*#__PURE__*/React.createElement("td", null, repTot.potential), /*#__PURE__*/React.createElement("td", null, repTot.contacted), /*#__PURE__*/React.createElement("td", null, repTot.ht), /*#__PURE__*/React.createElement("td", null, repTot.nq), /*#__PURE__*/React.createElement("td", null, pct(repTot.contacted, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(repTot.potential, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(repTot.withEmail, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, fmtFollowers(repTot.avgFoll || 0)), /*#__PURE__*/React.createElement("td", {
     className: "no-print"
   })))))), /*#__PURE__*/React.createElement("div", {
     className: "grid-2"
