@@ -35,9 +35,10 @@ blueprint adds a second call to `channels.list` to fetch `statistics.subscriberC
 Flow: `Webhook → HTTP search → HTTP channels.list → Webhook Response`
 
 - **HTTP 2 (search):** `youtube/v3/search?part=snippet&type=video&q={{keyword}}&maxResults=25`
-- **HTTP 3 (channels):** `youtube/v3/channels?part=snippet,statistics&id={{join(distinct(map(2.data.items;"snippet.channelId"));",")}}`
-  — `map()` pulls every `channelId`, `distinct()` removes duplicate channels, `join()` makes the
-  comma list the API expects.
+- **HTTP 3 (channels):** `youtube/v3/channels?part=snippet,statistics&id={{join(map(2.data.items;"snippet.channelId"));",")}}`
+  — `map()` pulls every `channelId` and `join()` makes the comma list the API expects.
+  (Duplicate ids are harmless — `channels.list` returns one per channel and the dashboard
+  also de-dupes by channel.)
 - **Webhook Response:** Body `{{3.data.items}}`, Status 200, headers `Content-Type: application/json`
   + `Access-Control-Allow-Origin: *` (note: Make header field is **Key**, value `*`).
 

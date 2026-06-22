@@ -48,7 +48,7 @@
         "headers": [],
         "qs": [
           { "name": "part", "value": "snippet,statistics" },
-          { "name": "id", "value": "{{join(distinct(map(2.data.items; \"snippet.channelId\")); \",\")}}" },
+          { "name": "id", "value": "{{join(map(2.data.items; \"snippet.channelId\"); \",\")}}" },
           { "name": "maxResults", "value": "50" },
           { "name": "key", "value": "YOUR_YOUTUBE_API_KEY" }
         ],
