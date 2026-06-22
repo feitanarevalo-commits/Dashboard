@@ -101,7 +101,10 @@ function mapDiscoveryResult(item, fallbackPlatform, i) {
   if (!url) {
     if (ytChannelId) url = 'https://www.youtube.com/channel/' + ytChannelId;else if (idObj.videoId) url = 'https://www.youtube.com/watch?v=' + idObj.videoId;
   }
-  const followers = get('followersCount', 'followers', 'subscriberCount', 'subscribers', 'subscribers_count', 'fansCount', 'fans');
+  // Subscriber/follower count — incl. YouTube channels.list statistics (nested).
+  const stats = item.statistics || {};
+  const followersRaw = get('followersCount', 'followers', 'subscriberCount', 'subscribers', 'subscribers_count', 'fansCount', 'fans') || stats.subscriberCount || '';
+  const followers = followersRaw === '' ? '' : typeof followersRaw === 'number' || /^\d+$/.test(String(followersRaw)) ? fmtFollowers(Number(followersRaw)) : String(followersRaw);
   const niche = get('niche', 'category', 'businessCategoryName', 'categoryName');
   const email = get('email', 'publicEmail', 'businessEmail');
   const thumb = get('thumbnail', 'thumbnailUrl', 'avatar', 'profilePic', 'profilePicUrl', 'profilePicUrlHD', 'displayUrl', 'image', 'picture', 'imageUrl') || ytThumb;
@@ -118,7 +121,7 @@ function mapDiscoveryResult(item, fallbackPlatform, i) {
     url: String(url || ''),
     platform: platform,
     niche: String(niche || ''),
-    followers: typeof followers === 'number' ? fmtFollowers(followers) : String(followers || ''),
+    followers: followers,
     emails: email ? [String(email)] : [],
     thumbnail: thumb ? String(thumb) : '',
     channelId: channelId ? String(channelId) : '',
@@ -3721,8 +3724,16 @@ function ScraperView({
       }
       const items = Array.isArray(data) ? data : data.results || data.items || data.data || [];
       const mapped = items.map((it, i) => mapDiscoveryResult(it, platform === 'All' ? null : platform, i));
-      if (onResults) onResults(mapped);
-      addToast(mapped.length ? `✓ ${mapped.length} lead(s) scraped` : 'Scraper ran but returned 0 profiles', 'success');
+      // Reject channels below the Min Followers threshold (only when the
+      // follower count is known — unknown counts pass through).
+      const minN = parseFollowers(minF);
+      const kept = minN > 0 ? mapped.filter(l => {
+        const f = parseFollowers(l.followers);
+        return !f || f >= minN;
+      }) : mapped;
+      const skipped = mapped.length - kept.length;
+      if (onResults) onResults(kept);
+      addToast(kept.length ? `✓ ${kept.length} lead(s) scraped` + (skipped ? ` · ${skipped} under ${minF} skipped` : '') : skipped ? `All ${skipped} result(s) were under ${minF}` : 'Scraper ran but returned 0 profiles', 'success');
     }).catch(e => {
       const cors = (e && e.message || '').toLowerCase().includes('failed to fetch');
       addToast(cors ? 'Scrape blocked (CORS): the response is missing Access-Control-Allow-Origin. Make → add header key "Access-Control-Allow-Origin" = "*" in the Webhook Response module. n8n → set the Webhook node "Allowed Origins" to *.' : `Scrape failed: ${e.message}`, 'error');
