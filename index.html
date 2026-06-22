@@ -1300,7 +1300,7 @@ function LeadsTable({
     if (sortCol === 'dateAssigned') return dir * (a.dateAssigned || '').localeCompare(b.dateAssigned || '');
     return 0;
   });
-  useEffect(() => setPage(1), [search, filterStatus, filterRep, sortCol, sortDir, colFilter]);
+  useEffect(() => setPage(1), [search, filterStatus, filterRep, sortCol, sortDir, colFilter, leads.length]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const allSel = filtered.length > 0 && filtered.every(l => sel.includes(l.id));
@@ -5185,7 +5185,7 @@ function App() {
       });
       const dropped = arr.length - fresh.length;
       logH('🔎', `Discovery: ${fresh.length} unique channel(s) added${dropped > 0 ? ` · ${dropped} duplicate(s) skipped` : ''}`);
-      return [...existing, ...fresh];
+      return [...fresh, ...existing]; // newest results first (top of the list / page 1)
     });
   }
 
