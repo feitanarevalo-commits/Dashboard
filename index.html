@@ -91,13 +91,21 @@ function mapDiscoveryResult(item, fallbackPlatform, i) {
     }
     return '';
   };
-  const name = get('channel_name', 'channelName', 'username', 'handle', 'ownerUsername', 'name', 'fullName', 'title');
-  const url = get('url', 'channel_url', 'channelUrl', 'profile_url', 'profileUrl', 'webUrl', 'link', 'video_url', 'videoUrl', 'inputUrl');
+  // Support raw YouTube Data API search items (nested snippet / id objects).
+  const sn = item.snippet || {};
+  const idObj = item.id && typeof item.id === 'object' ? item.id : {};
+  const ytChannelId = sn.channelId || idObj.channelId || '';
+  const ytThumb = (sn.thumbnails && (sn.thumbnails.high || sn.thumbnails.medium || sn.thumbnails.default) || {}).url || '';
+  const name = get('channel_name', 'channelName', 'username', 'handle', 'ownerUsername', 'name', 'fullName') || sn.channelTitle || sn.title;
+  let url = get('url', 'channel_url', 'channelUrl', 'profile_url', 'profileUrl', 'webUrl', 'link', 'video_url', 'videoUrl', 'inputUrl');
+  if (!url) {
+    if (ytChannelId) url = 'https://www.youtube.com/channel/' + ytChannelId;else if (idObj.videoId) url = 'https://www.youtube.com/watch?v=' + idObj.videoId;
+  }
   const followers = get('followersCount', 'followers', 'subscriberCount', 'subscribers', 'subscribers_count', 'fansCount', 'fans');
   const niche = get('niche', 'category', 'businessCategoryName', 'categoryName');
   const email = get('email', 'publicEmail', 'businessEmail');
-  const thumb = get('thumbnail', 'thumbnailUrl', 'avatar', 'profilePic', 'profilePicUrl', 'profilePicUrlHD', 'displayUrl', 'image', 'picture', 'imageUrl');
-  const channelId = get('channel_id', 'channelId', 'channelID', 'ownerId', 'authorId', 'userId', 'user_id');
+  const thumb = get('thumbnail', 'thumbnailUrl', 'avatar', 'profilePic', 'profilePicUrl', 'profilePicUrlHD', 'displayUrl', 'image', 'picture', 'imageUrl') || ytThumb;
+  const channelId = get('channel_id', 'channelId', 'channelID', 'ownerId', 'authorId', 'userId', 'user_id') || ytChannelId;
   // Determine platform: explicit field → infer from URL → searched tab → fallback.
   let platform = item.platform || fallbackPlatform || '';
   if (!platform || platform === 'All') {
