@@ -59,9 +59,9 @@
                 "status": "200",
                 "body": "{{3.data}}",
                 "headers": [
-                  { "name": "Content-Type", "value": "application/json" },
-                  { "name": "Access-Control-Allow-Origin", "value": "*" },
-                  { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Access-Control-Allow-Origin", "value": "*" },
+                  { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
                 ]
               },
               "metadata": { "designer": { "x": 900, "y": -150 } }
@@ -100,9 +100,9 @@
                 "status": "200",
                 "body": "{{5.data}}",
                 "headers": [
-                  { "name": "Content-Type", "value": "application/json" },
-                  { "name": "Access-Control-Allow-Origin", "value": "*" },
-                  { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Access-Control-Allow-Origin", "value": "*" },
+                  { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
                 ]
               },
               "metadata": { "designer": { "x": 900, "y": 0 } }
@@ -141,9 +141,9 @@
                 "status": "200",
                 "body": "{{7.data}}",
                 "headers": [
-                  { "name": "Content-Type", "value": "application/json" },
-                  { "name": "Access-Control-Allow-Origin", "value": "*" },
-                  { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Access-Control-Allow-Origin", "value": "*" },
+                  { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
                 ]
               },
               "metadata": { "designer": { "x": 900, "y": 150 } }
@@ -182,9 +182,9 @@
                 "status": "200",
                 "body": "{{9.data}}",
                 "headers": [
-                  { "name": "Content-Type", "value": "application/json" },
-                  { "name": "Access-Control-Allow-Origin", "value": "*" },
-                  { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Access-Control-Allow-Origin", "value": "*" },
+                  { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
                 ]
               },
               "metadata": { "designer": { "x": 900, "y": 300 } }

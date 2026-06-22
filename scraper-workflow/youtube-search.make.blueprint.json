@@ -69,9 +69,9 @@
         "status": "200",
         "body": "{{4.array}}",
         "headers": [
-          { "name": "Content-Type", "value": "application/json" },
-          { "name": "Access-Control-Allow-Origin", "value": "*" },
-          { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Access-Control-Allow-Origin", "value": "*" },
+          { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
         ]
       },
       "metadata": { "designer": { "x": 1200, "y": 0 } }
