@@ -3692,10 +3692,10 @@ function ScraperView({
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
-    }).then(r => {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.text();
-    }).then(text => {
+    }).then(r => r.text().then(t => {
+      if (!r.ok) throw new Error('HTTP ' + r.status + (t && t.trim() ? ' — ' + t.replace(/\s+/g, ' ').slice(0, 140) : ''));
+      return t;
+    })).then(text => {
       if (!text || !text.trim()) {
         addToast('Scraper returned an empty response — in n8n set Respond to Webhook → "Respond With: All Incoming Items" and connect it after Get dataset items', 'error');
         return;
