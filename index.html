@@ -3724,6 +3724,9 @@ function ScraperView({
         return;
       }
       const items = Array.isArray(data) ? data : data.results || data.items || data.data || [];
+      try {
+        console.log('[Enfinity scraper] received', items.length, 'items. First item:', items[0]);
+      } catch (e) {}
       const mapped = items.map((it, i) => mapDiscoveryResult(it, platform === 'All' ? null : platform, i));
       // Reject channels below the Min Followers threshold (only when the
       // follower count is known — unknown counts pass through).
