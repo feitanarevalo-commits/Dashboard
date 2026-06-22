@@ -19,8 +19,37 @@ result limit modest (≈25); webhooks time out around 40–100s depending on hos
 Ready-to-import files in this folder:
 - **`influencer-discovery.n8n.json`** — n8n workflow (Apify)
 - `influencer-discovery.make.blueprint.json` — Make.com blueprint (Apify)
-- **`youtube-search.make.blueprint.json`** — Make.com blueprint using the **YouTube Data API**
-  (no Apify) — matches the Webhook → HTTP → Iterator → **Aggregator** → Response pattern
+- `youtube-search.make.blueprint.json` — Make + YouTube Data API (no follower counts)
+- **`youtube-enriched.make.blueprint.json`** ← **use this** — Make + YouTube API **with
+  subscriber counts** (search → channels.list enrichment), so the dashboard's follower
+  column fills and the Min-Followers filter works.
+
+---
+
+## Make + YouTube with subscriber counts (youtube-enriched.make.blueprint.json)
+
+The plain `search` endpoint returns channel name + thumbnail but **no subscriber count**. This
+blueprint adds a second call to `channels.list` to fetch `statistics.subscriberCount`. It needs
+**no Iterator or Aggregator** — it uses Make's `map()`/`join()` to build the channel-id list.
+
+Flow: `Webhook → HTTP search → HTTP channels.list → Webhook Response`
+
+- **HTTP 2 (search):** `youtube/v3/search?part=snippet&type=video&q={{keyword}}&maxResults=25`
+- **HTTP 3 (channels):** `youtube/v3/channels?part=snippet,statistics&id={{join(distinct(map(2.data.items;"snippet.channelId"));",")}}`
+  — `map()` pulls every `channelId`, `distinct()` removes duplicate channels, `join()` makes the
+  comma list the API expects.
+- **Webhook Response:** Body `{{3.data.items}}`, Status 200, headers `Content-Type: application/json`
+  + `Access-Control-Allow-Origin: *` (note: Make header field is **Key**, value `*`).
+
+**Setup:** import → put your **YouTube Data API key** in **both** HTTP modules' `key` field →
+Save → toggle the scenario **ON (live)** → paste the Webhook production URL into ⚙ Customize →
+Scraper Webhook.
+
+The dashboard reads `snippet.title`, `id` (channel id), `statistics.subscriberCount`, and the
+thumbnail from each returned channel — so followers show, dedupe-by-channel works, and the
+**Min Followers** dropdown rejects anyone below the threshold.
+
+> Quota note: this makes 2 API calls per scrape (~101 units total of the 10,000/day default).
 
 ---
 

@@ -1,0 +1,83 @@
+{
+  "name": "Enfinity — YouTube Scraper + Subscriber counts (Make)",
+  "flow": [
+    {
+      "id": 1,
+      "module": "gateway:CustomWebHook",
+      "version": 1,
+      "parameters": { "hook": null, "maxResults": 1 },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 0, "y": 0 },
+        "restore": { "parameters": { "hook": { "label": "Enfinity Scraper Webhook" } } },
+        "expect": [
+          { "name": "keyword", "type": "text" },
+          { "name": "platform", "type": "text" },
+          { "name": "limit", "type": "number" }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+      "mapper": {
+        "url": "https://www.googleapis.com/youtube/v3/search",
+        "method": "get",
+        "headers": [],
+        "qs": [
+          { "name": "part", "value": "snippet" },
+          { "name": "type", "value": "video" },
+          { "name": "q", "value": "{{1.keyword}}" },
+          { "name": "maxResults", "value": "{{ifempty(1.limit; 25)}}" },
+          { "name": "key", "value": "YOUR_YOUTUBE_API_KEY" }
+        ],
+        "parseResponse": true
+      },
+      "metadata": { "designer": { "x": 300, "y": 0 } }
+    },
+    {
+      "id": 3,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+      "mapper": {
+        "url": "https://www.googleapis.com/youtube/v3/channels",
+        "method": "get",
+        "headers": [],
+        "qs": [
+          { "name": "part", "value": "snippet,statistics" },
+          { "name": "id", "value": "{{join(distinct(map(2.data.items; \"snippet.channelId\")); \",\")}}" },
+          { "name": "maxResults", "value": "50" },
+          { "name": "key", "value": "YOUR_YOUTUBE_API_KEY" }
+        ],
+        "parseResponse": true
+      },
+      "metadata": { "designer": { "x": 600, "y": 0 } }
+    },
+    {
+      "id": 4,
+      "module": "gateway:WebhookRespond",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "status": "200",
+        "body": "{{3.data.items}}",
+        "headers": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Access-Control-Allow-Origin", "value": "*" },
+          { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+        ]
+      },
+      "metadata": { "designer": { "x": 900, "y": 0 } }
+    }
+  ],
+  "metadata": {
+    "instant": true,
+    "version": 1,
+    "scenario": { "roundtrips": 1, "maxErrors": 3, "autoCommit": true, "autoCommitTriggerLast": true, "sequential": false, "confidential": false, "dataloss": false, "dlq": false },
+    "designer": { "orphans": [] },
+    "zone": "eu2.make.com"
+  }
+}

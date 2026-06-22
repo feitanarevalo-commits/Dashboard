@@ -94,7 +94,8 @@ function mapDiscoveryResult(item, fallbackPlatform, i) {
   // Support raw YouTube Data API search items (nested snippet / id objects).
   const sn = item.snippet || {};
   const idObj = item.id && typeof item.id === 'object' ? item.id : {};
-  const ytChannelId = sn.channelId || idObj.channelId || '';
+  const idStr = typeof item.id === 'string' ? item.id : ''; // channels.list: id is the channel id
+  const ytChannelId = sn.channelId || idObj.channelId || idStr || '';
   const ytThumb = (sn.thumbnails && (sn.thumbnails.high || sn.thumbnails.medium || sn.thumbnails.default) || {}).url || '';
   const name = get('channel_name', 'channelName', 'username', 'handle', 'ownerUsername', 'name', 'fullName') || sn.channelTitle || sn.title;
   let url = get('url', 'channel_url', 'channelUrl', 'profile_url', 'profileUrl', 'webUrl', 'link', 'video_url', 'videoUrl', 'inputUrl');
