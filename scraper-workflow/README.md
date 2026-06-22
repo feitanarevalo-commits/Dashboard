@@ -16,9 +16,50 @@ Dashboard ingests results  ◀──JSON array (CORS)──  Respond to Webhook
 Delivery is **synchronous** — the dashboard waits for the same HTTP response. Keep the
 result limit modest (≈25); webhooks time out around 40–100s depending on host.
 
-Two ready-to-import files are in this folder:
-- **`influencer-discovery.n8n.json`** — n8n workflow ← use this
-- `influencer-discovery.make.blueprint.json` — Make.com blueprint (alternative)
+Ready-to-import files in this folder:
+- **`influencer-discovery.n8n.json`** — n8n workflow (Apify)
+- `influencer-discovery.make.blueprint.json` — Make.com blueprint (Apify)
+- **`youtube-search.make.blueprint.json`** — Make.com blueprint using the **YouTube Data API**
+  (no Apify) — matches the Webhook → HTTP → Iterator → **Aggregator** → Response pattern
+
+---
+
+## Make + YouTube Data API (youtube-search.make.blueprint.json)
+
+This is the fix for the **"Scraper response was not valid JSON (got: Accepted…)"** error. That
+error happens when an Iterator feeds the Webhook Response directly — the response tries to fire
+once per item, so Make falls back to its default `Accepted` ack. The blueprint adds an **Array
+Aggregator** so one JSON array is returned.
+
+Flow: `Webhook → HTTP (youtube/v3/search) → Iterator → Array Aggregator → Webhook Response`
+
+**Setup**
+1. Get a **YouTube Data API v3 key** (Google Cloud Console → enable "YouTube Data API v3" →
+   create an API key).
+2. Make → **Create scenario → ⋯ → Import Blueprint** → `youtube-search.make.blueprint.json`.
+3. Open the **HTTP** module → replace `YOUR_YOUTUBE_API_KEY` in the `key` query field.
+4. Confirm the modules linked up: Iterator array = `{{2.body.items}}`, Aggregator source = the
+   Iterator, Webhook Response **Body** = `{{4.array}}` with headers `Content-Type: application/json`
+   and `Access-Control-Allow-Origin: *`.
+5. **Save**, toggle **ON**, copy the Webhook **production URL**, paste into the dashboard
+   (⚙ Customize → Scraper Webhook).
+
+**Field mapping** (each YouTube result → dashboard lead, built in the Aggregator):
+| Dashboard field | From YouTube item |
+|-----------------|-------------------|
+| channelName     | `snippet.channelTitle` |
+| channelId       | `snippet.channelId`    |
+| url             | `https://www.youtube.com/channel/{channelId}` |
+| thumbnail       | `snippet.thumbnails.high.url` |
+| platform        | `YouTube` (constant) |
+
+> `youtube/v3/search` returns **per-video** results, so a channel can repeat — the dashboard
+> de-dupes by `channelId` automatically. Also note YouTube API quota: each search costs ~100
+> units of the daily 10,000 default.
+
+> If the import is finicky (Make can be picky about Aggregator blueprints), build it by hand
+> with those 5 modules — the key is the **Array Aggregator between the Iterator and the Webhook
+> Response**, and the Response body = the aggregated array.
 
 ---
 
