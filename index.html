@@ -3704,7 +3704,11 @@ function ScraperView({
       try {
         data = JSON.parse(text);
       } catch (err) {
-        addToast('Scraper response was not valid JSON (got: ' + text.slice(0, 60) + '…)', 'error');
+        if (text.trim().toLowerCase() === 'accepted') {
+          addToast('Make returned its default "Accepted" — add an Array Aggregator before the Webhook Response and have it return the JSON array (Content-Type: application/json)', 'error');
+        } else {
+          addToast('Scraper response was not valid JSON (got: ' + text.slice(0, 60) + '…)', 'error');
+        }
         return;
       }
       const items = Array.isArray(data) ? data : data.results || data.items || data.data || [];
