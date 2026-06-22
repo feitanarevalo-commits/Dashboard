@@ -2564,6 +2564,12 @@ function GoogleImportView({
     if (!res.ok) throw new Error('Proxy HTTP ' + res.status);
     return await res.text();
   }
+  async function fetchViaAllOrigins(id, gid) {
+    const csvUrl = encodeURIComponent(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`);
+    const res = await fetch(`https://api.allorigins.win/raw?url=${csvUrl}`);
+    if (!res.ok) throw new Error('AllOrigins HTTP ' + res.status);
+    return await res.text();
+  }
   function fetchViaJsonp(id, gid) {
     return new Promise((resolve, reject) => {
       const cb = '__gs_' + Date.now();
@@ -2662,11 +2668,14 @@ function GoogleImportView({
       name: 'Direct CSV',
       fn: () => fetchDirectCSV(id, gid)
     }, {
-      name: 'CORS Proxy',
-      fn: () => fetchViaCorsProxy(id, gid)
-    }, {
       name: 'JSONP/gviz',
       fn: () => fetchViaGviz(id, gid)
+    }, {
+      name: 'AllOrigins',
+      fn: () => fetchViaAllOrigins(id, gid)
+    }, {
+      name: 'CORS Proxy',
+      fn: () => fetchViaCorsProxy(id, gid)
     }];
     for (const s of strategies) {
       try {
