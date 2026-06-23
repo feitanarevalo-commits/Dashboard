@@ -115,6 +115,7 @@ function mapDiscoveryResult(item, fallbackPlatform, i){
     emails: email ? [String(email)] : [],
     thumbnail: thumb ? String(thumb) : '',
     channelId: channelId ? String(channelId) : '',
+    addedAt: new Date().toISOString(),
     tags: [], campaigns: [], assignedTo: null, dateAssigned: null, lastContactDate: null, channels: [],
   };
 }
@@ -159,19 +160,37 @@ function daysSince(dateStr){
   return Math.max(0,Math.round((Date.now()-d.getTime())/864e5));
 }
 
+// When a lead first entered the dashboard (scraped or imported), as epoch ms.
+// Prefers the explicit `addedAt` ISO stamp, then falls back to `dateAssigned`,
+// then to the numeric `id` (ids are Date.now()-based), so even leads created
+// before this field existed still sort roughly right. Returns 0 if unknown.
+function leadAddedMs(l){
+  if(l && l.addedAt){ const t=new Date(l.addedAt).getTime(); if(!isNaN(t)) return t; }
+  if(l && l.dateAssigned){ const t=new Date(l.dateAssigned).getTime(); if(!isNaN(t)) return t; }
+  const n=l?Number(l.id):NaN;
+  if(!isNaN(n) && n>1e12 && n<2e13) return n;   // id looks like a ms timestamp
+  return 0;
+}
+// Human-readable "added" timestamp for a lead, or '—' when unknown.
+function fmtAddedAt(l){
+  const ms=leadAddedMs(l); if(!ms) return '—';
+  return new Date(ms).toLocaleString('en-CA',
+    {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).replace(',','');
+}
+
 // Per-lead export — one row per lead with the full detail set (raw + derived
 // fields) so the download is useful for offline analysis, not just a name list.
 function exportCSV(leads, filename='leads.csv') {
   const cols = ['Channel','Platform','Niche','URL','Followers','Followers (#)',
     'Email(s)','# Emails','Status Tags','Origin','Recycled','Campaign(s)',
-    'Assigned To','Date Assigned','Last Contact','Days Since Assigned','# Channels'];
+    'Assigned To','Added','Date Assigned','Last Contact','Days Since Assigned','# Channels'];
   const rows = [csvRow(cols), ...leads.map(l => csvRow([
     l.channelName, l.platform, l.niche, l.url,
     l.followers, parseFollowers(l.followers)||'',
     (l.emails||[]).join('; '), (l.emails||[]).length,
     (l.tags||[]).join('; '), leadOrigin(l), isRecycled(l)?'Yes':'No',
     (l.campaigns||[]).join(', '), l.assignedTo||'',
-    l.dateAssigned||'', l.lastContactDate||'', daysSince(l.dateAssigned),
+    fmtAddedAt(l), l.dateAssigned||'', l.lastContactDate||'', daysSince(l.dateAssigned),
     (l.channels||[]).length
   ]))].join('\n');
   downloadFile(rows, filename);
@@ -1511,7 +1530,12 @@ function GoogleImportView({onImport,addToast}) {
         const impRaw=get(row,'imported').trim().toLowerCase();
         const imported = ['yes','y','true','1'].includes(impRaw) ? true
                        : ['no','n','false','0'].includes(impRaw) ? false : undefined;
-        return{id:Date.now()+i,channelName:name,url:get(row,'url'),platform:get(row,'platform')||'YouTube',niche:get(row,'niche'),followers:get(row,'followers'),emails,tags,campaigns,assignedTo:rep,dateAssigned:(dateRaw||(rep?today:null)),lastContactDate:null,channels:[name],imported};
+        // Stamp when this lead entered the dashboard. Prefer the sheet's own date
+        // (so a historically-captured lead sorts before a fresh scrape); fall
+        // back to the import time when the sheet has no usable date.
+        let addedAt=new Date().toISOString();
+        if(dateRaw){ const t=new Date(dateRaw).getTime(); if(!isNaN(t)) addedAt=new Date(t).toISOString(); }
+        return{id:Date.now()+i,channelName:name,url:get(row,'url'),platform:get(row,'platform')||'YouTube',niche:get(row,'niche'),followers:get(row,'followers'),emails,tags,campaigns,assignedTo:rep,dateAssigned:(dateRaw||(rep?today:null)),lastContactDate:null,channels:[name],imported,addedAt};
       });
     onImport(imported);
     addToast(`✓ ${imported.length} leads imported`,'success');
@@ -2018,6 +2042,10 @@ function DuplicatesView({groups,config,onSave,onDelete,addToast}) {
       {groups.map(g=>{
         const head=g.leads[0];
         const conflict=g.reps.length>=2;
+        // Earliest-added record first, so the rep/import that got this channel
+        // first is at the top. Leads with no known time sort last.
+        const ordered=[...g.leads].sort((a,b)=>(leadAddedMs(a)||Infinity)-(leadAddedMs(b)||Infinity));
+        const firstId=(ordered[0] && leadAddedMs(ordered[0])) ? ordered[0].id : null;
         return (
           <div className="card" key={g.key} style={{borderLeft:`3px solid ${conflict?'var(--danger,#DE350B)':'var(--warn,#FF8B00)'}`}}>
             <div className="card-header" style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
@@ -2037,10 +2065,10 @@ function DuplicatesView({groups,config,onSave,onDelete,addToast}) {
             <div className="card-body" style={{padding:0,overflowX:'auto'}}>
               <table className="kpi-table">
                 <thead><tr>
-                  <th>Assigned To</th><th>Status</th><th>Campaign</th><th>Origin</th><th>Date Assigned</th><th>Email(s)</th><th className="no-print">Action</th>
+                  <th>Assigned To</th><th>Status</th><th>Campaign</th><th>Origin</th><th>Added</th><th>Date Assigned</th><th>Email(s)</th><th className="no-print">Action</th>
                 </tr></thead>
                 <tbody>
-                  {g.leads.map(l=>(
+                  {ordered.map(l=>(
                     <tr key={l.id}>
                       <td>
                         <select value={l.assignedTo||''} onChange={e=>reassign(l,e.target.value)} style={{minWidth:120}}>
@@ -2051,6 +2079,10 @@ function DuplicatesView({groups,config,onSave,onDelete,addToast}) {
                       <td>{(l.tags||[]).length?l.tags.map(t=><TagBadge key={t} tag={t}/>):<span style={{color:'var(--text-dim)'}}>—</span>}</td>
                       <td>{(l.campaigns||[]).join(', ')||'—'}</td>
                       <td>{leadOrigin(l)}</td>
+                      <td style={{whiteSpace:'nowrap',fontSize:12}}>
+                        {l.id===firstId && <span title="Earliest record for this channel" style={{marginRight:6,fontSize:11,fontWeight:700,color:'var(--success,#006644)',background:'var(--success-light,#E3FCEF)',padding:'2px 6px',borderRadius:20}}>🥇 First</span>}
+                        {fmtAddedAt(l)}
+                      </td>
                       <td>{l.dateAssigned||'—'}</td>
                       <td style={{fontSize:12}}>{(l.emails||[]).join(', ')||'—'}</td>
                       <td className="no-print"><button className="btn btn-ghost btn-xs" title="Remove this duplicate record" onClick={()=>remove(l)}>🗑 Remove</button></td>
@@ -2646,6 +2678,7 @@ function App() {
       tags: Array.isArray(x.tags)?x.tags:[], campaigns: Array.isArray(x.campaigns)?x.campaigns:[],
       assignedTo: x.assignedTo || null, dateAssigned: x.dateAssigned || null,
       lastContactDate: x.lastContactDate || null, channels: Array.isArray(x.channels)?x.channels:[],
+      addedAt: x.addedAt || null,
       source: x.source,
     };
   }

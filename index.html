@@ -163,6 +163,7 @@ function mapDiscoveryResult(item, fallbackPlatform, i) {
     emails: email ? [String(email)] : [],
     thumbnail: thumb ? String(thumb) : '',
     channelId: channelId ? String(channelId) : '',
+    addedAt: new Date().toISOString(),
     tags: [],
     campaigns: [],
     assignedTo: null,
@@ -228,11 +229,42 @@ function daysSince(dateStr) {
   return Math.max(0, Math.round((Date.now() - d.getTime()) / 864e5));
 }
 
+// When a lead first entered the dashboard (scraped or imported), as epoch ms.
+// Prefers the explicit `addedAt` ISO stamp, then falls back to `dateAssigned`,
+// then to the numeric `id` (ids are Date.now()-based), so even leads created
+// before this field existed still sort roughly right. Returns 0 if unknown.
+function leadAddedMs(l) {
+  if (l && l.addedAt) {
+    const t = new Date(l.addedAt).getTime();
+    if (!isNaN(t)) return t;
+  }
+  if (l && l.dateAssigned) {
+    const t = new Date(l.dateAssigned).getTime();
+    if (!isNaN(t)) return t;
+  }
+  const n = l ? Number(l.id) : NaN;
+  if (!isNaN(n) && n > 1e12 && n < 2e13) return n; // id looks like a ms timestamp
+  return 0;
+}
+// Human-readable "added" timestamp for a lead, or '—' when unknown.
+function fmtAddedAt(l) {
+  const ms = leadAddedMs(l);
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString('en-CA', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).replace(',', '');
+}
+
 // Per-lead export — one row per lead with the full detail set (raw + derived
 // fields) so the download is useful for offline analysis, not just a name list.
 function exportCSV(leads, filename = 'leads.csv') {
-  const cols = ['Channel', 'Platform', 'Niche', 'URL', 'Followers', 'Followers (#)', 'Email(s)', '# Emails', 'Status Tags', 'Origin', 'Recycled', 'Campaign(s)', 'Assigned To', 'Date Assigned', 'Last Contact', 'Days Since Assigned', '# Channels'];
-  const rows = [csvRow(cols), ...leads.map(l => csvRow([l.channelName, l.platform, l.niche, l.url, l.followers, parseFollowers(l.followers) || '', (l.emails || []).join('; '), (l.emails || []).length, (l.tags || []).join('; '), leadOrigin(l), isRecycled(l) ? 'Yes' : 'No', (l.campaigns || []).join(', '), l.assignedTo || '', l.dateAssigned || '', l.lastContactDate || '', daysSince(l.dateAssigned), (l.channels || []).length]))].join('\n');
+  const cols = ['Channel', 'Platform', 'Niche', 'URL', 'Followers', 'Followers (#)', 'Email(s)', '# Emails', 'Status Tags', 'Origin', 'Recycled', 'Campaign(s)', 'Assigned To', 'Added', 'Date Assigned', 'Last Contact', 'Days Since Assigned', '# Channels'];
+  const rows = [csvRow(cols), ...leads.map(l => csvRow([l.channelName, l.platform, l.niche, l.url, l.followers, parseFollowers(l.followers) || '', (l.emails || []).join('; '), (l.emails || []).length, (l.tags || []).join('; '), leadOrigin(l), isRecycled(l) ? 'Yes' : 'No', (l.campaigns || []).join(', '), l.assignedTo || '', fmtAddedAt(l), l.dateAssigned || '', l.lastContactDate || '', daysSince(l.dateAssigned), (l.channels || []).length]))].join('\n');
   downloadFile(rows, filename);
 }
 
@@ -2889,6 +2921,14 @@ function GoogleImportView({
       const dateRaw = get(row, 'dateAssigned');
       const impRaw = get(row, 'imported').trim().toLowerCase();
       const imported = ['yes', 'y', 'true', '1'].includes(impRaw) ? true : ['no', 'n', 'false', '0'].includes(impRaw) ? false : undefined;
+      // Stamp when this lead entered the dashboard. Prefer the sheet's own date
+      // (so a historically-captured lead sorts before a fresh scrape); fall
+      // back to the import time when the sheet has no usable date.
+      let addedAt = new Date().toISOString();
+      if (dateRaw) {
+        const t = new Date(dateRaw).getTime();
+        if (!isNaN(t)) addedAt = new Date(t).toISOString();
+      }
       return {
         id: Date.now() + i,
         channelName: name,
@@ -2903,7 +2943,8 @@ function GoogleImportView({
         dateAssigned: dateRaw || (rep ? today : null),
         lastContactDate: null,
         channels: [name],
-        imported
+        imported,
+        addedAt
       };
     });
     onImport(imported);
@@ -4038,6 +4079,10 @@ function DuplicatesView({
   }, "⚠ These channels appear under more than one record. Reassign them to a single rep or remove the extras so two reps don't work the same lead."), groups.map(g => {
     const head = g.leads[0];
     const conflict = g.reps.length >= 2;
+    // Earliest-added record first, so the rep/import that got this channel
+    // first is at the top. Leads with no known time sort last.
+    const ordered = [...g.leads].sort((a, b) => (leadAddedMs(a) || Infinity) - (leadAddedMs(b) || Infinity));
+    const firstId = ordered[0] && leadAddedMs(ordered[0]) ? ordered[0].id : null;
     return /*#__PURE__*/React.createElement("div", {
       className: "card",
       key: g.key,
@@ -4120,9 +4165,9 @@ function DuplicatesView({
       }
     }, /*#__PURE__*/React.createElement("table", {
       className: "kpi-table"
-    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Assigned To"), /*#__PURE__*/React.createElement("th", null, "Status"), /*#__PURE__*/React.createElement("th", null, "Campaign"), /*#__PURE__*/React.createElement("th", null, "Origin"), /*#__PURE__*/React.createElement("th", null, "Date Assigned"), /*#__PURE__*/React.createElement("th", null, "Email(s)"), /*#__PURE__*/React.createElement("th", {
+    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Assigned To"), /*#__PURE__*/React.createElement("th", null, "Status"), /*#__PURE__*/React.createElement("th", null, "Campaign"), /*#__PURE__*/React.createElement("th", null, "Origin"), /*#__PURE__*/React.createElement("th", null, "Added"), /*#__PURE__*/React.createElement("th", null, "Date Assigned"), /*#__PURE__*/React.createElement("th", null, "Email(s)"), /*#__PURE__*/React.createElement("th", {
       className: "no-print"
-    }, "Action"))), /*#__PURE__*/React.createElement("tbody", null, g.leads.map(l => /*#__PURE__*/React.createElement("tr", {
+    }, "Action"))), /*#__PURE__*/React.createElement("tbody", null, ordered.map(l => /*#__PURE__*/React.createElement("tr", {
       key: l.id
     }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("select", {
       value: l.assignedTo || '',
@@ -4142,7 +4187,23 @@ function DuplicatesView({
       style: {
         color: 'var(--text-dim)'
       }
-    }, "—")), /*#__PURE__*/React.createElement("td", null, (l.campaigns || []).join(', ') || '—'), /*#__PURE__*/React.createElement("td", null, leadOrigin(l)), /*#__PURE__*/React.createElement("td", null, l.dateAssigned || '—'), /*#__PURE__*/React.createElement("td", {
+    }, "—")), /*#__PURE__*/React.createElement("td", null, (l.campaigns || []).join(', ') || '—'), /*#__PURE__*/React.createElement("td", null, leadOrigin(l)), /*#__PURE__*/React.createElement("td", {
+      style: {
+        whiteSpace: 'nowrap',
+        fontSize: 12
+      }
+    }, l.id === firstId && /*#__PURE__*/React.createElement("span", {
+      title: "Earliest record for this channel",
+      style: {
+        marginRight: 6,
+        fontSize: 11,
+        fontWeight: 700,
+        color: 'var(--success,#006644)',
+        background: 'var(--success-light,#E3FCEF)',
+        padding: '2px 6px',
+        borderRadius: 20
+      }
+    }, "🥇 First"), fmtAddedAt(l)), /*#__PURE__*/React.createElement("td", null, l.dateAssigned || '—'), /*#__PURE__*/React.createElement("td", {
       style: {
         fontSize: 12
       }
@@ -5582,6 +5643,7 @@ function App() {
       dateAssigned: x.dateAssigned || null,
       lastContactDate: x.lastContactDate || null,
       channels: Array.isArray(x.channels) ? x.channels : [],
+      addedAt: x.addedAt || null,
       source: x.source
     };
   }
