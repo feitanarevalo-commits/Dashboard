@@ -228,6 +228,18 @@ function exportCloseCSV(leads, filename='close_import.csv') {
   downloadFile(rows, filename);
 }
 
+// One lead in the shape the Make "Close batch import" scenario iterates over:
+// flat fields for the Close contact + leadJson (full object) for round-tripping.
+function toCloseLeadItem(l){
+  return {
+    name:l.channelName, email:(l.emails||[])[0]||'', emails:l.emails||[],
+    url:l.url, platform:l.platform, niche:l.niche, followers:l.followers,
+    status:(l.tags||[]).join(', '), campaigns:l.campaigns||[],
+    assignedTo:l.assignedTo, dateAssigned:l.dateAssigned, closeLeadId:l.closeLeadId||null,
+    leadJson:JSON.stringify(l)
+  };
+}
+
 // Comprehensive Sales KPI report (one row per rep + a totals row). Includes
 // raw counts, derived conversion rates, email coverage, average audience size,
 // and per-campaign / per-platform splits, under a titled header block.
@@ -3214,7 +3226,7 @@ function App() {
     if(!leads.length){ addToast('No leads to save','info'); return; }
     setCloseSyncing(true);
     addToast(`Saving ${leads.length} lead(s) to Close…`,'info');
-    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads})})
+    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'close.create', rep:null, leads:leads.map(toCloseLeadItem)})})
       .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
       .then(text=>{
         // Optional: Close returns [{id, closeLeadId}] so we can update without duplicating next time.
@@ -3245,13 +3257,7 @@ function App() {
     if(!repLeads || !repLeads.length){ addToast(`No leads to send for ${rep}`,'info'); return; }
     // Per-lead shape the Make/n8n "close batch import" scenario iterates over;
     // leadJson round-trips the full dashboard object into Close's description.
-    const payload={action:'close.create', rep, leads:repLeads.map(l=>({
-      name:l.channelName, email:(l.emails||[])[0]||'', emails:l.emails||[],
-      url:l.url, platform:l.platform, niche:l.niche, followers:l.followers,
-      status:(l.tags||[]).join(', '), campaigns:l.campaigns||[],
-      assignedTo:l.assignedTo, dateAssigned:l.dateAssigned, closeLeadId:l.closeLeadId||null,
-      leadJson:JSON.stringify(l)
-    }))};
+    const payload={action:'close.create', rep, leads:repLeads.map(toCloseLeadItem)};
     setCloseSyncing(true);
     addToast(`Sending ${repLeads.length} lead(s) to Close.io for ${rep}…`,'info');
     fetch(CLOSE_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})

@@ -67,10 +67,10 @@ var DEFAULT_CONFIG = {
     historyRestore: true, emailValidation: false,
   },
 
-  // ── Webhook URLs ── paste your n8n webhook URLs here
-  closeWebhook:     'https://app.n8n.cloud/webhook/your-close-import-webhook', // SAVE leads → Close
-  closeLoadWebhook: 'https://app.n8n.cloud/webhook/your-close-load-webhook',   // LOAD leads ← Close
-  scrapeWebhook:    'https://app.n8n.cloud/webhook/your-scrape-webhook',
+  // ── Webhook URLs ── live Make.com scenarios (eu1)
+  closeWebhook:     'https://hook.eu1.make.com/s46mezye3pzk5vyxshdegdn1ze4ojiry', // SAVE leads → Close (batch import)
+  closeLoadWebhook: 'https://app.n8n.cloud/webhook/your-close-load-webhook',       // LOAD leads ← Close (not wired yet)
+  scrapeWebhook:    'https://hook.eu1.make.com/7mkf2sskmhscx672dkj5yxbhge6jtd98', // YouTube scraper gateway
 
   // ── Campaigns ── add as many as you need
   campaigns: [
