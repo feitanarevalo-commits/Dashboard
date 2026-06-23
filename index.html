@@ -5853,9 +5853,23 @@ function AgencyView({
   const [importing, setImporting] = useState(false);
   const visible = isAdmin ? agencies : agencies.filter(a => a.owner === myName);
 
-  // Bulk import: for each visible folder, fetch the sheet tab named exactly
-  // like the folder and drop its leads in. Tabs with no matching folder are
-  // ignored; folders with no matching tab are reported back.
+  // Fetch + parse the sheet tab named exactly like a folder. Throws if the tab
+  // is missing/empty so callers can report it.
+  async function fetchFolderLeads(id, f, idBase) {
+    const {
+      headers,
+      rows
+    } = await gsFetchTableByName(id, f.name);
+    const data = (rows || []).filter(r => r.some(c => String(c).trim()));
+    if (!headers.length || !data.length) throw new Error('empty tab');
+    const defaultRep = (config.salesReps || []).includes(f.owner) ? f.owner : null;
+    const newLeads = gsRowsToLeads(data, gsAutoMap(headers), idBase || Date.now(), defaultRep);
+    if (!newLeads.length) throw new Error('no leads');
+    return newLeads;
+  }
+
+  // Bulk import: every visible folder pulls its matching tab. Tabs with no
+  // matching folder are ignored; folders with no matching tab are reported.
   async function importFromSheets() {
     const id = gsExtractId(sheetUrl.trim());
     if (!id) {
@@ -5873,21 +5887,7 @@ function AgencyView({
     const misses = [];
     for (const f of visible) {
       try {
-        const {
-          headers,
-          rows
-        } = await gsFetchTableByName(id, f.name);
-        const data = (rows || []).filter(r => r.some(c => String(c).trim()));
-        if (!headers.length || !data.length) {
-          misses.push(f.name);
-          continue;
-        }
-        const defaultRep = (config.salesReps || []).includes(f.owner) ? f.owner : null;
-        const newLeads = gsRowsToLeads(data, gsAutoMap(headers), Date.now() + idx++ * 100000, defaultRep);
-        if (!newLeads.length) {
-          misses.push(f.name);
-          continue;
-        }
+        const newLeads = await fetchFolderLeads(id, f, Date.now() + idx++ * 100000);
         if (onImportSheet) onImportSheet(f.id, newLeads);
         added += newLeads.length;
         matched++;
@@ -5897,6 +5897,25 @@ function AgencyView({
     }
     setImporting(false);
     if (matched) addToast(`Imported ${added} lead(s) into ${matched} folder(s)${misses.length ? ` · no matching tab: ${misses.join(', ')}` : ''}`, 'success');else addToast(`No matching tabs found. Name a sheet tab exactly like a folder${misses.length ? ` (tried: ${misses.join(', ')})` : ''}.`, 'error');
+  }
+
+  // Import a single folder's tab (the per-folder button).
+  async function importOneFolder(f) {
+    const id = gsExtractId(sheetUrl.trim());
+    if (!id) {
+      addToast('Paste a Google Sheets URL in the import box above first', 'error');
+      return;
+    }
+    setImporting(true);
+    try {
+      const newLeads = await fetchFolderLeads(id, f);
+      if (onImportSheet) onImportSheet(f.id, newLeads);
+      addToast(`Imported ${newLeads.length} lead(s) into "${f.name}"`, 'success');
+    } catch (e) {
+      addToast(`No matching tab "${f.name}" found in that sheet`, 'error');
+    } finally {
+      setImporting(false);
+    }
   }
   function createFolder() {
     const n = newName.trim();
@@ -6049,7 +6068,10 @@ function AgencyView({
     canEdit: isAdmin || f.owner === myName,
     onUpdate: updateFolder,
     onDelete: deleteFolder,
-    addToast: addToast
+    addToast: addToast,
+    onImportTab: () => importOneFolder(f),
+    importing: importing,
+    sheetReady: !!sheetUrl.trim()
   })));
 }
 function AgencyFolder({
@@ -6060,7 +6082,10 @@ function AgencyFolder({
   canEdit,
   onUpdate,
   onDelete,
-  addToast
+  addToast,
+  onImportTab,
+  importing,
+  sheetReady
 }) {
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(folder.name);
@@ -6158,7 +6183,12 @@ function AgencyFolder({
       display: 'flex',
       gap: 6
     }
-  }, renaming ? /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-xs",
+    disabled: importing || !sheetReady,
+    title: sheetReady ? `Import the sheet tab named "${folder.name}" into this folder` : 'Paste a Google Sheets URL in the import box above first',
+    onClick: onImportTab
+  }, "⇪ Import tab"), renaming ? /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary btn-xs",
     onClick: saveName
   }, "Save") : /*#__PURE__*/React.createElement("button", {

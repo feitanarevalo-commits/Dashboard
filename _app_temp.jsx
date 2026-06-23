@@ -2764,9 +2764,20 @@ function AgencyView({agencies,setAgencies,leads,config,currentUser,isAdmin,addTo
   const [importing,setImporting]=useState(false);
   const visible=isAdmin?agencies:agencies.filter(a=>a.owner===myName);
 
-  // Bulk import: for each visible folder, fetch the sheet tab named exactly
-  // like the folder and drop its leads in. Tabs with no matching folder are
-  // ignored; folders with no matching tab are reported back.
+  // Fetch + parse the sheet tab named exactly like a folder. Throws if the tab
+  // is missing/empty so callers can report it.
+  async function fetchFolderLeads(id, f, idBase){
+    const {headers,rows}=await gsFetchTableByName(id, f.name);
+    const data=(rows||[]).filter(r=>r.some(c=>String(c).trim()));
+    if(!headers.length || !data.length) throw new Error('empty tab');
+    const defaultRep=(config.salesReps||[]).includes(f.owner)?f.owner:null;
+    const newLeads=gsRowsToLeads(data, gsAutoMap(headers), idBase||Date.now(), defaultRep);
+    if(!newLeads.length) throw new Error('no leads');
+    return newLeads;
+  }
+
+  // Bulk import: every visible folder pulls its matching tab. Tabs with no
+  // matching folder are ignored; folders with no matching tab are reported.
   async function importFromSheets(){
     const id=gsExtractId(sheetUrl.trim());
     if(!id){ addToast('Paste a valid Google Sheets URL','error'); return; }
@@ -2775,12 +2786,7 @@ function AgencyView({agencies,setAgencies,leads,config,currentUser,isAdmin,addTo
     let added=0, matched=0, idx=0; const misses=[];
     for(const f of visible){
       try{
-        const {headers,rows}=await gsFetchTableByName(id, f.name);
-        const data=(rows||[]).filter(r=>r.some(c=>String(c).trim()));
-        if(!headers.length || !data.length){ misses.push(f.name); continue; }
-        const defaultRep=(config.salesReps||[]).includes(f.owner)?f.owner:null;
-        const newLeads=gsRowsToLeads(data, gsAutoMap(headers), Date.now()+(idx++)*100000, defaultRep);
-        if(!newLeads.length){ misses.push(f.name); continue; }
+        const newLeads=await fetchFolderLeads(id, f, Date.now()+(idx++)*100000);
         if(onImportSheet) onImportSheet(f.id, newLeads);
         added+=newLeads.length; matched++;
       }catch(e){ misses.push(f.name); }
@@ -2788,6 +2794,19 @@ function AgencyView({agencies,setAgencies,leads,config,currentUser,isAdmin,addTo
     setImporting(false);
     if(matched) addToast(`Imported ${added} lead(s) into ${matched} folder(s)${misses.length?` · no matching tab: ${misses.join(', ')}`:''}`,'success');
     else addToast(`No matching tabs found. Name a sheet tab exactly like a folder${misses.length?` (tried: ${misses.join(', ')})`:''}.`,'error');
+  }
+
+  // Import a single folder's tab (the per-folder button).
+  async function importOneFolder(f){
+    const id=gsExtractId(sheetUrl.trim());
+    if(!id){ addToast('Paste a Google Sheets URL in the import box above first','error'); return; }
+    setImporting(true);
+    try{
+      const newLeads=await fetchFolderLeads(id, f);
+      if(onImportSheet) onImportSheet(f.id, newLeads);
+      addToast(`Imported ${newLeads.length} lead(s) into "${f.name}"`,'success');
+    }catch(e){ addToast(`No matching tab "${f.name}" found in that sheet`,'error'); }
+    finally{ setImporting(false); }
   }
 
   function createFolder(){
@@ -2841,13 +2860,14 @@ function AgencyView({agencies,setAgencies,leads,config,currentUser,isAdmin,addTo
         </div></div>}
       {visible.map(f=>(
         <AgencyFolder key={f.id} folder={f} leads={leads} config={config} isAdmin={isAdmin}
-          canEdit={isAdmin||f.owner===myName} onUpdate={updateFolder} onDelete={deleteFolder} addToast={addToast}/>
+          canEdit={isAdmin||f.owner===myName} onUpdate={updateFolder} onDelete={deleteFolder} addToast={addToast}
+          onImportTab={()=>importOneFolder(f)} importing={importing} sheetReady={!!sheetUrl.trim()}/>
       ))}
     </div>
   );
 }
 
-function AgencyFolder({folder,leads,config,isAdmin,canEdit,onUpdate,onDelete,addToast}) {
+function AgencyFolder({folder,leads,config,isAdmin,canEdit,onUpdate,onDelete,addToast,onImportTab,importing,sheetReady}) {
   const [renaming,setRenaming]=useState(false);
   const [nameDraft,setNameDraft]=useState(folder.name);
   const [pick,setPick]=useState('');
@@ -2877,6 +2897,9 @@ function AgencyFolder({folder,leads,config,isAdmin,canEdit,onUpdate,onDelete,add
           {isAdmin && <span style={{fontSize:10,fontWeight:700,color:'var(--accent)',background:'var(--accent-light)',padding:'2px 7px',borderRadius:20}}>@{folder.owner}</span>}
         </div>
         {canEdit && <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+          <button className="btn btn-outline btn-xs" disabled={importing||!sheetReady}
+            title={sheetReady?`Import the sheet tab named "${folder.name}" into this folder`:'Paste a Google Sheets URL in the import box above first'}
+            onClick={onImportTab}>⇪ Import tab</button>
           {renaming
             ? <button className="btn btn-primary btn-xs" onClick={saveName}>Save</button>
             : <button className="btn btn-ghost btn-xs" onClick={()=>{setNameDraft(folder.name);setRenaming(true);}}>✎ Rename</button>}
