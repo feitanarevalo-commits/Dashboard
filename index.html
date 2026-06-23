@@ -4543,9 +4543,9 @@ function SettingsDrawer({
       label: 'Potential Leads',
       icon: '⭐'
     },
-    nq: {
-      label: 'NQ Leads',
-      icon: '❌'
+    unassigned: {
+      label: 'Unassigned Leads',
+      icon: '⭕'
     },
     contacted: {
       label: 'Contacted Leads',
@@ -5290,9 +5290,9 @@ function GlobalSearch({
     label: 'Potential Leads',
     icon: '★'
   }, {
-    id: 'nq',
-    label: 'NQ Leads',
-    icon: '✕'
+    id: 'unassigned',
+    label: 'Unassigned Leads',
+    icon: '○'
   }, {
     id: 'contacted',
     label: 'Contacted Leads',
@@ -5839,7 +5839,7 @@ function App() {
   recentCutoff.setDate(recentCutoff.getDate() - 7);
   const counts = {
     potential: vLeads.filter(l => l.tags.includes('Potential')).length,
-    nq: vLeads.filter(l => l.tags.includes('Not Qualified')).length,
+    unassigned: vLeads.filter(l => (l.campaigns || []).length === 0).length,
     contacted: vLeads.filter(l => l.tags.includes('Contacted')).length,
     recycle: vLeads.filter(l => l.tags.includes('For Recycle')).length,
     recent: vLeads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff).length,
@@ -5877,11 +5877,11 @@ function App() {
     count: counts.potential,
     cls: 'green'
   }, {
-    id: 'nq',
-    icon: '✕',
-    label: 'NQ Leads',
-    count: counts.nq,
-    cls: 'red'
+    id: 'unassigned',
+    icon: '○',
+    label: 'Unassigned',
+    count: counts.unassigned,
+    cls: 'orange'
   }, {
     id: 'contacted',
     icon: '✉',
@@ -5983,8 +5983,8 @@ function App() {
       filename: "potential_leads",
       printTitle: "Potential Leads"
     });
-    if (tab === 'nq') return /*#__PURE__*/React.createElement(LeadsTable, {
-      leads: vLeads.filter(l => l.tags.includes('Not Qualified')),
+    if (tab === 'unassigned') return /*#__PURE__*/React.createElement(LeadsTable, {
+      leads: vLeads.filter(l => (l.campaigns || []).length === 0),
       onEdit: saveL,
       onDelete: delL,
       onBulkAssign: bulkAssign,
@@ -5994,8 +5994,8 @@ function App() {
       config: config,
       feats: config.features || {},
       campColorMap: campColorMap,
-      filename: "nq_leads",
-      printTitle: "NQ Leads"
+      filename: "unassigned_leads",
+      printTitle: "Unassigned Leads"
     });
     if (tab === 'contacted') return /*#__PURE__*/React.createElement(ContactedView, {
       leads: vLeads,
@@ -6064,7 +6064,7 @@ function App() {
     'lead-mgmt': 'Lead Management',
     'google-import': 'Google Sheets Import',
     potential: 'Potential Leads',
-    nq: 'NQ Leads',
+    unassigned: 'Unassigned Leads',
     contacted: 'Contacted Leads',
     recycle: 'For Recycle',
     recent: 'Recently Assigned',
