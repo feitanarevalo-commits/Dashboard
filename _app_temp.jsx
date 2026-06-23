@@ -123,6 +123,21 @@ function mapDiscoveryResult(item, fallbackPlatform, i){
 function leadKey(l){
   return String(l.channelId || l.url || l.channelName || '').trim().toLowerCase();
 }
+// Parse the pipe-delimited Close description we write on push back into fields,
+// e.g. "URL: x | Platform: YouTube | Niche: Fit | Followers: 90K | Status: Potential
+// | Campaign: MSN | Rep: Pen | Assigned: 2026-06-23". Skips empty/null values.
+function parseCloseDescription(desc){
+  const out={};
+  if(typeof desc!=='string' || !desc) return out;
+  desc.split('|').forEach(part=>{
+    const idx=part.indexOf(':'); if(idx<0) return;
+    const k=part.slice(0,idx).trim().toLowerCase();
+    const v=part.slice(idx+1).trim();
+    if(!v || v.toLowerCase()==='null' || v.toLowerCase()==='undefined') return;
+    if(['url','platform','niche','followers','status','campaign','rep','assigned'].includes(k)) out[k]=v;
+  });
+  return out;
+}
 
 // ─── PERMISSIONS ──────────────────────────────────────────
 function userRole(name, config){
@@ -3181,15 +3196,26 @@ function App() {
   // the dashboard expects, so missing fields don't crash the UI.
   function normalizeLead(x,i){
     x=x||{};
+    // Tolerant of both dashboard-shaped leads and RAW Close lead objects
+    // (name, contacts[].emails[].email, status_label, our pipe-text description).
+    const meta=parseCloseDescription(x.description);
+    const closeId = x.closeLeadId || x.close_id || (typeof x.id==='string' && /^lead_/.test(x.id) ? x.id : null);
+    let emails = Array.isArray(x.emails)?x.emails:(x.email?[x.email]:[]);
+    if(!emails.length && Array.isArray(x.contacts))
+      emails = x.contacts.flatMap(c=>(c&&c.emails||[]).map(e=>e&&e.email).filter(Boolean));
+    let tags = Array.isArray(x.tags)?x.tags:[];
+    if(!tags.length){ const st=meta.status||x.status_label; if(st){ const t=canonTag(st); if(t) tags=[t]; } }
+    let campaigns = Array.isArray(x.campaigns)?x.campaigns:[];
+    if(!campaigns.length && meta.campaign) campaigns = meta.campaign.split(/[;,/]/).map(s=>s.trim()).filter(Boolean);
     return {
-      id: x.id || (Date.now()+Math.floor(Math.random()*1e6)+i),
-      closeLeadId: x.closeLeadId || x.close_id || null,
-      channelName: x.channelName || x.name || ('lead_'+(i+1)),
-      url: x.url || '', platform: x.platform || 'YouTube', niche: x.niche || '',
-      followers: x.followers || '', emails: Array.isArray(x.emails)?x.emails:(x.email?[x.email]:[]),
+      id: (typeof x.id==='number') ? x.id : (Date.now()+Math.floor(Math.random()*1e6)+i),
+      closeLeadId: closeId,
+      channelName: x.channelName || x.name || x.display_name || ('lead_'+(i+1)),
+      url: x.url || meta.url || '', platform: x.platform || meta.platform || 'YouTube', niche: x.niche || meta.niche || '',
+      followers: x.followers || meta.followers || '', emails,
       thumbnail: x.thumbnail || '', channelId: x.channelId || '',
-      tags: Array.isArray(x.tags)?x.tags:[], campaigns: Array.isArray(x.campaigns)?x.campaigns:[],
-      assignedTo: x.assignedTo || null, dateAssigned: x.dateAssigned || null,
+      tags, campaigns,
+      assignedTo: x.assignedTo || meta.rep || null, dateAssigned: x.dateAssigned || meta.assigned || null,
       lastContactDate: x.lastContactDate || null, channels: Array.isArray(x.channels)?x.channels:[],
       links: Array.isArray(x.links)?x.links:[],
       addedAt: x.addedAt || null,

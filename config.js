@@ -69,7 +69,7 @@ var DEFAULT_CONFIG = {
 
   // ── Webhook URLs ── live Make.com scenarios (eu1)
   closeWebhook:     'https://hook.eu1.make.com/s46mezye3pzk5vyxshdegdn1ze4ojiry', // SAVE leads → Close (batch import)
-  closeLoadWebhook: 'https://app.n8n.cloud/webhook/your-close-load-webhook',       // LOAD leads ← Close (not wired yet)
+  closeLoadWebhook: 'https://hook.eu1.make.com/d35hvlju9cgea3mdwcr782ui5vldrkl5',   // LOAD leads ← Close
   scrapeWebhook:    'https://hook.eu1.make.com/amu0xr93i4q214760zi9rqa1lcxlch55', // YouTube scraper gateway
   smartreachWebhook:'https://hook.eu1.make.com/rk8bt363npu9bclbpquev0avr9na6wal', // SEND prospects → SmartReach (name+email)
 
