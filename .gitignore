@@ -3,13 +3,10 @@
 .DS_Store
 Thumbs.db
 
-# Build intermediates (not needed in repo — index.html is the built output)
-_app_temp.jsx
+# Generated bundle — rebuilt from _app_temp.jsx via babel + _embed.mjs
 app.js
-_embed.mjs
-.babelrc
 
-# Node (if you ever add a build step)
+# Node
 node_modules/
 npm-debug.log*
 

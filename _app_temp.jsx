@@ -1,0 +1,2943 @@
+const { useState, useEffect, useCallback, useRef } = React;
+// All constants (PLATFORMS, STATUSES, STATUS_TAGS, TAG_COLORS,
+// DEFAULT_CONFIG, SAMPLE_LEADS, SAMPLE_HISTORY) come from config.js
+
+// ─── UTILS ────────────────────────────────────────────────
+function getRowClass(lead) {
+  const c = lead.campaigns;
+  if(c.includes('MSN') && c.includes('VVV')) return 'row-both';
+  if(c.includes('MSN')) return 'row-msn';
+  if(c.includes('VVV')) return 'row-vvv';
+  return '';
+}
+function avatarLetter(name){ return name ? name[0].toUpperCase() : '?'; }
+function hasStatusTag(lead){ return STATUS_TAGS.some(t=>lead.tags.includes(t)); }
+// Normalize a raw status/tag string from a sheet into a canonical STATUS_TAGS
+// value, so tag-based routing (Potential → rep, Contacted → Contacted tab, …)
+// works no matter how the sheet spells or cases it. Unknown tags pass through.
+function canonTag(raw){
+  const s=String(raw||'').trim();
+  if(!s) return '';
+  const k=s.toLowerCase().replace(/[^a-z]/g,'');
+  const MAP={
+    potential:'Potential', potentials:'Potential', potentiallead:'Potential', potentialleads:'Potential',
+    contacted:'Contacted', contact:'Contacted', contacting:'Contacted',
+    notqualified:'Not Qualified', nq:'Not Qualified', unqualified:'Not Qualified', disqualified:'Not Qualified',
+    existingleads:'Existing Leads', existinglead:'Existing Leads', existing:'Existing Leads',
+    forrecycle:'For Recycle', recycle:'For Recycle', recycled:'For Recycle', recycling:'For Recycle',
+    duplicate:'Duplicate', duplicates:'Duplicate', dupe:'Duplicate', dup:'Duplicate',
+    ht:'HT', hot:'HT', hotlead:'HT', hottlead:'HT',
+  };
+  return MAP[k] || s;
+}
+
+// ─── LEAD ORIGIN: Fresh vs Imported ───────────────────────
+// Fresh   = never contacted on any campaign (a brand-new lead).
+// Imported= has been contacted / recycled / brought in from a sheet
+//           or external import (i.e. previously worked).
+function leadOrigin(lead){
+  // Explicit flag (e.g. the sheet's IMPORTED Yes/No column) always wins.
+  if(lead.imported === true) return 'Imported';
+  if(lead.imported === false) return 'Fresh';
+  const t = lead.tags || [];
+  const worked = !!lead.lastContactDate
+    || t.includes('Contacted') || t.includes('For Recycle') || t.includes('Existing Leads')
+    || lead.source === 'import' || lead.recycled === true;
+  return worked ? 'Imported' : 'Fresh';
+}
+function isRecycled(lead){
+  return (lead.tags||[]).includes('For Recycle') || lead.recycled === true;
+}
+// Parse "1.5M" / "23K" / "12000" → a number for range filtering.
+function parseFollowers(v){
+  if(v==null) return 0;
+  const s=String(v).trim().toUpperCase();
+  const n=parseFloat(s.replace(/[^0-9.]/g,''))||0;
+  if(s.includes('M')) return n*1e6;
+  if(s.includes('K')) return n*1e3;
+  return n;
+}
+function fmtFollowers(n){
+  if(n>=1e6) return (n/1e6).toFixed(n%1e6?1:0)+'M';
+  if(n>=1e3) return (n/1e3).toFixed(n%1e3?1:0)+'K';
+  return String(n);
+}
+// Deterministic pseudo stat so placeholder ER/Growth look stable per lead
+// (clearly cosmetic until real audience data is wired in).
+function pseudoStat(seed, lo, hi){
+  let h=0; const s=String(seed||'x');
+  for(let i=0;i<s.length;i++){ h=(h*31+s.charCodeAt(i))>>>0; }
+  return (lo + (h%1000)/1000*(hi-lo));
+}
+
+// Map a raw result from the Make/Apify scraper into a dashboard lead.
+// Tolerant of field-name variations across Apify actors/platforms.
+function mapDiscoveryResult(item, fallbackPlatform, i){
+  item = item || {};
+  const get=(...keys)=>{ for(const k of keys){ const v=item[k]; if(v!=null && v!=='') return v; } return ''; };
+  // Support raw YouTube Data API search items (nested snippet / id objects).
+  const sn = item.snippet || {};
+  const idObj = (item.id && typeof item.id === 'object') ? item.id : {};
+  const idStr = (typeof item.id === 'string') ? item.id : '';  // channels.list: id is the channel id
+  const ytChannelId = sn.channelId || idObj.channelId || idStr || '';
+  const ytThumb = (sn.thumbnails && (sn.thumbnails.high||sn.thumbnails.medium||sn.thumbnails.default)||{}).url || '';
+  const name=get('channel_name','channelName','username','handle','ownerUsername','name','fullName') || sn.channelTitle || sn.title;
+  let url=get('url','channel_url','channelUrl','profile_url','profileUrl','webUrl','link','video_url','videoUrl','inputUrl');
+  if(!url){
+    if(ytChannelId) url='https://www.youtube.com/channel/'+ytChannelId;
+    else if(idObj.videoId) url='https://www.youtube.com/watch?v='+idObj.videoId;
+  }
+  // Subscriber/follower count — incl. YouTube channels.list statistics (nested).
+  const stats=item.statistics||{};
+  const followersRaw=get('followersCount','followers','subscriberCount','subscribers','subscribers_count','fansCount','fans') || stats.subscriberCount || '';
+  const followers = followersRaw==='' ? '' :
+    ((typeof followersRaw==='number' || /^\d+$/.test(String(followersRaw))) ? fmtFollowers(Number(followersRaw)) : String(followersRaw));
+  const niche=get('niche','category','businessCategoryName','categoryName');
+  const email=get('email','publicEmail','businessEmail');
+  const thumb=get('thumbnail','thumbnailUrl','avatar','profilePic','profilePicUrl','profilePicUrlHD','displayUrl','image','picture','imageUrl') || ytThumb;
+  const channelId=get('channel_id','channelId','channelID','ownerId','authorId','userId','user_id') || ytChannelId;
+  // Determine platform: explicit field → infer from URL → searched tab → fallback.
+  let platform=item.platform || fallbackPlatform || '';
+  if(!platform || platform==='All'){
+    const u=String(url).toLowerCase();
+    platform = (u.includes('youtube')||u.includes('youtu.be')) ? 'YouTube'
+             : u.includes('tiktok') ? 'TikTok'
+             : u.includes('instagram') ? 'Instagram'
+             : (fallbackPlatform || 'YouTube');
+  }
+  return {
+    id: Date.now()+Math.floor(Math.random()*1e6)+i,
+    channelName: String(name||('influencer_'+(i+1))),
+    url: String(url||''),
+    platform: platform,
+    niche: String(niche||''),
+    followers: followers,
+    emails: email ? [String(email)] : [],
+    thumbnail: thumb ? String(thumb) : '',
+    channelId: channelId ? String(channelId) : '',
+    tags: [], campaigns: [], assignedTo: null, dateAssigned: null, lastContactDate: null, channels: [],
+  };
+}
+// Stable identity key for de-duplicating leads: channel ID > URL > name.
+function leadKey(l){
+  return String(l.channelId || l.url || l.channelName || '').trim().toLowerCase();
+}
+
+// ─── PERMISSIONS ──────────────────────────────────────────
+function userRole(name, config){
+  const u = (config.users||[]).find(x=>x.name===name);
+  return u ? u.role : 'employee';
+}
+function isAdminUser(user){ return user && user.role === 'admin'; }
+
+// Effective password = per-browser override (if the user changed it) else the
+// default from config.js. Overrides live in localStorage, so they are
+// per-device only — there is no backend to sync them across browsers.
+function pwKey(name){ return 'enfinity_pw_'+name; }
+function effectivePassword(user){
+  try{ const o=localStorage.getItem(pwKey(user.name)); if(o!=null) return o; }catch(e){}
+  return user.password;
+}
+
+// CSV-safe cell: quote + escape only when the value contains a comma, quote,
+// or newline. Keeps numbers/plain text unquoted so spreadsheets parse cleanly.
+function csvCell(v){
+  const s=v==null?'':String(v);
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function csvRow(arr){ return arr.map(csvCell).join(','); }
+function downloadFile(text, filename, type='text/csv;charset=utf-8'){
+  const blob = new Blob([text],{type});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function pct(n,d){ return d ? Math.round(n/d*1000)/10 : 0; }      // one-decimal %
+function daysSince(dateStr){
+  if(!dateStr) return '';
+  const d=new Date(dateStr); if(isNaN(d)) return '';
+  return Math.max(0,Math.round((Date.now()-d.getTime())/864e5));
+}
+
+// Per-lead export — one row per lead with the full detail set (raw + derived
+// fields) so the download is useful for offline analysis, not just a name list.
+function exportCSV(leads, filename='leads.csv') {
+  const cols = ['Channel','Platform','Niche','URL','Followers','Followers (#)',
+    'Email(s)','# Emails','Status Tags','Origin','Recycled','Campaign(s)',
+    'Assigned To','Date Assigned','Last Contact','Days Since Assigned','# Channels'];
+  const rows = [csvRow(cols), ...leads.map(l => csvRow([
+    l.channelName, l.platform, l.niche, l.url,
+    l.followers, parseFollowers(l.followers)||'',
+    (l.emails||[]).join('; '), (l.emails||[]).length,
+    (l.tags||[]).join('; '), leadOrigin(l), isRecycled(l)?'Yes':'No',
+    (l.campaigns||[]).join(', '), l.assignedTo||'',
+    l.dateAssigned||'', l.lastContactDate||'', daysSince(l.dateAssigned),
+    (l.channels||[]).length
+  ]))].join('\n');
+  downloadFile(rows, filename);
+}
+
+// Comprehensive Sales KPI report (one row per rep + a totals row). Includes
+// raw counts, derived conversion rates, email coverage, average audience size,
+// and per-campaign / per-platform splits, under a titled header block.
+function exportKpiCSV(repRows, info, filename='enfinity_sales_kpis.csv') {
+  info = info || {};
+  const camps = info.campaigns || [];          // [{id,label}]
+  const plats = info.platforms || [];           // ['YouTube',...]
+  const fmtRow = r => {
+    const qualified = r.total - r.nq;
+    return csvRow([
+      r.rep, r.total, r.fresh, r.recycled, r.potential, r.contacted, r.ht, r.nq,
+      pct(r.contacted,r.total), pct(r.potential,r.total), pct(qualified,r.total),
+      r.withEmail, pct(r.withEmail,r.total), r.avgFoll||0,
+      ...camps.map(c=>(r.byCampaign&&r.byCampaign[c.id])||0),
+      ...plats.map(p=>(r.byPlatform&&r.byPlatform[p])||0),
+    ]);
+  };
+  // Totals row: sum counts, recompute rates/averages on the aggregate.
+  const sum = k => repRows.reduce((s,r)=>s+(r[k]||0),0);
+  const tFoll = repRows.reduce((s,r)=>s+((r.avgFoll||0)*(r.follKnown||0)),0);
+  const tFollKnown = sum('follKnown');
+  const totals = {
+    rep:'All Reps', total:sum('total'), fresh:sum('fresh'), recycled:sum('recycled'),
+    potential:sum('potential'), contacted:sum('contacted'), ht:sum('ht'), nq:sum('nq'),
+    withEmail:sum('withEmail'), avgFoll: tFollKnown?Math.round(tFoll/tFollKnown):0,
+    byCampaign:Object.fromEntries(camps.map(c=>[c.id,repRows.reduce((s,r)=>s+((r.byCampaign&&r.byCampaign[c.id])||0),0)])),
+    byPlatform:Object.fromEntries(plats.map(p=>[p,repRows.reduce((s,r)=>s+((r.byPlatform&&r.byPlatform[p])||0),0)])),
+  };
+  const cols = ['Sales Rep','Total Assigned','Fresh','Recycled','Potential','Contacted','High Ticket','Not Qualified',
+    'Contact Rate %','Potential Rate %','Qualified Rate %','With Email','Email Coverage %','Avg Followers',
+    ...camps.map(c=>`Campaign: ${c.label}`), ...plats.map(p=>`Platform: ${p}`)];
+  const lines = [
+    'Enfinity Sales Dashboard — Sales KPI Report',
+    `Period:,${info.period||''}`,
+    `Date range:,${info.rangeStart||''} to ${info.rangeEnd||''}`,
+    `Generated:,${new Date().toISOString().replace('T',' ').slice(0,16)}`,
+    '',
+    csvRow(cols),
+    ...repRows.map(fmtRow),
+    fmtRow(totals),
+  ];
+  downloadFile(lines.join('\n'), filename);
+}
+
+function exportPDF(repName) {
+  const style = document.createElement('style');
+  style.id = 'print-style';
+  style.textContent = `@media print { .no-print,.sidebar,.topbar,.toolbar,.main-header,.drawer,.drawer-overlay,.toasts { display: none !important; } .print-header { display: block !important; } body { font-size: 11pt; } }`;
+  document.head.appendChild(style);
+  document.querySelector('.print-header') && (document.querySelector('.print-header').style.display='block');
+  window.print();
+  setTimeout(() => { const s = document.getElementById('print-style'); s && s.remove(); }, 500);
+}
+
+// ─── TOAST ────────────────────────────────────────────────
+function Toast({toasts}) {
+  const icons = {success:'✅',error:'❌',info:'ℹ️'};
+  return <div className="toasts">{toasts.map(t=><div key={t.id} className={`toast ${t.type}`}><span>{icons[t.type]}</span>{t.msg}</div>)}</div>;
+}
+
+// ─── TAG BADGE ────────────────────────────────────────────
+const TAG_COLORS={
+  'Potential':{bg:'#E3FCF2',color:'#00875A'},
+  'Not Qualified':{bg:'#FFEBE6',color:'#DE350B'},
+  'Contacted':{bg:'#EBF2FF',color:'#1366D6'},
+  'For Recycle':{bg:'#FFF4E5',color:'#FF8B00'},
+  'Existing Leads':{bg:'#EAE6FF',color:'#6554C0'},
+  'Duplicate':{bg:'#F0F2F5',color:'#68737D'},
+  'HT':{bg:'#FFF4E5',color:'#FF8B00'},
+};
+
+function TagBadge({tag}) {
+  if(tag==='HT') return <span className="tag tag-ht">⚡ HT</span>;
+  return <span className={`tag ${STATUS_CLS[tag]||'tag-duplicate'}`}>{tag}</span>;
+}
+
+// ─── TOGGLE ───────────────────────────────────────────────
+function Toggle({checked,onChange}) {
+  return (
+    <label className="toggle">
+      <input type="checkbox" checked={checked} onChange={e=>onChange(e.target.checked)} />
+      <div className="toggle-track" />
+      <div className="toggle-thumb" />
+    </label>
+  );
+}
+
+// ─── LEAD MODAL ───────────────────────────────────────────
+function LeadModal({lead,onClose,onSave,onDelete,config}) {
+  const [form,setForm] = useState({
+    ...lead,
+    emails:[...(lead.emails||[])],
+    tags: Array.isArray(lead.tags) ? [...lead.tags] : [],
+  });
+  const [newEmail,setNewEmail] = useState('');
+  const [newUrl,setNewUrl] = useState('');
+  const [confirmDel,setConfirmDel] = useState(false);
+  function upd(k,v){setForm(f=>({...f,[k]:v}));}
+  function addEmail(){if(newEmail&&!form.emails.includes(newEmail)){setForm(f=>({...f,emails:[...f.emails,newEmail]}));setNewEmail('');}}
+  function delEmail(e){setForm(f=>({...f,emails:f.emails.filter(x=>x!==e)}));}
+  function addUrl(){const u=newUrl.trim();if(u){setForm(f=>({...f,channels:[...(f.channels||[]),u]}));setNewUrl('');}}
+  function delUrl(i){setForm(f=>({...f,channels:(f.channels||[]).filter((_,j)=>j!==i)}));}
+  function toggleTag(t){
+    const tags=form.tags||[];
+    upd('tags', tags.includes(t) ? tags.filter(x=>x!==t) : [...tags,t]);
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal">
+        <div className="modal-header">
+          <div>
+            <h2>Edit Lead</h2>
+            <p style={{color:'var(--text-dim)',fontSize:13,marginTop:3}}>{lead.channelName}</p>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
+        </div>
+        <div className="form-group"><label className="form-label">Channel Name</label><input value={form.channelName} onChange={e=>upd('channelName',e.target.value)}/></div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+          <div className="form-group"><label className="form-label">Platform</label><select value={form.platform} onChange={e=>upd('platform',e.target.value)} style={{width:'100%'}}>{PLATFORMS.map(p=><option key={p}>{p}</option>)}</select></div>
+          <div className="form-group"><label className="form-label">Niche</label><input value={form.niche} onChange={e=>upd('niche',e.target.value)}/></div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+          <div className="form-group"><label className="form-label">Followers / Subscribers</label><input value={form.followers} onChange={e=>upd('followers',e.target.value)}/></div>
+        </div>
+        <div className="form-group">
+          <label className="form-label" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            Channel URLs
+            <span style={{fontSize:10,fontWeight:400,color:'var(--text-light)',textTransform:'none',letterSpacing:0}}>First URL = primary link shown in table</span>
+          </label>
+          <div className="email-rows">
+            <div className="email-row">
+              <input value={form.url||''} onChange={e=>upd('url',e.target.value)} placeholder="Primary channel URL (e.g. youtube.com/@handle)" style={{flex:1}}/>
+            </div>
+            {(form.channels||[]).map((u,i)=>(
+              <div className="email-row" key={i}>
+                <input value={u} onChange={e=>{const arr=[...(form.channels||[])];arr[i]=e.target.value;upd('channels',arr);}} placeholder="Additional channel URL..."/>
+                <button className="btn btn-danger btn-xs" onClick={()=>delUrl(i)}>✕</button>
+              </div>
+            ))}
+            <div className="email-row">
+              <input placeholder="Add another channel URL..." value={newUrl} onChange={e=>setNewUrl(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addUrl()}/>
+              <button className="btn btn-outline btn-xs" onClick={addUrl}>+ Add URL</button>
+            </div>
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Emails</label>
+          <div className="email-rows">
+            {form.emails.map((em,i)=>(
+              <div className="email-row" key={i}>
+                <input value={em} onChange={e=>{const arr=[...form.emails];arr[i]=e.target.value;upd('emails',arr);}}/>
+                <button className="btn btn-danger btn-xs" onClick={()=>delEmail(em)}>✕</button>
+              </div>
+            ))}
+            <div className="email-row">
+              <input placeholder="Add email address..." value={newEmail} onChange={e=>setNewEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addEmail()}/>
+              <button className="btn btn-outline btn-xs" onClick={addEmail}>+ Add</button>
+            </div>
+          </div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+          <div className="form-group">
+            <label className="form-label">Assign to Rep</label>
+            <select value={form.assignedTo||''} onChange={e=>{upd('assignedTo',e.target.value||null);if(e.target.value&&!form.dateAssigned)upd('dateAssigned',new Date().toISOString().split('T')[0]);}} style={{width:'100%'}}>
+              <option value="">— Unassigned —</option>
+              {(config.salesReps||[]).map(r=><option key={r}>{r}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Date Assigned</label>
+            <input type="date" value={form.dateAssigned||''} onChange={e=>upd('dateAssigned',e.target.value)}/>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <div>
+            {!confirmDel
+              ? <button className="btn btn-danger btn-sm" onClick={()=>setConfirmDel(true)}>🗑 Delete Lead</button>
+              : <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:12,color:'var(--danger)',fontWeight:600}}>Confirm delete?</span>
+                  <button className="btn btn-danger btn-sm" onClick={()=>{onDelete(lead.id);onClose();}}>Yes, Delete</button>
+                  <button className="btn btn-ghost btn-sm" onClick={()=>setConfirmDel(false)}>Cancel</button>
+                </div>
+            }
+          </div>
+          <div className="modal-footer-right">
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" onClick={()=>{onSave(form);onClose();}}>Save Changes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CONTEXT MENU ────────────────────────────────────────
+function ContextMenu({x,y,lead,sel,allLeads,config,campColorMap,onEdit,onDelete,onOpenEdit,onClose}) {
+  const isBulk=sel&&sel.length>1&&sel.includes(lead.id);
+  const [live,setLive]=useState({...lead});
+  const ref=React.useRef(null);
+  useEffect(()=>{
+    function outside(e){if(ref.current&&!ref.current.contains(e.target))onClose();}
+    function esc(e){if(e.key==='Escape')onClose();}
+    document.addEventListener('mousedown',outside);
+    document.addEventListener('keydown',esc);
+    return()=>{document.removeEventListener('mousedown',outside);document.removeEventListener('keydown',esc);};
+  },[]);
+  const pos={top:y,left:x};
+  useEffect(()=>{
+    const el=ref.current; if(!el) return;
+    const m=8, vw=window.innerWidth, vh=window.innerHeight;
+    const w=el.offsetWidth, fullH=el.scrollHeight;
+    // Clamp horizontally, choose a top that keeps the menu on-screen, then cap
+    // its height to the space below that top so it scrolls instead of overflowing.
+    let left=x, top=y;
+    if(left + w > vw - m) left = Math.max(m, vw - w - m);
+    const h = Math.min(fullH, vh - 2*m);
+    if(top + h > vh - m) top = Math.max(m, vh - h - m);
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    el.style.maxHeight = (vh - top - m) + 'px';
+  },[]);
+  function applyToTargets(patch){
+    if(isBulk){
+      (allLeads||[]).filter(l=>sel.includes(l.id)).forEach(l=>{
+        let u={...l};
+        if(patch.tags!==undefined) u.tags=patch.tags(l.tags);
+        if(patch.campaigns!==undefined) u.campaigns=patch.campaigns(l.campaigns);
+        if(patch.assignedTo!==undefined){u.assignedTo=patch.assignedTo;u.dateAssigned=new Date().toISOString().split('T')[0];}
+        onEdit(u);
+      });
+    }
+  }
+  function toggleTag(t){
+    // Single-select: choosing a tag replaces any existing one (toggles off if same).
+    const nextTags=tags=>tags.includes(t)?[]:[t];
+    if(isBulk){applyToTargets({tags:nextTags});}
+    const u={...live,tags:nextTags(live.tags)};setLive(u);onEdit(u);
+  }
+  function toggleCamp(c){
+    const nextCamps=camps=>camps.includes(c)?camps.filter(x=>x!==c):[...camps,c];
+    if(isBulk){applyToTargets({campaigns:nextCamps});}
+    const u={...live,campaigns:nextCamps(live.campaigns)};setLive(u);onEdit(u);
+  }
+  function assignRep(r){
+    if(isBulk){applyToTargets({assignedTo:r});}
+    const u={...live,assignedTo:r,dateAssigned:new Date().toISOString().split('T')[0]};
+    setLive(u);onEdit(u);onClose();
+  }
+  function openAll(){
+    const targets = isBulk ? (allLeads||[]).filter(l=>sel.includes(l.id)) : [live];
+    const urls = targets.map(l=>l.url).filter(Boolean);
+    urls.forEach(u=>{
+      const a=document.createElement('a');
+      a.href=u; a.target='_blank'; a.rel='noopener noreferrer';
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+    onClose();
+  }
+  const openCount = isBulk ? (allLeads||[]).filter(l=>sel.includes(l.id) && l.url).length : (live.url?1:0);
+  return(
+    <div className="ctx-menu" ref={ref} style={{top:y,left:x}}>
+      {isBulk&&<div style={{background:'var(--accent)',color:'white',fontSize:11,fontWeight:700,padding:'6px 14px',textAlign:'center'}}>
+        Applying to {sel.length} selected leads
+      </div>}
+      {!isBulk&&<div className="ctx-item" onClick={()=>{onOpenEdit(live);onClose();}}>
+        <span>✏</span> Edit Lead
+      </div>}
+      {openCount>0&&<div className="ctx-item" onClick={openAll}>
+        <span>🔗</span> {isBulk?`Open ${openCount} profile${openCount!==1?'s':''} in new tabs`:'Open profile in new tab'}
+      </div>}
+      <div className="ctx-sep"/>
+      <div className="ctx-section-label">Tags</div>
+      {[...STATUSES,'HT'].map(t=>{
+        const on=live.tags.includes(t);
+        const c=TAG_COLORS[t]||{bg:'#F0F2F5',color:'#68737D'};
+        return(
+          <div key={t} className="ctx-item" onClick={()=>toggleTag(t)}>
+            <div style={{width:14,height:14,borderRadius:3,border:`2px solid ${on?c.color:'var(--border)'}`,background:on?c.color:'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              {on&&<span style={{color:'white',fontSize:8,lineHeight:1}}>✓</span>}
+            </div>
+            <span style={on?{color:c.color,fontWeight:600}:{}}>{t==='HT'?'⚡ HT':t}</span>
+          </div>
+        );
+      })}
+      <div className="ctx-sep"/>
+      <div className="ctx-section-label">Campaign</div>
+      {(config.campaigns||[]).map(camp=>{
+        const on=live.campaigns.includes(camp.id);
+        return(
+          <div key={camp.id} className="ctx-item" onClick={()=>toggleCamp(camp.id)}>
+            <div style={{width:14,height:14,borderRadius:3,border:`2px solid ${on?camp.color:'var(--border)'}`,background:on?camp.color:'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              {on&&<span style={{color:'white',fontSize:8,lineHeight:1}}>✓</span>}
+            </div>
+            <span style={{color:camp.color,fontWeight:600}}>● {camp.label}</span>
+          </div>
+        );
+      })}
+      <div className="ctx-sep"/>
+      <div className="ctx-section-label">Assign to Rep</div>
+      {(config.salesReps||[]).map(r=>{
+        const on=live.assignedTo===r;
+        return(
+          <div key={r} className="ctx-item" onClick={()=>assignRep(r)}>
+            <div style={{width:20,height:20,borderRadius:'50%',background:on?'var(--accent)':'var(--accent-light)',color:on?'white':'var(--accent)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:700,flexShrink:0}}>{r[0]}</div>
+            <span style={on?{fontWeight:600}:{}}>{r}</span>
+            {on&&<span style={{marginLeft:'auto',color:'var(--accent)',fontSize:11}}>✓</span>}
+          </div>
+        );
+      })}
+      <div className="ctx-sep"/>
+      <div className="ctx-item danger" onClick={()=>{if(window.confirm(`Delete "${live.channelName}"?`)){onDelete(live.id);}onClose();}}>
+        <span>🗑</span> Delete Lead
+      </div>
+    </div>
+  );
+}
+
+// ─── INLINE PICKER ───────────────────────────────────────
+function InlinePicker({type,selected,options,campColorMap,onChange,single=false}) {
+  const [open,setOpen]=useState(false);
+  const ref=React.useRef(null);
+  useEffect(()=>{
+    function outside(e){if(ref.current&&!ref.current.contains(e.target))setOpen(false);}
+    document.addEventListener('mousedown',outside);
+    return()=>document.removeEventListener('mousedown',outside);
+  },[]);
+  function toggle(val){
+    // single = only one selection allowed (replace); else multi-select toggle.
+    const next = single
+      ? (selected.includes(val) ? [] : [val])
+      : (selected.includes(val) ? selected.filter(x=>x!==val) : [...selected,val]);
+    onChange(next);
+    if(single) setOpen(false);
+  }
+  return(
+    <div className="inline-picker" style={{position:'relative',minWidth:80}} ref={ref}>
+      <div style={{display:'flex',gap:3,flexWrap:'wrap',alignItems:'center',cursor:'pointer',minHeight:24}} onClick={()=>setOpen(o=>!o)}>
+        {selected.length===0&&<span style={{fontSize:11,color:'var(--text-light)',padding:'2px 4px'}}>— ▾</span>}
+        {type==='tag'&&selected.map(t=>{
+          const c=TAG_COLORS[t]||{bg:'#F0F2F5',color:'#68737D'};
+          return<span key={t} style={{fontSize:10,fontWeight:600,padding:'2px 7px',borderRadius:20,background:c.bg,color:c.color,whiteSpace:'nowrap'}}>{t==='HT'?'⚡ HT':t}</span>;
+        })}
+        {type==='campaign'&&selected.map(c=>{
+          const col=(campColorMap&&campColorMap[c])||'var(--accent)';
+          return<span key={c} style={{fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:20,background:col+'20',color:col,whiteSpace:'nowrap'}}>● {c}</span>;
+        })}
+        {selected.length>0&&<span style={{fontSize:9,color:'var(--text-dim)',opacity:.7}}>▾</span>}
+      </div>
+      {open&&(
+        <div style={{position:'fixed',zIndex:500,background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius)',boxShadow:'var(--shadow-lg)',minWidth:170,padding:'6px 0',marginTop:4}}
+          ref={el=>{if(el){const r=ref.current.getBoundingClientRect();el.style.top=(r.bottom+4)+'px';el.style.left=r.left+'px';}}}>
+          {options.map(opt=>{
+            const val=opt.id||opt;
+            const active=selected.includes(val);
+            let pill;
+            if(type==='tag'){const c=TAG_COLORS[val]||{bg:'#F0F2F5',color:'#68737D'};pill=<span style={{fontSize:11,fontWeight:600,padding:'1px 8px',borderRadius:20,background:c.bg,color:c.color}}>{val==='HT'?'⚡ HT':val}</span>;}
+            else{const col=(campColorMap&&campColorMap[val])||'var(--accent)';pill=<span style={{fontSize:11,fontWeight:700,padding:'1px 8px',borderRadius:20,background:col+'20',color:col}}>● {val}</span>;}
+            return(
+              <div key={val} style={{display:'flex',alignItems:'center',gap:8,padding:'7px 14px',cursor:'pointer',background:active?'var(--accent-light)':'transparent'}} onClick={()=>toggle(val)}>
+                <div style={{width:14,height:14,borderRadius:3,border:`2px solid ${active?'var(--accent)':'var(--border)'}`,background:active?'var(--accent)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                  {active&&<span style={{color:'white',fontSize:9,fontWeight:700}}>✓</span>}
+                </div>
+                {pill}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── COL HEADER (with filter dropdown) ───────────────────
+function ColHeader({col, label, sortCol, sortDir, onSort, leads, colFilter, setColFilter, openFilterCol, setOpenFilterCol}) {
+  const ref = useRef(null);
+  const isOpen = openFilterCol === col;
+  const hasFilter = colFilter[col] != null;
+
+  useEffect(()=>{
+    if(!isOpen) return;
+    function outside(e){
+      if(ref.current && !ref.current.contains(e.target)) setOpenFilterCol(null);
+    }
+    function esc(e){ if(e.key==='Escape') setOpenFilterCol(null); }
+    document.addEventListener('mousedown', outside);
+    document.addEventListener('keydown', esc);
+    return()=>{ document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', esc); };
+  },[isOpen]);
+
+  // Build filter options for this column
+  function getOptions(){
+    if(col==='tags'){
+      const all=new Set();
+      leads.forEach(l=>(l.tags||[]).forEach(t=>all.add(t)));
+      const opts=[...all];
+      opts.push('Unassigned');
+      return opts;
+    }
+    if(col==='assignedTo'){
+      const all=new Set();
+      leads.forEach(l=>{ if(l.assignedTo) all.add(l.assignedTo); });
+      return [...all,'Unassigned'];
+    }
+    if(col==='campaign'){
+      const all=new Set();
+      leads.forEach(l=>(l.campaigns||[]).forEach(c=>all.add(c)));
+      return [...all,'None'];
+    }
+    if(col==='platform'){
+      const all=new Set();
+      leads.forEach(l=>{ if(l.platform) all.add(l.platform); });
+      return [...all];
+    }
+    if(col==='origin'){
+      return ['Fresh','Imported'];
+    }
+    return [];
+  }
+
+  const filterOpts = getOptions();
+  const isSorted = sortCol===col;
+  const sortLabel = isSorted ? (sortDir==='asc'?'▲':'▼') : '⇅';
+
+  function handleSort(dir){
+    onSort(col, dir);
+    setOpenFilterCol(null);
+  }
+  function handleFilter(val){
+    setColFilter(f=>({...f,[col]:val}));
+    setOpenFilterCol(null);
+  }
+  function clearFilter(){
+    setColFilter(f=>{const n={...f};delete n[col];return n;});
+    setOpenFilterCol(null);
+  }
+
+  return(
+    <th style={{position:'relative',userSelect:'none',whiteSpace:'nowrap',cursor:'pointer'}}
+      className={`sortable${isSorted?' sort-'+sortDir:''}`}
+      ref={ref}>
+      <span onClick={()=>setOpenFilterCol(isOpen?null:col)} style={{display:'inline-flex',alignItems:'center',gap:4}}>
+        {label}
+        <span className="sort-chevron" style={{fontSize:9,opacity: hasFilter?1:.4,color:hasFilter?'var(--accent)':undefined}}>
+          {hasFilter ? '●' : sortLabel}
+        </span>
+      </span>
+      {isOpen&&(
+        <div style={{position:'fixed',zIndex:600,background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius)',boxShadow:'var(--shadow-lg)',minWidth:180,padding:'4px 0'}}
+          ref={el=>{
+            if(el){
+              const thRect=ref.current.getBoundingClientRect();
+              el.style.top=(thRect.bottom+2)+'px';
+              el.style.left=thRect.left+'px';
+            }
+          }}
+          onClick={e=>e.stopPropagation()}>
+          <div className="col-filter-item" onClick={()=>handleSort('asc')}>Sort A → Z</div>
+          <div className="col-filter-item" onClick={()=>handleSort('desc')}>Sort Z → A</div>
+          {filterOpts.length>0&&<>
+            <div className="col-filter-sep"/>
+            <div className="col-filter-section">Filter</div>
+            {filterOpts.map(opt=>(
+              <div key={opt} className={`col-filter-item${colFilter[col]===opt?' col-filter-active':''}`} onClick={()=>handleFilter(opt)}>
+                {opt}
+              </div>
+            ))}
+          </>}
+          {hasFilter&&<>
+            <div className="col-filter-sep"/>
+            <div className="col-filter-item col-filter-clear" onClick={clearFilter}>✕ Clear filter</div>
+          </>}
+        </div>
+      )}
+    </th>
+  );
+}
+
+// ─── INLINE EMAIL (paste/edit email directly in the table) ──
+function InlineEmail({emails, onSave}) {
+  const [editing,setEditing]=useState(false);
+  const [val,setVal]=useState('');
+  const list=Array.isArray(emails)?emails:[];
+  const rest=list.slice(1);
+  function start(e){ e.stopPropagation(); setVal(list[0]||''); setEditing(true); }
+  function commit(){ const v=val.trim(); onSave(v?[v,...rest]:rest); setEditing(false); }
+  const stop=e=>e.stopPropagation();
+  if(editing){
+    return <input className="inline-email-input" autoFocus value={val}
+      onClick={stop} onMouseDown={stop}
+      onChange={e=>setVal(e.target.value)} onBlur={commit}
+      onKeyDown={e=>{ if(e.key==='Enter'){e.preventDefault();commit();} else if(e.key==='Escape'){setEditing(false);} }}
+      placeholder="paste email…"/>;
+  }
+  return (
+    <span className="inline-picker" onMouseDown={stop} onClick={start} title="Click to add / edit email">
+      {list[0]
+        ? <span className="inline-email">{list[0]}</span>
+        : <span className="inline-email-empty">+ email</span>}
+      {list.length>1 && <span className="more-emails">+{list.length-1}</span>}
+    </span>
+  );
+}
+
+// ─── LEADS TABLE ──────────────────────────────────────────
+function LeadsTable({leads,onEdit,onDelete,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
+  const [sel,setSel] = useState([]);
+  const [searchState,setSearchState] = useState('');
+  // When the parent provides search control (e.g. Scraper uses it as the
+  // scrape keyword), the box is controlled by the parent; otherwise local.
+  const search = onSearchChange!=null ? (searchValue||'') : searchState;
+  const setSearch = onSearchChange!=null ? onSearchChange : setSearchState;
+  const [filterStatus,setFilterStatus] = useState('');
+  const [filterRep,setFilterRep] = useState('');
+  const [sortCol,setSortCol] = useState('');
+  const [sortDir,setSortDir] = useState('asc');
+  const [bulkRep,setBulkRep] = useState('');
+  const [bulkTags,setBulkTags] = useState([]);
+  const [bulkCamps,setBulkCamps] = useState([]);
+  const [editLead,setEditLead] = useState(null);
+  const [ctxMenu,setCtxMenu] = useState(null);
+  const [page,setPage] = useState(1);
+  const [colFilter,setColFilter] = useState({});
+  const [openFilterCol,setOpenFilterCol] = useState(null);
+  const PAGE_SIZE=25;
+
+  const cols = config.columns||{};
+  const allReps = config.salesReps||[];
+
+  function handleSort(col, dir){
+    setSortCol(col);
+    setSortDir(dir||'asc');
+  }
+
+  // Apply column filters on top of search/status/rep filters
+  const filtered = leads.filter(l=>{
+    const s=(searchFilters?search:'').toLowerCase();
+    if(s && !l.channelName.toLowerCase().includes(s) && !l.niche.toLowerCase().includes(s) && !l.platform.toLowerCase().includes(s)) return false;
+    if(filterStatus && !l.tags.includes(filterStatus)) return false;
+    if(filterRep && l.assignedTo!==filterRep) return false;
+    // Column filters
+    if(colFilter.tags){
+      if(colFilter.tags==='Unassigned'){if((l.tags||[]).length>0) return false;}
+      else{if(!(l.tags||[]).includes(colFilter.tags)) return false;}
+    }
+    if(colFilter.assignedTo){
+      if(colFilter.assignedTo==='Unassigned'){if(l.assignedTo) return false;}
+      else{if(l.assignedTo!==colFilter.assignedTo) return false;}
+    }
+    if(colFilter.campaign){
+      if(colFilter.campaign==='None'){if((l.campaigns||[]).length>0) return false;}
+      else{if(!(l.campaigns||[]).includes(colFilter.campaign)) return false;}
+    }
+    if(colFilter.platform){
+      if(l.platform!==colFilter.platform) return false;
+    }
+    if(colFilter.origin){
+      if(leadOrigin(l)!==colFilter.origin) return false;
+    }
+    return true;
+  }).sort((a,b)=>{
+    if(!sortCol) return 0;
+    const dir=sortDir==='asc'?1:-1;
+    if(sortCol==='channelName') return dir*a.channelName.localeCompare(b.channelName);
+    if(sortCol==='platform') return dir*(a.platform||'').localeCompare(b.platform||'');
+    if(sortCol==='niche') return dir*(a.niche||'').localeCompare(b.niche||'');
+    if(sortCol==='followers'){
+      const fa=parseInt(String(a.followers).replace(/[^0-9]/g,''))||0;
+      const fb=parseInt(String(b.followers).replace(/[^0-9]/g,''))||0;
+      return dir*(fa-fb);
+    }
+    if(sortCol==='assignedTo') return dir*(a.assignedTo||'').localeCompare(b.assignedTo||'');
+    if(sortCol==='dateAssigned') return dir*(a.dateAssigned||'').localeCompare(b.dateAssigned||'');
+    return 0;
+  });
+
+  useEffect(()=>setPage(1),[search,filterStatus,filterRep,sortCol,sortDir,colFilter,leads.length]);
+  const totalPages=Math.max(1,Math.ceil(filtered.length/PAGE_SIZE));
+  const paginated=filtered.slice((page-1)*PAGE_SIZE,page*PAGE_SIZE);
+
+  const allSel=filtered.length>0&&filtered.every(l=>sel.includes(l.id));
+  function toggleAll(){setSel(allSel?[]:filtered.map(l=>l.id));}
+  function toggleOne(id){setSel(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);}
+  const lastIdx=useRef(null);
+  // Drag-to-select (marquee): press on a row/empty area and sweep across rows.
+  const dragging=useRef(false);
+  const dragStart=useRef(null);
+  const didDrag=useRef(false);
+  const INTERACTIVE='input,select,button,a,.inline-picker,.channel-name-link';
+  useEffect(()=>{
+    function up(){ dragging.current=false; }
+    document.addEventListener('mouseup',up);
+    return()=>document.removeEventListener('mouseup',up);
+  },[]);
+  function rowMouseDown(e,idx){
+    if(e.button!==0 || e.target.closest(INTERACTIVE)) return;
+    dragging.current=true; didDrag.current=false; dragStart.current=idx;
+  }
+  function containerMouseDown(e){
+    if(e.button!==0) return;
+    if(e.target.closest('tr')||e.target.closest('thead')||e.target.closest(INTERACTIVE)) return;
+    dragging.current=true; didDrag.current=false; dragStart.current=null;
+  }
+  function rowMouseEnter(idx){
+    if(!dragging.current) return;
+    if(dragStart.current==null) dragStart.current=idx;
+    if(idx!==dragStart.current) didDrag.current=true;
+    const a=Math.min(dragStart.current,idx), b=Math.max(dragStart.current,idx);
+    setSel(paginated.slice(a,b+1).map(l=>l.id));
+  }
+  function rowClick(e,lead,idx){
+    // Ignore clicks on interactive cell content (links, inputs, pickers, buttons).
+    if(e.target.closest(INTERACTIVE)) return;
+    if(didDrag.current){ didDrag.current=false; return; } // was a drag-select, not a click
+    if(e.shiftKey && lastIdx.current!=null){
+      const a=Math.min(lastIdx.current,idx), b=Math.max(lastIdx.current,idx);
+      const ids=paginated.slice(a,b+1).map(l=>l.id);
+      setSel(s=>Array.from(new Set([...s,...ids])));
+    } else {
+      toggleOne(lead.id);
+      lastIdx.current=idx;
+    }
+  }
+  function openSelected(){
+    const targets=filtered.filter(l=>sel.includes(l.id));
+    targets.map(l=>l.url).filter(Boolean).forEach(u=>{
+      const a=document.createElement('a'); a.href=u; a.target='_blank'; a.rel='noopener noreferrer';
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+  }
+
+  function doSaveBulk(){
+    const today=new Date().toISOString().split('T')[0];
+    sel.forEach(id=>{
+      const l=leads.find(x=>x.id===id);if(!l)return;
+      let u={...l};
+      if(bulkRep){u.assignedTo=bulkRep;u.dateAssigned=today;}
+      if(bulkTags.length){u.tags=[...bulkTags];}  // single-select: replace tag
+      bulkCamps.forEach(c=>{if(!u.campaigns.includes(c))u.campaigns=[...u.campaigns,c];});
+      onEdit(u);
+    });
+    setSel([]);setBulkRep('');setBulkTags([]);setBulkCamps([]);
+  }
+  function toggleBulkTag(t){setBulkTags(ts=>ts.includes(t)?[]:[t]);}
+  function toggleBulkCamp(c){setBulkCamps(cs=>cs.includes(c)?cs.filter(x=>x!==c):[...cs,c]);}
+  function patchLead(id,patch){const l=leads.find(x=>x.id===id);if(l)onEdit({...l,...patch});}
+  function handleCtx(e,lead){e.preventDefault();setCtxMenu({x:e.clientX,y:e.clientY,lead});}
+
+  const colHeaderProps = {sortCol,sortDir,onSort:handleSort,leads,colFilter,setColFilter,openFilterCol,setOpenFilterCol};
+
+  return (
+    <div className={embedded?'lt-embedded':''} style={embedded?{display:'flex',flexDirection:'column'}:{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
+      <div className="toolbar no-print">
+        {toolbarStart}
+        <div className="search-field">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input placeholder={searchPlaceholder} value={search} onChange={e=>setSearch(e.target.value)}/>
+        </div>
+        {toolbarAfterSearch}
+        <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
+          <option value="">All Status</option>
+          {STATUSES.map(s=><option key={s}>{s}</option>)}
+          <option value="HT">HT (High Ticket)</option>
+        </select>
+        {showAssigned && (
+          <select value={filterRep} onChange={e=>setFilterRep(e.target.value)}>
+            <option value="">All Reps</option>
+            {allReps.map(r=><option key={r}>{r}</option>)}
+          </select>
+        )}
+        <span className="count-label no-print">{filtered.length} lead{filtered.length!==1?'s':''}{sel.length>0&&` · ${sel.length} selected`}</span>
+        <div className="export-group no-print" style={{marginLeft:'auto'}}>
+          {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(filtered,`${filename}.csv`)}>⬇ CSV</button>}
+          {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={()=>exportPDF()}>🖨 PDF</button>}
+        </div>
+      </div>
+
+      {sel.length>0&&(
+        <div className="bulk-panel no-print">
+          <span style={{fontWeight:700,color:'var(--accent)',fontSize:13,whiteSpace:'nowrap'}}>✓ {sel.length} selected</span>
+          <div className="toolbar-sep"/>
+          {feats.bulkAssign&&<>
+            <span className="bulk-panel-label">Rep</span>
+            <select value={bulkRep} onChange={e=>setBulkRep(e.target.value)} style={{fontSize:12,padding:'5px 10px'}}>
+              <option value="">— none —</option>
+              {allReps.map(r=><option key={r}>{r}</option>)}
+            </select>
+          </>}
+          <div className="toolbar-sep"/>
+          <span className="bulk-panel-label">Tags</span>
+          <div className="bulk-chip">
+            {[...STATUSES,'HT'].map(t=>{
+              const on=bulkTags.includes(t);
+              const c=TAG_COLORS[t]||{bg:'#F0F2F5',color:'#68737D'};
+              return<span key={t} className={`bulk-chip-item${on?' active':''}`}
+                style={on?{background:c.bg,color:c.color}:{}}
+                onClick={()=>toggleBulkTag(t)}>{t==='HT'?'⚡ HT':t}</span>;
+            })}
+          </div>
+          <div className="toolbar-sep"/>
+          <span className="bulk-panel-label">Campaign</span>
+          <div className="bulk-chip">
+            {(config.campaigns||[]).map(c=>{
+              const on=bulkCamps.includes(c.id);
+              return<span key={c.id} className={`bulk-chip-item${on?' active':''}`}
+                style={on?{background:c.color+'22',color:c.color,borderColor:c.color}:{}}
+                onClick={()=>toggleBulkCamp(c.id)}>● {c.label}</span>;
+            })}
+          </div>
+          <div className="toolbar-sep"/>
+          <button className="btn btn-primary btn-sm" onClick={doSaveBulk}
+            disabled={!bulkRep&&bulkTags.length===0&&bulkCamps.length===0}>
+            Save Changes
+          </button>
+          <button className="btn btn-outline btn-sm" onClick={openSelected} title="Open each selected lead's URL in a new tab">🔗 Open {sel.length}</button>
+          <button className="btn btn-ghost btn-sm" onClick={()=>{setSel([]);setBulkRep('');setBulkTags([]);setBulkCamps([]);}}>✕ Clear</button>
+        </div>
+      )}
+
+      <div className="print-header">{printTitle} — {filtered.length} leads — {new Date().toLocaleDateString()}</div>
+
+      <div className="table-container" onMouseDown={containerMouseDown}>
+        {filtered.length===0
+          ? <div className="empty"><div className="empty-icon">📭</div><h3>No leads found</h3><p>Try adjusting your filters</p></div>
+          : (
+          <table>
+            <thead>
+              <tr>
+                {feats.bulkAssign && <th style={{width:40}}><input type="checkbox" checked={allSel} onChange={toggleAll}/></th>}
+                {cols.thumbnail && <th style={{width:50}}>Photo</th>}
+                {cols.channelName && <ColHeader col="channelName" label="Channel" {...colHeaderProps}/>}
+                {cols.url && <th>URL</th>}
+                {cols.platform && <ColHeader col="platform" label="Platform" {...colHeaderProps}/>}
+                {cols.niche && <ColHeader col="niche" label="Niche" {...colHeaderProps}/>}
+                {cols.followers && <ColHeader col="followers" label="Followers" {...colHeaderProps}/>}
+                {cols.emails && <th>Email</th>}
+                {cols.tags && <ColHeader col="tags" label="Tags" {...colHeaderProps}/>}
+                {showOrigin && <ColHeader col="origin" label="Origin" {...colHeaderProps}/>}
+                {showCampaign && cols.campaign && <ColHeader col="campaign" label="Campaign" {...colHeaderProps}/>}
+                {showAssigned && cols.assignedTo && <ColHeader col="assignedTo" label="Assigned To" {...colHeaderProps}/>}
+                {showAssigned && cols.dateAssigned && <ColHeader col="dateAssigned" label="Date Assigned" {...colHeaderProps}/>}
+                <th style={{width:80}} className="no-print">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginated.map((lead,idx)=>(
+                <tr key={lead.id} className={`${getRowClass(lead)}${sel.includes(lead.id)?' row-selected':''}`} onContextMenu={e=>handleCtx(e,lead)} onClick={e=>rowClick(e,lead,idx)} onMouseDown={e=>rowMouseDown(e,idx)} onMouseEnter={()=>rowMouseEnter(idx)} style={{cursor:'pointer'}}>
+                  {feats.bulkAssign && <td><input type="checkbox" checked={sel.includes(lead.id)} onChange={()=>toggleOne(lead.id)}/></td>}
+                  {cols.thumbnail && (
+                    <td>
+                      <a href={lead.url} target="_blank" rel="noopener noreferrer">
+                        <div className="thumb thumb-lg" title={`Visit ${lead.channelName}`}>
+                          {lead.thumbnail
+                            ? <img src={lead.thumbnail} alt={lead.channelName} loading="lazy" onError={e=>{e.target.style.display='none';e.target.parentNode.textContent=avatarLetter(lead.channelName);}}/>
+                            : avatarLetter(lead.channelName)}
+                        </div>
+                      </a>
+                    </td>
+                  )}
+                  {cols.channelName && (
+                    <td>
+                      <div className={`channel-name${onRowOpen?' channel-name-link':''}`} onClick={onRowOpen?()=>onRowOpen(lead):undefined}>{lead.channelName}</div>
+                      {lead.channels && lead.channels.length>1 && <div className="channel-sub">{lead.channels.length} channels</div>}
+                    </td>
+                  )}
+                  {cols.url && (
+                    <td style={{maxWidth:160}}>
+                      {lead.url
+                        ? <a href={lead.url} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:'var(--accent)',textDecoration:'none',display:'block',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={lead.url}>
+                            {lead.url.replace(/https?:\/\/(www\.)?/,'')}
+                          </a>
+                        : <span style={{color:'var(--text-light)'}}>—</span>}
+                    </td>
+                  )}
+                  {cols.platform && <td><span className="platform-badge">{PLATFORM_ICON[lead.platform]} {lead.platform}</span></td>}
+                  {cols.niche && <td style={{color:'var(--text-dim)',fontSize:11}}>{lead.niche}</td>}
+                  {cols.followers && <td><span className="followers-val">{lead.followers}</span></td>}
+                  {cols.emails && (
+                    <td className="email-cell">
+                      <InlineEmail emails={lead.emails||[]} onSave={arr=>patchLead(lead.id,{emails:arr})}/>
+                    </td>
+                  )}
+                  {cols.tags && (
+                    <td>
+                      <InlinePicker type="tag" selected={lead.tags} options={[...STATUSES,'HT']} campColorMap={campColorMap}
+                        onChange={tags=>patchLead(lead.id,{tags})} single/>
+                    </td>
+                  )}
+                  {showOrigin && (
+                    <td>
+                      {leadOrigin(lead)==='Fresh'
+                        ? <span className="origin-badge fresh">● Fresh</span>
+                        : <span className="origin-badge imported">↻ Imported</span>}
+                    </td>
+                  )}
+                  {showCampaign && cols.campaign && (
+                    <td>
+                      <InlinePicker type="campaign" selected={lead.campaigns} options={(config.campaigns||[]).map(c=>c.id)} campColorMap={campColorMap}
+                        onChange={campaigns=>patchLead(lead.id,{campaigns})}/>
+                    </td>
+                  )}
+                  {showAssigned && cols.assignedTo && (
+                    <td>
+                      {lead.assignedTo
+                        ? <div style={{display:'flex',alignItems:'center',gap:6}}><div style={{width:22,height:22,borderRadius:'50%',background:'var(--accent-light)',color:'var(--accent)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:700}}>{lead.assignedTo[0]}</div><span style={{fontWeight:600}}>{lead.assignedTo}</span></div>
+                        : <span style={{color:'var(--text-light)',fontSize:11}}>Unassigned</span>}
+                    </td>
+                  )}
+                  {showAssigned && cols.dateAssigned && (
+                    <td style={{fontSize:11,color:'var(--text-dim)'}}>{lead.dateAssigned||'—'}</td>
+                  )}
+                  <td className="no-print">
+                    <div style={{display:'flex',gap:5}}>
+                      <button className="btn-icon" onClick={()=>onRowOpen?onRowOpen(lead):setEditLead(lead)} title={onRowOpen?'View profile':'Edit lead'}>{onRowOpen?'👁':'✏'}</button>
+                      {onDelete && <button className="btn-icon" style={{color:'var(--danger)',borderColor:'rgba(222,53,11,.25)'}} onClick={()=>{if(window.confirm(`Delete "${lead.channelName}"?`))onDelete(lead.id);}} title="Delete lead">🗑</button>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {totalPages>1&&(
+        <div className="pagination no-print">
+          <button className="page-btn" onClick={()=>setPage(1)} disabled={page===1}>«</button>
+          <button className="page-btn" onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}>‹</button>
+          {Array.from({length:totalPages},(_,i)=>i+1).filter(p=>p===1||p===totalPages||Math.abs(p-page)<=2).reduce((acc,p,i,arr)=>{
+            if(i>0&&p-arr[i-1]>1)acc.push(<span key={'e'+p} style={{padding:'0 4px',color:'var(--text-dim)'}}>…</span>);
+            acc.push(<button key={p} className={`page-btn${page===p?' active':''}`} onClick={()=>setPage(p)}>{p}</button>);
+            return acc;
+          },[])}
+          <button className="page-btn" onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages}>›</button>
+          <button className="page-btn" onClick={()=>setPage(totalPages)} disabled={page===totalPages}>»</button>
+          <span style={{fontSize:12,color:'var(--text-dim)',marginLeft:8}}>Page {page} of {totalPages} · {filtered.length} leads</span>
+        </div>
+      )}
+      {editLead&&<LeadModal lead={editLead} config={config} onClose={()=>setEditLead(null)} onSave={l=>{if(onEdit)onEdit(l);setEditLead(null);}} onDelete={id=>{if(onDelete)onDelete(id);setEditLead(null);}}/>}
+      {ctxMenu&&<ContextMenu x={ctxMenu.x} y={ctxMenu.y} lead={ctxMenu.lead} sel={sel} allLeads={leads} config={config} campColorMap={campColorMap} onEdit={l=>{if(onEdit)onEdit(l);}} onDelete={id=>{if(onDelete)onDelete(id);setCtxMenu(null);}} onOpenEdit={l=>setEditLead(l)} onClose={()=>setCtxMenu(null)}/>}
+    </div>
+  );
+}
+
+// ─── HOME VIEW ────────────────────────────────────────────
+const PERIODS=[{id:'daily',label:'Daily',days:1},{id:'weekly',label:'Weekly',days:7},{id:'monthly',label:'Monthly',days:30},{id:'yearly',label:'Yearly',days:365}];
+
+function HomeView({leads,config}) {
+  const [period,setPeriod]=useState('monthly');
+  const pdfRef=useRef(null);
+  const campColorMap={};
+  (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
+
+  const pDef=PERIODS.find(p=>p.id===period)||PERIODS[2];
+  const cutoff=new Date(); cutoff.setHours(0,0,0,0); cutoff.setDate(cutoff.getDate()-(pDef.days-1));
+  function inPeriod(l){ return l.dateAssigned && new Date(l.dateAssigned)>=cutoff; }
+
+  // Per-rep KPI rows for the selected period (based on dateAssigned).
+  const reps=config.salesReps||[];
+  const campDefs=(config.campaigns||[]).map(c=>({id:c.id,label:c.label}));
+  const repRows=reps.map(r=>{
+    const mine=leads.filter(l=>l.assignedTo===r && inPeriod(l));
+    const follNums=mine.map(l=>parseFollowers(l.followers)).filter(n=>n>0);
+    const byCampaign={}; campDefs.forEach(c=>byCampaign[c.id]=mine.filter(l=>l.campaigns.includes(c.id)).length);
+    const byPlatform={}; PLATFORMS.forEach(p=>byPlatform[p]=mine.filter(l=>l.platform===p).length);
+    return {
+      rep:r,
+      total:mine.length,
+      fresh:mine.filter(l=>leadOrigin(l)==='Fresh').length,
+      recycled:mine.filter(l=>isRecycled(l)).length,
+      potential:mine.filter(l=>l.tags.includes('Potential')).length,
+      contacted:mine.filter(l=>l.tags.includes('Contacted')).length,
+      ht:mine.filter(l=>l.tags.includes('HT')).length,
+      nq:mine.filter(l=>l.tags.includes('Not Qualified')).length,
+      withEmail:mine.filter(l=>(l.emails||[]).length>0).length,
+      follKnown:follNums.length,
+      avgFoll:follNums.length?Math.round(follNums.reduce((a,b)=>a+b,0)/follNums.length):0,
+      byCampaign, byPlatform,
+    };
+  });
+  const maxRep=Math.max(1,...repRows.map(r=>r.total));
+  // Aggregate across reps for the table's "All Reps" footer row.
+  const sumRep=k=>repRows.reduce((s,r)=>s+(r[k]||0),0);
+  const repTot={total:sumRep('total'),fresh:sumRep('fresh'),recycled:sumRep('recycled'),potential:sumRep('potential'),contacted:sumRep('contacted'),ht:sumRep('ht'),nq:sumRep('nq'),withEmail:sumRep('withEmail')};
+  const repTotFollKnown=sumRep('follKnown');
+  repTot.avgFoll=repTotFollKnown?Math.round(repRows.reduce((s,r)=>s+(r.avgFoll||0)*(r.follKnown||0),0)/repTotFollKnown):0;
+
+  const periodLeads=leads.filter(inPeriod);
+  const total=periodLeads.length;
+  const freshTot=periodLeads.filter(l=>leadOrigin(l)==='Fresh').length;
+  const recycledTot=periodLeads.filter(l=>isRecycled(l)).length;
+  const potentialTot=periodLeads.filter(l=>l.tags.includes('Potential')).length;
+  const contactedTot=periodLeads.filter(l=>l.tags.includes('Contacted')).length;
+  const withEmailTot=periodLeads.filter(l=>(l.emails||[]).length>0).length;
+  const htTot=periodLeads.filter(l=>l.tags.includes('HT')).length;
+  const nqTot=periodLeads.filter(l=>l.tags.includes('Not Qualified')).length;
+  const follAll=periodLeads.map(l=>parseFollowers(l.followers)).filter(n=>n>0);
+  const avgFollTot=follAll.length?Math.round(follAll.reduce((a,b)=>a+b,0)/follAll.length):0;
+  const kpiInfo={period:pDef.label, rangeStart:cutoff.toISOString().split('T')[0], rangeEnd:new Date().toISOString().split('T')[0], campaigns:campDefs, platforms:PLATFORMS};
+
+  return (
+    <div className="home-content" ref={pdfRef}>
+      <div className="print-header" style={{display:'none'}}>
+        <h1 style={{margin:0}}>Enfinity Sales Dashboard</h1>
+        <p>Rep KPI Report — {pDef.label} ({cutoff.toISOString().split('T')[0]} → today)</p>
+      </div>
+
+      <div className="analytics-toolbar no-print">
+        <div className="period-toggle">
+          {PERIODS.map(p=>(
+            <button key={p.id} className={`period-btn${period===p.id?' active':''}`} onClick={()=>setPeriod(p.id)}>{p.label}</button>
+          ))}
+        </div>
+        <div style={{marginLeft:'auto',display:'flex',gap:8}}>
+          <button className="btn btn-outline btn-sm" onClick={()=>exportKpiCSV(repRows,kpiInfo,`enfinity_sales_kpis_${period}.csv`)}>⬇ Download CSV</button>
+          <button className="btn btn-outline btn-sm" onClick={()=>exportPDF('Rep KPI Report')}>🖨 Download PDF</button>
+        </div>
+      </div>
+
+      <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
+        <div className="stat-card accent"><div className="stat-label">Assigned ({pDef.label})</div><div className="stat-value">{total}</div><div className="stat-sub">across all reps</div></div>
+        <div className="stat-card green"><div className="stat-label">Fresh Leads</div><div className="stat-value">{freshTot}</div><div className="stat-sub">never contacted</div></div>
+        <div className="stat-card orange"><div className="stat-label">Recycled</div><div className="stat-value">{recycledTot}</div><div className="stat-sub">previously worked</div></div>
+        <div className="stat-card"><div className="stat-label">Contacted</div><div className="stat-value">{contactedTot}</div><div className="stat-sub">{pct(contactedTot,total)}% contact rate</div></div>
+        <div className="stat-card green"><div className="stat-label">Potential</div><div className="stat-value">{potentialTot}</div><div className="stat-sub">{pct(potentialTot,total)}% · {htTot} high ticket</div></div>
+        <div className="stat-card"><div className="stat-label">With Email</div><div className="stat-value">{withEmailTot}</div><div className="stat-sub">{pct(withEmailTot,total)}% coverage</div></div>
+        <div className="stat-card accent"><div className="stat-label">Avg Followers</div><div className="stat-value">{fmtFollowers(avgFollTot)}</div><div className="stat-sub">{nqTot} not qualified</div></div>
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">Leads per Sales Rep — Fresh vs Recycled</div>
+          <div className="chart-legend">
+            <span><i style={{background:'var(--accent)'}}/>Fresh</span>
+            <span><i style={{background:'var(--warn)'}}/>Recycled</span>
+          </div>
+        </div>
+        <div className="card-body">
+          {repRows.length===0 && <div style={{color:'var(--text-dim)',padding:12}}>No sales reps configured.</div>}
+          {repRows.map(r=>(
+            <div className="grouped-bar-row" key={r.rep}>
+              <div className="bar-label">{r.rep}</div>
+              <div className="grouped-bar-track">
+                <div className="gbar" style={{width:`${r.fresh/maxRep*100}%`,background:'var(--accent)'}} title={`Fresh: ${r.fresh}`}/>
+                <div className="gbar" style={{width:`${r.recycled/maxRep*100}%`,background:'var(--warn)'}} title={`Recycled: ${r.recycled}`}/>
+              </div>
+              <div className="bar-count">{r.total}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><div className="card-title">Per-Rep KPI Breakdown ({pDef.label})</div></div>
+        <div className="card-body" style={{padding:0,overflowX:'auto'}}>
+          <table className="kpi-table">
+            <thead><tr>
+              <th>Sales Rep</th><th>Total</th><th>Fresh</th><th>Recycled</th>
+              <th>Potential</th><th>Contacted</th><th>High Ticket</th><th>NQ</th>
+              <th title="Contacted ÷ Total">Contact %</th><th title="Potential ÷ Total">Pot %</th>
+              <th title="Leads with at least one email ÷ Total">Email %</th><th>Avg Followers</th>
+              <th className="no-print">Report</th>
+            </tr></thead>
+            <tbody>
+              {repRows.map(r=>(
+                <tr key={r.rep}>
+                  <td style={{fontWeight:600}}>{r.rep}</td>
+                  <td>{r.total}</td>
+                  <td style={{color:'var(--accent)',fontWeight:600}}>{r.fresh}</td>
+                  <td style={{color:'var(--warn)',fontWeight:600}}>{r.recycled}</td>
+                  <td>{r.potential}</td><td>{r.contacted}</td><td>{r.ht}</td><td>{r.nq}</td>
+                  <td>{pct(r.contacted,r.total)}%</td>
+                  <td>{pct(r.potential,r.total)}%</td>
+                  <td>{pct(r.withEmail,r.total)}%</td>
+                  <td>{fmtFollowers(r.avgFoll||0)}</td>
+                  <td className="no-print">
+                    <button className="btn btn-ghost btn-xs" title="Download this rep's leads as CSV"
+                      onClick={()=>exportCSV(leads.filter(l=>l.assignedTo===r.rep && inPeriod(l)),`${r.rep}_${period}_leads.csv`)}>⬇ CSV</button>
+                  </td>
+                </tr>
+              ))}
+              {repRows.length>0 && <tr style={{borderTop:'2px solid var(--border)',fontWeight:700}}>
+                <td>All Reps</td>
+                <td>{repTot.total}</td>
+                <td style={{color:'var(--accent)'}}>{repTot.fresh}</td>
+                <td style={{color:'var(--warn)'}}>{repTot.recycled}</td>
+                <td>{repTot.potential}</td>
+                <td>{repTot.contacted}</td>
+                <td>{repTot.ht}</td>
+                <td>{repTot.nq}</td>
+                <td>{pct(repTot.contacted,repTot.total)}%</td>
+                <td>{pct(repTot.potential,repTot.total)}%</td>
+                <td>{pct(repTot.withEmail,repTot.total)}%</td>
+                <td>{fmtFollowers(repTot.avgFoll||0)}</td>
+                <td className="no-print"/>
+              </tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="grid-2">
+        <div className="card">
+          <div className="card-header"><div className="card-title">Campaign Distribution</div></div>
+          <div className="card-body">
+            {(config.campaigns||[]).map(c=>{const cnt=periodLeads.filter(l=>l.campaigns.includes(c.id)).length;return(
+              <div className="bar-row" key={c.id}>
+                <div className="bar-label">{c.label}</div>
+                <div className="bar-track"><div className="bar-fill" style={{width:`${total?cnt/total*100:0}%`,background:c.color}}></div></div>
+                <div className="bar-count">{cnt}</div>
+              </div>
+            );})}
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-header"><div className="card-title">Platform Split</div></div>
+          <div className="card-body">
+            {PLATFORMS.map(p=>{const cnt=periodLeads.filter(l=>l.platform===p).length;return(
+              <div className="bar-row" key={p}>
+                <div className="bar-label">{PLATFORM_ICON[p]} {p}</div>
+                <div className="bar-track"><div className="bar-fill" style={{width:`${total?cnt/total*100:0}%`,background:'var(--purple)'}}></div></div>
+                <div className="bar-count">{cnt}</div>
+              </div>
+            );})}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── REP AVATAR COMPONENT ────────────────────────────────
+function RepAvatar({rep,config,size=36,online=false,bgOverride=null}) {
+  const color=(config.repColors||{})[rep]||'#6366F1';
+  const emoji=(config.repEmojis||{})[rep]||'';
+  const photo=(config.repPhotos||{})[rep]||'';
+  const fontSize=emoji?Math.round(size*.48):Math.round(size*.38);
+  const dotSize=Math.max(6,Math.round(size*.28));
+  const borderColor=bgOverride||'var(--bg)';
+  return(
+    <div className="rep-avatar" style={{width:size,height:size,background:photo?'transparent':color,color:'white',fontSize,flexShrink:0}}>
+      {photo
+        ? <img src={photo} alt={rep}/>
+        : (emoji||rep[0].toUpperCase())}
+      {online&&<div className="rep-online-dot" style={{width:dotSize,height:dotSize,bottom:-1,right:-1,border:`${Math.max(1,Math.round(dotSize*.22))}px solid ${borderColor}`}}/>}
+    </div>
+  );
+}
+
+// ─── REP DASHBOARD VIEW ───────────────────────────────────
+function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onImportClose}) {
+  function importToClose(r,ls){
+    if(onImportClose) onImportClose(r,ls);
+  }
+  // myLeads = everything assigned to the rep (drives the stat cards & counts).
+  // activeLeads = the rep's work queue shown in the table; once a lead is tagged
+  // Contacted it leaves this queue and appears under the global Contacted tab.
+  const myLeads = leads.filter(l=>l.assignedTo===rep);
+  const activeLeads = myLeads.filter(l=>!l.tags.includes('Contacted'));
+  const campColorMap={};
+  (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
+  const total=myLeads.length;
+  const active=activeLeads.length;
+  const potential=myLeads.filter(l=>l.tags.includes('Potential')).length;
+  const contacted=myLeads.filter(l=>l.tags.includes('Contacted')).length;
+  const ht=myLeads.filter(l=>l.tags.includes('HT')).length;
+  const feats=config.features||{};
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
+      <div className="rep-view-header no-print">
+        <RepAvatar rep={rep} config={config} size={42} online bgOverride="var(--card)"/>
+        <div>
+          <div style={{fontWeight:700,fontSize:15}}>{rep}'s Dashboard</div>
+          <div style={{fontSize:11,color:'var(--text-dim)'}}>{total} lead{total!==1?'s':''} · {active} active</div>
+        </div>
+        <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
+          <button className="btn btn-primary btn-sm" onClick={()=>importToClose(rep,myLeads)} title="Import this rep's leads into Close.io CRM via n8n webhook">⬆ Import to Close.io</button>
+          <div className="export-group">
+            {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(myLeads,`${rep}_leads.csv`)}>⬇ Export CSV</button>}
+            {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={()=>exportPDF(rep)}>🖨 Export PDF</button>}
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button>
+        </div>
+      </div>
+      <div style={{display:'flex',gap:12,padding:'16px 24px',flexShrink:0,borderBottom:'1px solid var(--border)',background:'var(--card)'}}>
+        <div className="stat-card accent" style={{flex:1}}><div className="stat-label">Total</div><div className="stat-value">{total}</div></div>
+        <div className="stat-card green" style={{flex:1}}><div className="stat-label">Potential</div><div className="stat-value">{potential}</div></div>
+        <div className="stat-card" style={{flex:1}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
+        <div className="stat-card orange" style={{flex:1}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
+      </div>
+      <LeadsTable
+        leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkAssign={onBulkAssign}
+        showAssigned showCampaign config={config} feats={feats} campColorMap={campColorMap}
+        filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
+      />
+    </div>
+  );
+}
+
+// ─── REP SELECT SCREEN ────────────────────────────────────
+function RepSelectScreen({leads,config,activeRep,onSelect}) {
+  return (
+    <div className="rep-select-screen">
+      <div className="rep-select-title">
+        <h2>Select Your Profile</h2>
+        <p>Choose your name to log in and manage your assigned leads</p>
+      </div>
+      <div className="rep-grid">
+        {(config.salesReps||[]).map(r=>{
+          const active=leads.filter(l=>l.assignedTo===r&&!l.tags.includes('Contacted')).length;
+          const total=leads.filter(l=>l.assignedTo===r).length;
+          const isOnline=activeRep===r;
+          const color=(config.repColors||{})[r]||'#6366F1';
+          return (
+            <div key={r} className={`rep-card-btn${isOnline?' rep-card-online':''}`} onClick={()=>onSelect(r)}
+              style={isOnline?{borderColor:color,boxShadow:`0 0 0 3px ${color}30`}:{}}>
+              <RepAvatar rep={r} config={config} size={64} online={isOnline} bgOverride="var(--card)"/>
+              <div className="rep-name">{r}</div>
+              <div className="rep-leads">{active} active · {total} total</div>
+              {isOnline&&<div style={{fontSize:10,fontWeight:700,color,marginTop:2}}>● Currently logged in</div>}
+            </div>
+          );
+        })}
+      </div>
+      <button className="btn btn-ghost btn-sm" onClick={()=>onSelect(activeRep)}>← Back</button>
+    </div>
+  );
+}
+
+// ─── CONTACTED VIEW ──────────────────────────────────────
+function ContactedView({leads,onSave,onDelete,onBulkAssign,config,campColorMap}) {
+  const contacted=leads.filter(l=>l.tags.includes('Contacted'));
+  const today=new Date();
+  function recycleInfo(l){
+    if(!l.lastContactDate) return null;
+    const diff=Math.floor((today-new Date(l.lastContactDate))/86400000);
+    if(l.campaigns.includes('VVV')){const left=30-diff;return{threshold:30,diff,left,color:left<=7?'var(--danger)':left<=14?'var(--warn)':'var(--success)'};}
+    if(l.campaigns.includes('MSN')){const left=90-diff;return{threshold:90,diff,left,color:left<=14?'var(--danger)':left<=30?'var(--warn)':'var(--success)'};}
+    return null;
+  }
+  return (
+    <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'auto'}}>
+      <div style={{padding:'16px 24px',borderBottom:'1px solid var(--border)',background:'var(--card)',display:'flex',gap:12,flexShrink:0}}>
+        <div className="stat-card accent" style={{flex:1}}><div className="stat-label">Total Contacted</div><div className="stat-value">{contacted.length}</div></div>
+        <div className="stat-card green" style={{flex:1}}><div className="stat-label">VVV (30-day recycle)</div><div className="stat-value">{contacted.filter(l=>l.campaigns.includes('VVV')).length}</div></div>
+        <div className="stat-card orange" style={{flex:1}}><div className="stat-label">MSN (90-day recycle)</div><div className="stat-value">{contacted.filter(l=>l.campaigns.includes('MSN')).length}</div></div>
+        <div className="stat-card" style={{flex:1}}><div className="stat-label">Recycle Soon (&lt;14d)</div><div className="stat-value" style={{color:'var(--danger)'}}>{contacted.filter(l=>{const r=recycleInfo(l);return r&&r.left<=14&&r.left>0;}).length}</div></div>
+      </div>
+      <table className="leads-table">
+        <thead><tr>
+          <th>Channel</th><th>Campaign</th><th>Assigned To</th>
+          <th>Last Contacted</th><th>Days Since Contact</th><th>Recycle In</th>
+        </tr></thead>
+        <tbody>
+          {contacted.length===0&&<tr><td colSpan={6} style={{textAlign:'center',padding:32,color:'var(--text-dim)'}}>No contacted leads yet</td></tr>}
+          {contacted.map(l=>{
+            const r=recycleInfo(l);
+            return(
+              <tr key={l.id} className={l.campaigns.includes('MSN')&&l.campaigns.includes('VVV')?'row-both':l.campaigns.includes('MSN')?'row-msn':l.campaigns.includes('VVV')?'row-vvv':''}>
+                <td><div style={{fontWeight:600,fontSize:13}}>{l.channelName}</div><div style={{fontSize:11,color:'var(--text-dim)'}}>{l.platform}</div></td>
+                <td>{l.campaigns.map(c=><span key={c} className="tag-badge" style={{background:campColorMap[c]||'var(--accent)',color:'#fff',marginRight:4}}>{c}</span>)}</td>
+                <td>{l.assignedTo||<span style={{color:'var(--text-dim)'}}>—</span>}</td>
+                <td>{l.lastContactDate||<span style={{color:'var(--text-dim)'}}>—</span>}</td>
+                <td>{r?<span style={{fontWeight:600,color:r.diff>0?'var(--text-dim)':'var(--text)'}}>{r.diff} day{r.diff!==1?'s':''}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
+                <td>{r?<span style={{fontWeight:700,color:r.color}}>{r.left<=0?'⚠ Ready to Recycle':`${r.left}d`}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── GOOGLE SHEETS IMPORT ────────────────────────────────
+function GoogleImportView({onImport,addToast}) {
+  const [url,setUrl]=useState('');
+  const [loading,setLoading]=useState(false);
+  const [preview,setPreview]=useState(null);
+  const [mapping,setMapping]=useState({});
+
+  const FIELDS=[
+    {key:'channelName',label:'Channel Name',required:true},
+    {key:'url',label:'Channel URL'},
+    {key:'platform',label:'Platform'},
+    {key:'niche',label:'Niche'},
+    {key:'followers',label:'Followers'},
+    {key:'emails',label:'Email(s)'},
+    {key:'tags',label:'Tags / Status'},
+    {key:'campaigns',label:'Campaign / Services'},
+    {key:'assignedTo',label:'Assigned To / Scraper'},
+    {key:'dateAssigned',label:'Date (of Dump)'},
+    {key:'imported',label:'Imported (Yes/No)'},
+  ];
+
+  function extractSheetId(raw){const m=raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);return m?m[1]:null;}
+  function extractGid(raw){const m=raw.match(/[?&#]gid=(\d+)/);return m?m[1]:'0';}
+
+  async function fetchDirectCSV(id,gid){
+    const csvUrl=`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+    const res=await fetch(csvUrl,{mode:'cors'});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    return await res.text();
+  }
+
+  async function fetchViaCorsProxy(id,gid){
+    const csvUrl=encodeURIComponent(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`);
+    const res=await fetch(`https://corsproxy.io/?${csvUrl}`);
+    if(!res.ok) throw new Error('Proxy HTTP '+res.status);
+    return await res.text();
+  }
+
+  async function fetchViaAllOrigins(id,gid){
+    const csvUrl=encodeURIComponent(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`);
+    const res=await fetch(`https://api.allorigins.win/raw?url=${csvUrl}`);
+    if(!res.ok) throw new Error('AllOrigins HTTP '+res.status);
+    return await res.text();
+  }
+
+  function fetchViaJsonp(id,gid){
+    return new Promise((resolve,reject)=>{
+      const cb='__gs_'+Date.now();
+      const s=document.createElement('script');
+      s.src=`https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:json;responseHandler:${cb}&gid=${gid}`;
+      const timer=setTimeout(()=>{cleanup();reject(new Error('Timeout'));},12000);
+      function cleanup(){try{delete window[cb];}catch(e){}s.remove();clearTimeout(timer);}
+      window[cb]=data=>{cleanup();resolve(data);};
+      s.onerror=()=>{cleanup();reject(new Error('Script error'));};
+      document.head.appendChild(s);
+    });
+  }
+
+  async function fetchViaGviz(id,gid){
+    const data=await fetchViaJsonp(id,gid);
+    if(!data||!data.table) throw new Error('No table');
+    const cols=data.table.cols.map(c=>(c.label||c.id||'').trim());
+    const rows=(data.table.rows||[]).map(r=>(r.c||[]).map((cell,i)=>{
+      if(!cell||cell.v==null) return '';
+      if(cell.f) return cell.f;
+      return String(cell.v).trim();
+    }));
+    const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
+    return [cols.map(esc).join(','),...rows.map(r=>r.map(esc).join(','))].join('\n');
+  }
+
+  function parseCSV(text){
+    const lines=text.split('\n').filter(l=>l.trim());
+    function parseLine(line){
+      const out=[];let cur='',q=false;
+      for(let i=0;i<line.length;i++){
+        if(line[i]==='"'){q=!q;}
+        else if(line[i]===','&&!q){out.push(cur.trim());cur='';}
+        else cur+=line[i];
+      }
+      out.push(cur.trim());return out;
+    }
+    return{headers:parseLine(lines[0]),rows:lines.slice(1).map(parseLine)};
+  }
+
+  function autoMap(headers){
+    const ALIASES={
+      channelName:['channel name','channel','name','creator','creator name','handle'],
+      url:['url','channel url','profile url','youtube url','youtube link'],
+      platform:['platform','social','network'],
+      niche:['niche','category','topic','industry','vertical'],
+      followers:['followers','subscribers','subs','audience','reach','follower count'],
+      emails:['email','emails','email address','contact email'],
+      tags:['tags','tag','status','label','stage'],
+      campaigns:['services','service','campaign','campaigns'],
+      assignedTo:['assigned to','assigned','sales rep','lg scraper','scraper','rep','owner','agent'],
+      dateAssigned:['date of dump','date assigned','dump date','date'],
+      imported:['imported','is imported','import status'],
+    };
+    const r={};
+    headers.forEach((h,i)=>{
+      const low=h.toLowerCase().trim();
+      for(const[field,aliases]of Object.entries(ALIASES)){
+        if(!r[field]&&aliases.some(a=>low.includes(a))) r[field]=String(i);
+      }
+    });
+    return r;
+  }
+
+  async function fetchSheet(){
+    const id=extractSheetId(url.trim());
+    if(!id){addToast('Paste a valid Google Sheets URL','error');return;}
+    const gid=extractGid(url.trim());
+    setLoading(true);
+    let text=null;
+    const errors=[];
+    const strategies=[
+      {name:'Direct CSV',  fn:()=>fetchDirectCSV(id,gid)},
+      {name:'JSONP/gviz',  fn:()=>fetchViaGviz(id,gid)},
+      {name:'AllOrigins',  fn:()=>fetchViaAllOrigins(id,gid)},
+      {name:'CORS Proxy',  fn:()=>fetchViaCorsProxy(id,gid)},
+    ];
+    for(const s of strategies){
+      try{text=await s.fn();break;}
+      catch(e){errors.push(`${s.name}: ${e.message}`);}
+    }
+    if(!text){
+      console.error('All fetch strategies failed:',errors);
+      addToast('Could not load sheet. Ensure it is shared as "Anyone with link can view" and try again.','error');
+      setLoading(false);return;
+    }
+    try{
+      const{headers,rows}=parseCSV(text);
+      if(!headers.length) throw new Error('Sheet appears empty');
+      const m=autoMap(headers);
+      setMapping(m);
+      setPreview({headers,rows,previewRows:rows.slice(0,5)});
+      addToast(`Fetched ${rows.length} rows — confirm column mapping below`,'success');
+    }catch(e){
+      addToast(`Parsed sheet but got an error: ${e.message}`,'error');
+    }
+    setLoading(false);
+  }
+
+  function doImport(){
+    if(!preview)return;
+    const today=new Date().toISOString().split('T')[0];
+    const get=(row,key)=>mapping[key]!==undefined?(row[parseInt(mapping[key])]||'').trim():'';
+    const imported=preview.rows
+      .filter(r=>r.some(c=>c.trim()))
+      .map((row,i)=>{
+        const emails=get(row,'emails').split(/[;,]/).map(e=>e.trim()).filter(Boolean);
+        const tags=[...new Set(get(row,'tags').split(/[;,]/).map(canonTag).filter(Boolean))];
+        const campaigns=get(row,'campaigns').split(/[;,]/).map(c=>c.trim()).filter(Boolean);
+        const name=get(row,'channelName')||`Row ${i+1}`;
+        const rep=get(row,'assignedTo')||null;
+        const dateRaw=get(row,'dateAssigned');
+        const impRaw=get(row,'imported').trim().toLowerCase();
+        const imported = ['yes','y','true','1'].includes(impRaw) ? true
+                       : ['no','n','false','0'].includes(impRaw) ? false : undefined;
+        return{id:Date.now()+i,channelName:name,url:get(row,'url'),platform:get(row,'platform')||'YouTube',niche:get(row,'niche'),followers:get(row,'followers'),emails,tags,campaigns,assignedTo:rep,dateAssigned:(dateRaw||(rep?today:null)),lastContactDate:null,channels:[name],imported};
+      });
+    onImport(imported);
+    addToast(`✓ ${imported.length} leads imported`,'success');
+    setPreview(null);setUrl('');
+  }
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'auto',padding:'24px'}}>
+      <div className="card" style={{maxWidth:780,marginBottom:20}}>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>Import from Google Sheets</div>
+        <div style={{fontSize:12,color:'var(--text-dim)',marginBottom:16}}>
+          Paste your Google Sheets URL. The sheet must be shared as <strong>"Anyone with the link can view"</strong> or published to the web (File → Share → Publish to web → CSV).
+        </div>
+        <div style={{display:'flex',gap:10}}>
+          <input value={url} onChange={e=>setUrl(e.target.value)} onKeyDown={e=>e.key==='Enter'&&fetchSheet()} placeholder="https://docs.google.com/spreadsheets/d/..." style={{flex:1}}/>
+          <button className="btn btn-primary" onClick={fetchSheet} disabled={loading||!url.trim()}>
+            {loading?'⏳ Fetching...':'⬇ Load Sheet'}
+          </button>
+        </div>
+        <div style={{marginTop:12,fontSize:11,color:'var(--text-dim)'}}>
+          <strong>How to share:</strong> Open your sheet → File → Share → Share with others → Change to "Anyone with the link" → Viewer → Done
+        </div>
+      </div>
+
+      {preview&&(
+        <>
+          <div className="card" style={{maxWidth:780,marginBottom:20}}>
+            <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>Column Mapping <span style={{fontWeight:400,fontSize:11,color:'var(--text-dim)'}}>— auto-detected from your headers, adjust if needed</span></div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+              {FIELDS.map(f=>(
+                <div key={f.key} style={{display:'flex',alignItems:'center',gap:8}}>
+                  <div style={{width:120,fontSize:12,color:'var(--text-dim)',flexShrink:0}}>{f.label}{f.required&&<span style={{color:'var(--danger)'}}> *</span>}</div>
+                  <select value={mapping[f.key]||''} onChange={e=>setMapping(m=>({...m,[f.key]:e.target.value}))} style={{flex:1,fontSize:12}}>
+                    <option value="">— skip —</option>
+                    {preview.headers.map((h,i)=><option key={i} value={String(i)}>{h}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card" style={{maxWidth:780,marginBottom:20}}>
+            <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>Preview <span style={{fontWeight:400,fontSize:11,color:'var(--text-dim)'}}>— first 5 rows of {preview.rows.length} total</span></div>
+            <div style={{overflowX:'auto'}}>
+              <table className="leads-table" style={{fontSize:11}}>
+                <thead><tr>{preview.headers.map((h,i)=><th key={i}>{h}</th>)}</tr></thead>
+                <tbody>{preview.previewRows.map((row,i)=><tr key={i}>{row.map((cell,j)=><td key={j} style={{maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{cell||<span style={{color:'var(--text-dim)'}}>—</span>}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style={{maxWidth:780,display:'flex',gap:10,alignItems:'center'}}>
+            <button className="btn btn-primary" onClick={doImport}>⬆ Import {preview.rows.length} Leads</button>
+            <button className="btn btn-ghost" onClick={()=>{setPreview(null);setUrl('');}}>Cancel</button>
+            <span style={{fontSize:11,color:'var(--text-dim)'}}>Existing leads will not be duplicated — imports are additive.</span>
+          </div>
+        </>
+      )}
+
+      {!preview&&(
+        <div className="card" style={{maxWidth:780}}>
+          <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:'var(--text-dim)'}}>Expected sheet columns (column names are flexible)</div>
+          <table style={{width:'100%',fontSize:12,borderCollapse:'collapse'}}>
+            <thead><tr style={{borderBottom:'1px solid var(--border)'}}>
+              <th style={{textAlign:'left',padding:'6px 8px',color:'var(--text-dim)',fontWeight:600}}>Field</th>
+              <th style={{textAlign:'left',padding:'6px 8px',color:'var(--text-dim)',fontWeight:600}}>Recognized Column Names</th>
+            </tr></thead>
+            <tbody>
+              {[
+                ['Channel Name*','Channel Name, Name, Creator, Handle'],
+                ['Channel URL','URL, Link, Channel URL, YouTube URL'],
+                ['Platform','Platform, Social, Network'],
+                ['Niche','Niche, Category, Topic, Industry, Vertical'],
+                ['Followers','Followers, Subscribers, Subs, Audience'],
+                ['Email(s)','Email, Emails, Contact Email (comma/semicolon for multiple)'],
+                ['Tags','Tags, Status, Label, Stage'],
+                ['Assigned To','Assigned To, Rep, Sales Rep, Owner'],
+              ].map(([f,a])=>(
+                <tr key={f} style={{borderBottom:'1px solid var(--border-light)'}}>
+                  <td style={{padding:'7px 8px',fontWeight:500}}>{f}</td>
+                  <td style={{padding:'7px 8px',color:'var(--text-dim)'}}>{a}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── PROFILE SIDE PANEL ───────────────────────────────────
+// Gleemo-style right drawer. Stats marked "~" are cosmetic placeholders
+// (engagement / growth / audience) until real metrics are wired in.
+function ProfilePanel({lead,config,campColorMap,onClose,onSave,onDelete,addToast}) {
+  const [form,setForm]=useState({...lead,tags:[...(lead.tags||[])],campaigns:[...(lead.campaigns||[])]});
+  useEffect(()=>{ setForm({...lead,tags:[...(lead.tags||[])],campaigns:[...(lead.campaigns||[])]}); },[lead.id]);
+  function upd(k,v){ setForm(f=>({...f,[k]:v})); }
+  function toggleTag(t){ setForm(f=>({...f,tags:f.tags.includes(t)?[]:[t]})); }
+  function toggleCamp(c){ setForm(f=>({...f,campaigns:f.campaigns.includes(c)?f.campaigns.filter(x=>x!==c):[...f.campaigns,c]})); }
+  function save(){ onSave(form); addToast('Profile saved','success'); onClose(); }
+
+  const followersN=parseFollowers(lead.followers);
+  const er=pseudoStat(lead.channelName,0.4,6.5).toFixed(1);
+  const growth=pseudoStat(lead.url||lead.channelName,-2,8).toFixed(1);
+  const bars=Array.from({length:18},(_,i)=>pseudoStat((lead.channelName||'')+i,8,100));
+  const peakIdx=bars.indexOf(Math.max(...bars));
+
+  return (
+    <>
+      <div className="drawer-overlay" onClick={onClose}/>
+      <div className="profile-panel">
+        <div className="profile-panel-head">
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <div className="thumb" style={{width:42,height:42,fontSize:16}}>{avatarLetter(lead.channelName)}</div>
+            <div>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <span style={{fontWeight:700,fontSize:15}}>{lead.channelName}</span>
+                <span className="platform-badge">{PLATFORM_ICON[lead.platform]} {lead.platform}</span>
+              </div>
+              {lead.url && <a href={lead.url} target="_blank" rel="noopener noreferrer" className="profile-handle">{lead.url.replace(/https?:\/\/(www\.)?/,'')}</a>}
+            </div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
+        </div>
+
+        <div className="profile-panel-body">
+          <div className="profile-stats">
+            <div><div className="ps-val">{fmtFollowers(followersN)||'—'}</div><div className="ps-lab">Followers</div></div>
+            <div><div className="ps-val">{er}%<span className="ps-approx">~</span></div><div className="ps-lab">Engagement</div></div>
+            <div><div className="ps-val">{growth}%<span className="ps-approx">~</span></div><div className="ps-lab">Growth</div></div>
+          </div>
+
+          <div className="profile-section">
+            <div className="profile-section-title">Basic Information</div>
+            <div className="profile-kv"><span>Niche</span><b>{lead.niche||'—'}</b></div>
+            <div className="profile-kv"><span>Email</span><b>{lead.emails && lead.emails[0] ? lead.emails[0] : '—'}</b></div>
+            {lead.url && <div className="profile-kv"><span>Link</span><a href={lead.url} target="_blank" rel="noopener noreferrer">{lead.url.replace(/https?:\/\/(www\.)?/,'').slice(0,32)}</a></div>}
+            <div className="profile-kv"><span>Origin</span>
+              {leadOrigin(lead)==='Fresh'?<span className="origin-badge fresh">● Fresh</span>:<span className="origin-badge imported">↻ Imported</span>}
+            </div>
+          </div>
+
+          <div className="profile-section">
+            <div className="profile-section-title">Engagement Distribution <span className="ps-approx">~ sample</span></div>
+            <div className="eng-chart">
+              {bars.map((h,i)=><div key={i} className="eng-bar" style={{height:`${h}%`,background:i===peakIdx?'var(--accent)':'var(--border)'}}/>)}
+            </div>
+            <div className="eng-axis"><span>Low</span><span>median</span><span>High</span></div>
+          </div>
+
+          <div className="profile-section">
+            <div className="profile-section-title">Status Tags</div>
+            <div className="tag-grid">
+              {[...STATUSES,'HT'].map(t=>{
+                const on=form.tags.includes(t); const c=TAG_COLORS[t]||{bg:'#F0F2F5',color:'#68737D'};
+                return <button key={t} type="button" className={`tag-btn${on?' on':''}`} style={on?{background:c.bg,color:c.color,borderColor:c.color}:{}} onClick={()=>toggleTag(t)}>{t==='HT'?'⚡ HT':t}</button>;
+              })}
+            </div>
+          </div>
+
+          <div className="profile-section">
+            <div className="profile-section-title">Campaign</div>
+            <div className="tag-grid">
+              {(config.campaigns||[]).map(c=>{
+                const on=form.campaigns.includes(c.id);
+                return <button key={c.id} type="button" className={`tag-btn${on?' on':''}`} style={on?{background:c.color,color:'#fff',borderColor:c.color}:{}} onClick={()=>toggleCamp(c.id)}>● {c.label}</button>;
+              })}
+            </div>
+          </div>
+
+          <div className="profile-section">
+            <div className="profile-section-title">Assign to Rep</div>
+            <select value={form.assignedTo||''} onChange={e=>{upd('assignedTo',e.target.value||null);if(e.target.value&&!form.dateAssigned)upd('dateAssigned',new Date().toISOString().split('T')[0]);}} style={{width:'100%'}}>
+              <option value="">— Unassigned —</option>
+              {(config.salesReps||[]).map(r=><option key={r}>{r}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="profile-panel-foot">
+          {onDelete && <button className="btn btn-danger btn-sm" onClick={()=>{if(window.confirm(`Delete "${lead.channelName}"?`)){onDelete(lead.id);onClose();}}}>🗑 Delete</button>}
+          <button className="btn btn-ghost" style={{marginLeft:'auto'}} onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={save}>★ Save</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── INFLUENCER DISCOVERY (was Scraper) ───────────────────
+const DISCOVERY_PLACEHOLDERS={
+  gender:['All','Female','Male'],
+  age:['All','0-18','19-25','26-35','36-45','46+'],
+  location:['All','America','Europe','Asia','Worldwide'],
+  language:['All','English','Spanish','French','Other'],
+  er:['Any','>0.5%','>1%','>3%','>5%'],
+  growth:['Any','1m / >5%','1m / >20%'],
+  lastPost:['Any','7 days','30 days','3 months','6 months'],
+  mediaCount:['Any','1-100','100-500','500+'],
+  accountType:['Any','Regular','Business','Creator'],
+  verified:['Any','Verified','Not verified'],
+  sponsorship:['Any','Has sponsored posts','No sponsored posts'],
+  contact:['Any','Email','Email + YouTube'],
+};
+const INTEREST_OPTIONS=['Activewear','Art & Design','Beauty & Cosmetics','Business & Careers','Camera & Photography','Cars & Motorbikes','Finance','Fitness','Food & Drink','Gaming','Healthcare','Music','Travel'];
+
+function DiscoveryView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,config}) {
+  const feats=config.features||{};
+  const campColorMap={}; (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
+  const PLAT_TABS=['All',...PLATFORMS,'Amazon'];
+  const [searching,setSearching]=useState(false);
+
+  // Functional filters
+  const [platTab,setPlatTab]=useState('All');
+  const [keyword,setKeyword]=useState('');
+  const [minF,setMinF]=useState('');
+  const [maxF,setMaxF]=useState('');
+  const [interest,setInterest]=useState('All');
+  const [sortBy,setSortBy]=useState('relevance');
+  // Cosmetic placeholder filters (UI only)
+  const [ph,setPh]=useState({gender:'All',age:'All',location:'All',language:'All',er:'Any',growth:'Any',lastPost:'Any',mediaCount:'Any',accountType:'Any',verified:'Any',sponsorship:'Any',contact:'Any',audGender:'All',audAge:'All',audLocation:'All',audLanguage:'All'});
+  function setP(k,v){ setPh(p=>({...p,[k]:v})); }
+  const [profileLead,setProfileLead]=useState(null);
+
+  function reset(){ setPlatTab('All');setKeyword('');setMinF('');setMaxF('');setInterest('All');setSortBy('relevance');
+    setPh({gender:'All',age:'All',location:'All',language:'All',er:'Any',growth:'Any',lastPost:'Any',mediaCount:'Any',accountType:'Any',verified:'Any',sponsorship:'Any',contact:'Any',audGender:'All',audAge:'All',audLocation:'All',audLanguage:'All'});
+    addToast('Filters reset','info');
+  }
+
+  // Builds the search payload sent to the Make webhook (see make-scenario/README.md).
+  function buildPayload(){
+    return {
+      platform: platTab,
+      keyword: keyword.trim(),
+      interest: interest==='All'?'':interest,
+      minFollowers: minF?parseFollowers(minF):null,
+      maxFollowers: maxF?parseFollowers(maxF):null,
+      gender: ph.gender, age: ph.age, location: ph.location, language: ph.language,
+      engagementRate: ph.er, growthRate: ph.growth, lastPost: ph.lastPost, mediaCount: ph.mediaCount,
+      accountType: ph.accountType, verified: ph.verified, sponsorship: ph.sponsorship, contact: ph.contact,
+      audience: { gender: ph.audGender, age: ph.audAge, location: ph.audLocation, language: ph.audLanguage },
+      sortBy, limit: 25,
+    };
+  }
+
+  function findInfluencers(){
+    const wh=(config.scrapeWebhook||'').trim();
+    // No real webhook configured yet → just report local mock matches.
+    if(!wh || wh.includes('your-') || wh.includes('webhook-id')){
+      addToast(`${pool.length} influencer(s) match your filters (connect a scraper webhook to fetch live)`,'info');
+      return;
+    }
+    setSearching(true);
+    addToast('Searching influencers via scraper…','info');
+    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(buildPayload())})
+      .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(data=>{
+        const items=Array.isArray(data)?data:(data.results||data.items||data.data||[]);
+        const mapped=items.map((it,i)=>mapDiscoveryResult(it,platTab==='All'?null:platTab,i));
+        if(onResults) onResults(mapped);
+        addToast(`✓ ${mapped.length} influencer(s) fetched from scraper`,'success');
+      })
+      .catch(e=>addToast(`Search failed: ${e.message}`,'error'))
+      .finally(()=>setSearching(false));
+  }
+
+  // The discovery queue = leads not yet worked (no status tag), like the old scraper queue.
+  let pool=leads.filter(l=>!hasStatusTag(l));
+  if(platTab!=='All' && platTab!=='Amazon') pool=pool.filter(l=>l.platform===platTab);
+  if(keyword.trim()){ const k=keyword.toLowerCase(); pool=pool.filter(l=>(l.channelName||'').toLowerCase().includes(k)||(l.niche||'').toLowerCase().includes(k)); }
+  if(interest!=='All') pool=pool.filter(l=>(l.niche||'').toLowerCase().includes(interest.toLowerCase()));
+  const minN=parseFollowers(minF), maxN=parseFollowers(maxF);
+  if(minF) pool=pool.filter(l=>parseFollowers(l.followers)>=minN);
+  if(maxF) pool=pool.filter(l=>parseFollowers(l.followers)<=maxN);
+  if(sortBy==='followers') pool=[...pool].sort((a,b)=>parseFollowers(b.followers)-parseFollowers(a.followers));
+  if(sortBy==='name') pool=[...pool].sort((a,b)=>(a.channelName||'').localeCompare(b.channelName||''));
+
+  const credit=Math.min(pool.length,300);
+
+  function Field({label,hint,children}){
+    return <div className="disc-field"><label className="form-label">{label}{hint&&<span className="disc-hint" title={hint}>ⓘ</span>}</label>{children}</div>;
+  }
+  function PHSelect({k,opts}){ return <select value={ph[k]} onChange={e=>setP(k,e.target.value)}>{opts.map(o=><option key={o}>{o}</option>)}</select>; }
+
+  return (
+    <div className="discovery" style={{display:'flex',flexDirection:'column',flex:1,overflow:'auto'}}>
+      <div className="disc-head">
+        <div>
+          <h2 style={{margin:0,fontSize:18}}>Influencer Discovery</h2>
+          <p style={{fontSize:12,color:'var(--text-dim)',margin:'2px 0 0'}}>Discover & filter influencers across Instagram, YouTube, TikTok, and Amazon.</p>
+        </div>
+        <div className="disc-credit">Search Credit: <b>{credit}/300</b></div>
+      </div>
+
+      {/* Platform tabs */}
+      <div className="disc-tabs">
+        {PLAT_TABS.map(p=>(
+          <button key={p} className={`disc-tab${platTab===p?' active':''}`} onClick={()=>setPlatTab(p)}>
+            {p==='All'?'◎ All':`${PLATFORM_ICON[p]||'🛒'} ${p}`}
+          </button>
+        ))}
+      </div>
+
+      {/* Filter panel */}
+      <div className="disc-panel">
+        <div className="disc-group-label">Influencer</div>
+        <div className="disc-grid">
+          <Field label="Gender"><PHSelect k="gender" opts={DISCOVERY_PLACEHOLDERS.gender}/></Field>
+          <Field label="Age"><PHSelect k="age" opts={DISCOVERY_PLACEHOLDERS.age}/></Field>
+          <Field label="Location"><PHSelect k="location" opts={DISCOVERY_PLACEHOLDERS.location}/></Field>
+          <Field label="Language"><PHSelect k="language" opts={DISCOVERY_PLACEHOLDERS.language}/></Field>
+          <Field label="Interest"><select value={interest} onChange={e=>setInterest(e.target.value)}><option>All</option>{INTEREST_OPTIONS.map(o=><option key={o}>{o}</option>)}</select></Field>
+          <Field label="Followers">
+            <div style={{display:'flex',gap:6,alignItems:'center'}}>
+              <input value={minF} onChange={e=>setMinF(e.target.value)} placeholder="min (1K)" style={{width:'100%'}}/>
+              <span style={{color:'var(--text-light)'}}>–</span>
+              <input value={maxF} onChange={e=>setMaxF(e.target.value)} placeholder="max (1M)" style={{width:'100%'}}/>
+            </div>
+          </Field>
+        </div>
+
+        <div className="disc-group-label">Engagement <span className="disc-soon">placeholder</span></div>
+        <div className="disc-grid">
+          <Field label="Engagement Rate"><PHSelect k="er" opts={DISCOVERY_PLACEHOLDERS.er}/></Field>
+          <Field label="Growth Rate"><PHSelect k="growth" opts={DISCOVERY_PLACEHOLDERS.growth}/></Field>
+          <Field label="Last Post"><PHSelect k="lastPost" opts={DISCOVERY_PLACEHOLDERS.lastPost}/></Field>
+          <Field label="Media Count"><PHSelect k="mediaCount" opts={DISCOVERY_PLACEHOLDERS.mediaCount}/></Field>
+        </div>
+
+        <div className="disc-group-label">Account <span className="disc-soon">placeholder</span></div>
+        <div className="disc-grid">
+          <Field label="Account Type"><PHSelect k="accountType" opts={DISCOVERY_PLACEHOLDERS.accountType}/></Field>
+          <Field label="Verified Status"><PHSelect k="verified" opts={DISCOVERY_PLACEHOLDERS.verified}/></Field>
+          <Field label="Sponsorship"><PHSelect k="sponsorship" opts={DISCOVERY_PLACEHOLDERS.sponsorship}/></Field>
+          <Field label="Contact Information"><PHSelect k="contact" opts={DISCOVERY_PLACEHOLDERS.contact}/></Field>
+        </div>
+
+        <div className="disc-group-label">Audience <span className="disc-soon">placeholder</span></div>
+        <div className="disc-grid">
+          <Field label="Gender"><select value={ph.audGender} onChange={e=>setP('audGender',e.target.value)}>{DISCOVERY_PLACEHOLDERS.gender.map(o=><option key={o}>{o}</option>)}</select></Field>
+          <Field label="Age"><select value={ph.audAge} onChange={e=>setP('audAge',e.target.value)}>{DISCOVERY_PLACEHOLDERS.age.map(o=><option key={o}>{o}</option>)}</select></Field>
+          <Field label="Location"><select value={ph.audLocation} onChange={e=>setP('audLocation',e.target.value)}>{DISCOVERY_PLACEHOLDERS.location.map(o=><option key={o}>{o}</option>)}</select></Field>
+          <Field label="Language"><select value={ph.audLanguage} onChange={e=>setP('audLanguage',e.target.value)}>{DISCOVERY_PLACEHOLDERS.language.map(o=><option key={o}>{o}</option>)}</select></Field>
+        </div>
+
+        <div className="disc-footer-row">
+          <div className="disc-keyword">
+            <span style={{fontSize:12,color:'var(--text-dim)',fontWeight:600}}>Keyword</span>
+            <input value={keyword} onChange={e=>setKeyword(e.target.value)} placeholder="Search name or niche..."/>
+          </div>
+          <div className="disc-field" style={{minWidth:150}}>
+            <span style={{fontSize:12,color:'var(--text-dim)',fontWeight:600}}>Sort By</span>
+            <select value={sortBy} onChange={e=>setSortBy(e.target.value)}>
+              <option value="relevance">Relevance</option>
+              <option value="followers">Followers (high→low)</option>
+              <option value="name">Name (A→Z)</option>
+            </select>
+          </div>
+          <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'flex-end'}}>
+            <button className="btn btn-ghost" onClick={reset} disabled={searching}>Reset Filters</button>
+            <button className="btn btn-primary" onClick={findInfluencers} disabled={searching}>{searching?'⏳ Searching…':'🔎 Find Influencer'}</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="disc-results-label">{pool.length} profile{pool.length!==1?'s':''}</div>
+      <LeadsTable leads={pool} onEdit={onSave} onDelete={onDelete} onBulkAssign={onBulkAssign}
+        showAssigned showCampaign showOrigin onRowOpen={setProfileLead} embedded
+        config={config} feats={feats} campColorMap={campColorMap} filename="discovery" printTitle="Influencer Discovery"/>
+
+      {profileLead && <ProfilePanel lead={profileLead} config={config} campColorMap={campColorMap}
+        onClose={()=>setProfileLead(null)} onSave={onSave} onDelete={onDelete} addToast={addToast}/>}
+    </div>
+  );
+}
+
+// ─── SCRAPER VIEW (restored) ──────────────────────────────
+// Simple scraper queue. "Run Scraper" POSTs to the Make/Apify webhook
+// (config.scrapeWebhook) and ingests results; falls back to a notice if
+// no webhook is configured. The richer DiscoveryView above is kept dormant.
+const SCRAPER_LANGUAGES=['All','English','Spanish','French','German','Portuguese','Other'];
+
+function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,config}) {
+  const [platform,setPlatform]=useState('All');
+  const [minF,setMinF]=useState('10K');
+  const [language,setLanguage]=useState('All');
+  const [keyword,setKeyword]=useState('');
+  const [loading,setLoading]=useState(false);
+  const feats=config.features||{};
+  const campColorMap={};
+  (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
+
+  function scrape(){
+    const wh=(config.scrapeWebhook||'').trim();
+    if(!wh || wh.includes('your-') || wh.includes('webhook-id')){
+      addToast('No scraper webhook set — add it in ⚙ Customize → Scraper Webhook','info');
+      return;
+    }
+    const payload={ type:'search', platform, keyword:keyword.trim(), interest:'', language, minFollowers:parseFollowers(minF), maxFollowers:null, sortBy:'relevance', limit:25 };
+    setLoading(true);
+    addToast('Running scraper…','info');
+    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      .then(r=>r.text().then(t=>{ if(!r.ok) throw new Error('HTTP '+r.status+(t&&t.trim()?' — '+t.replace(/\s+/g,' ').slice(0,140):'')); return t; }))
+      .then(text=>{
+        if(!text || !text.trim()){
+          addToast('Scraper returned an empty response — in n8n set Respond to Webhook → "Respond With: All Incoming Items" and connect it after Get dataset items','error');
+          return;
+        }
+        let data;
+        try{ data=JSON.parse(text); }
+        catch(err){
+          if(text.trim().toLowerCase()==='accepted'){
+            addToast('Make returned its default "Accepted" — add an Array Aggregator before the Webhook Response and have it return the JSON array (Content-Type: application/json)','error');
+          } else {
+            addToast('Scraper response was not valid JSON (got: '+text.slice(0,60)+'…)','error');
+          }
+          return;
+        }
+        const items=Array.isArray(data)?data:(data.results||data.items||data.data||[]);
+        try{ console.log('[Enfinity scraper] received',items.length,'items. First item:',items[0]); }catch(e){}
+        const mapped=items.map((it,i)=>mapDiscoveryResult(it,platform==='All'?null:platform,i));
+        // Reject channels below the Min Followers threshold (only when the
+        // follower count is known — unknown counts pass through).
+        const minN=parseFollowers(minF);
+        const kept = minN>0 ? mapped.filter(l=>{ const f=parseFollowers(l.followers); return !f || f>=minN; }) : mapped;
+        const skipped = mapped.length - kept.length;
+        if(onResults) onResults(kept);
+        addToast(kept.length
+          ? `✓ ${kept.length} lead(s) scraped`+(skipped?` · ${skipped} under ${minF} skipped`:'')
+          : (skipped?`All ${skipped} result(s) were under ${minF}`:'Scraper ran but returned 0 profiles'),'success');
+      })
+      .catch(e=>{
+        const cors=(e&&e.message||'').toLowerCase().includes('failed to fetch');
+        addToast(cors
+          ? 'Scrape blocked (CORS): the response is missing Access-Control-Allow-Origin. Make → add header key "Access-Control-Allow-Origin" = "*" in the Webhook Response module. n8n → set the Webhook node "Allowed Origins" to *.'
+          : `Scrape failed: ${e.message}`,'error');
+      })
+      .finally(()=>setLoading(false));
+  }
+
+  const runBtn=(
+    <button className="btn btn-primary btn-sm" onClick={scrape} disabled={loading} title="Run the scraper for the selected filters">
+      {loading?'⏳ Scraping…':'▶ Run Scraper'}
+    </button>
+  );
+  const scraperFilters=(
+    <>
+      <select value={platform} onChange={e=>setPlatform(e.target.value)} title="Platform">
+        <option value="All">All Platforms</option>
+        {PLATFORMS.map(p=><option key={p}>{p}</option>)}
+      </select>
+      <select value={minF} onChange={e=>setMinF(e.target.value)} title="Minimum followers">
+        {['1K','10K','50K','100K','500K','1M'].map(v=><option key={v} value={v}>{v}+ followers</option>)}
+      </select>
+      <select value={language} onChange={e=>setLanguage(e.target.value)} title="Language">
+        {SCRAPER_LANGUAGES.map(l=><option key={l} value={l}>{l==='All'?'All Languages':l}</option>)}
+      </select>
+    </>
+  );
+
+  return (
+    <LeadsTable leads={leads.filter(l=>!hasStatusTag(l) && leadOrigin(l)!=='Imported')} onEdit={onSave} onDelete={onDelete} onBulkAssign={onBulkAssign}
+      showAssigned showCampaign showOrigin toolbarStart={runBtn} toolbarAfterSearch={scraperFilters}
+      searchValue={keyword} onSearchChange={setKeyword} searchFilters={false} searchPlaceholder="Search query (sent to scraper)…"
+      config={config} feats={feats} campColorMap={campColorMap} filename="scraper_queue" printTitle="Scraper Queue"/>
+  );
+}
+
+// ─── DUPLICATES VIEW ──────────────────────────────────────
+// Surfaces channels that exist in more than one lead record — e.g. when two
+// reps import the same channel from their own sheets. Each group lists every
+// copy with its rep, so an admin can reassign or remove the extras.
+function DuplicatesView({groups,config,onSave,onDelete,addToast}) {
+  const reps=config.salesReps||[];
+  const crossRep=groups.filter(g=>g.reps.length>=2).length;
+  const totalRecords=groups.reduce((s,g)=>s+g.leads.length,0);
+
+  if(groups.length===0){
+    return (
+      <div className="home-content">
+        <div className="card"><div className="card-body" style={{textAlign:'center',padding:'48px 24px',color:'var(--text-dim)'}}>
+          <div style={{fontSize:34,marginBottom:8}}>✓</div>
+          <div style={{fontWeight:700,fontSize:16,color:'var(--text)'}}>No duplicate leads</div>
+          <div style={{marginTop:4}}>No channel is currently held by more than one sales rep.</div>
+        </div></div>
+      </div>
+    );
+  }
+
+  function reassign(l,rep){ if(onSave) onSave({...l,assignedTo:rep||null}); }
+  function remove(l){ if(onDelete) onDelete(l.id); if(addToast) addToast(`Removed duplicate of "${l.channelName}"`,'success'); }
+
+  return (
+    <div className="home-content">
+      <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:4}}>
+        <div className="stat-card red"><div className="stat-label">Duplicate Channels</div><div className="stat-value">{groups.length}</div><div className="stat-sub">{totalRecords} lead records</div></div>
+        <div className="stat-card orange"><div className="stat-label">Cross-Rep Conflicts</div><div className="stat-value">{crossRep}</div><div className="stat-sub">held by 2+ reps</div></div>
+      </div>
+      <div style={{padding:'10px 14px',borderRadius:10,background:'var(--warn-light,#FFF4E5)',color:'var(--warn,#B25E00)',fontSize:13,fontWeight:500}}>
+        ⚠ These channels appear under more than one record. Reassign them to a single rep or remove the extras so two reps don't work the same lead.
+      </div>
+
+      {groups.map(g=>{
+        const head=g.leads[0];
+        const conflict=g.reps.length>=2;
+        return (
+          <div className="card" key={g.key} style={{borderLeft:`3px solid ${conflict?'var(--danger,#DE350B)':'var(--warn,#FF8B00)'}`}}>
+            <div className="card-header" style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              <div className="card-title" style={{display:'flex',alignItems:'center',gap:8}}>
+                {head.thumbnail
+                  ? <img src={head.thumbnail} alt="" style={{width:26,height:26,borderRadius:'50%',objectFit:'cover'}}/>
+                  : <div style={{width:26,height:26,borderRadius:'50%',background:'var(--accent-light)',color:'var(--accent)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700}}>{avatarLetter(head.channelName)}</div>}
+                {head.channelName}
+                <span style={{fontSize:12,fontWeight:500,color:'var(--text-dim)'}}>{PLATFORM_ICON[head.platform]||''} {head.platform} · {head.followers||'—'} followers</span>
+              </div>
+              <div style={{marginLeft:'auto',display:'flex',gap:6,alignItems:'center'}}>
+                {conflict
+                  ? <span style={{fontSize:11,fontWeight:700,color:'var(--danger,#DE350B)',background:'var(--danger-light,#FFEBE6)',padding:'3px 8px',borderRadius:20}}>⚠ {g.reps.length} reps</span>
+                  : <span style={{fontSize:11,fontWeight:700,color:'var(--warn,#B25E00)',background:'var(--warn-light,#FFF4E5)',padding:'3px 8px',borderRadius:20}}>{g.leads.length} copies</span>}
+              </div>
+            </div>
+            <div className="card-body" style={{padding:0,overflowX:'auto'}}>
+              <table className="kpi-table">
+                <thead><tr>
+                  <th>Assigned To</th><th>Status</th><th>Campaign</th><th>Origin</th><th>Date Assigned</th><th>Email(s)</th><th className="no-print">Action</th>
+                </tr></thead>
+                <tbody>
+                  {g.leads.map(l=>(
+                    <tr key={l.id}>
+                      <td>
+                        <select value={l.assignedTo||''} onChange={e=>reassign(l,e.target.value)} style={{minWidth:120}}>
+                          <option value="">Unassigned</option>
+                          {reps.map(r=><option key={r} value={r}>{r}</option>)}
+                        </select>
+                      </td>
+                      <td>{(l.tags||[]).length?l.tags.map(t=><TagBadge key={t} tag={t}/>):<span style={{color:'var(--text-dim)'}}>—</span>}</td>
+                      <td>{(l.campaigns||[]).join(', ')||'—'}</td>
+                      <td>{leadOrigin(l)}</td>
+                      <td>{l.dateAssigned||'—'}</td>
+                      <td style={{fontSize:12}}>{(l.emails||[]).join(', ')||'—'}</td>
+                      <td className="no-print"><button className="btn btn-ghost btn-xs" title="Remove this duplicate record" onClick={()=>remove(l)}>🗑 Remove</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── CAMPAIGN VIEW ────────────────────────────────────────
+function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,config}) {
+  const filtered=leads.filter(l=>l.campaigns.includes(campaign.id));
+  const [repFilter,setRepFilter]=useState('');
+  const display=repFilter?filtered.filter(l=>l.assignedTo===repFilter):filtered;
+  const feats=config.features||{};
+  const campColorMap={};
+  (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
+
+  function doExportCSV(){exportCSV(display,`${campaign.id}${repFilter?'_'+repFilter:''}_leads.csv`);addToast(`Exported ${display.length} leads as CSV`,'success');}
+  function doExportPDF(){exportPDF();addToast('Printing PDF...','info');}
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
+      <div style={{background:'var(--card)',borderBottom:'1px solid var(--border)',padding:'10px 20px',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',flexShrink:0}}>
+        <div style={{display:'flex',gap:6}}>
+          <button className={`btn btn-sm ${!repFilter?'btn-primary':'btn-outline'}`} onClick={()=>setRepFilter('')}>All ({filtered.length})</button>
+          {(config.salesReps||[]).map(r=>{const cnt=filtered.filter(l=>l.assignedTo===r).length;return(
+            <button key={r} className={`btn btn-sm ${repFilter===r?'btn-primary':'btn-outline'}`} onClick={()=>setRepFilter(f=>f===r?'':r)}>
+              {r} ({cnt})
+            </button>
+          );})}
+        </div>
+        <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+          {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={doExportCSV}>⬇ CSV</button>}
+          {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={doExportPDF}>🖨 PDF</button>}
+        </div>
+      </div>
+      <LeadsTable leads={display} onEdit={l=>{}} onBulkAssign={onBulkAssign} showAssigned showCampaign={false} config={config} feats={feats} campColorMap={campColorMap} filename={`${campaign.id}_leads`} printTitle={`${campaign.label} Campaign Report`}/>
+    </div>
+  );
+}
+
+// ─── LEAD MGMT VIEW ───────────────────────────────────────
+function LeadMgmtView({leads,onSave,onBulkAssign,addToast,config}) {
+  const [repView,setRepView]=useState('');
+  const feats=config.features||{};
+  const campColorMap={};
+  (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
+  const all=(config.salesReps||[]);
+  const unassigned=leads.filter(l=>!l.assignedTo);
+  const display=repView==='unassigned'?unassigned:repView?leads.filter(l=>l.assignedTo===repView):leads;
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
+      <div style={{background:'var(--card)',borderBottom:'1px solid var(--border)',padding:'12px 20px',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',flexShrink:0}} className="no-print">
+        <button className={`btn btn-sm ${repView===''?'btn-primary':'btn-outline'}`} onClick={()=>setRepView('')}>All ({leads.length})</button>
+        {all.map(r=>{const cnt=leads.filter(l=>l.assignedTo===r).length;return(
+          <button key={r} className={`btn btn-sm ${repView===r?'btn-primary':'btn-outline'}`} onClick={()=>setRepView(v=>v===r?'':r)}>
+            <div style={{width:16,height:16,borderRadius:'50%',background:'var(--accent)',color:'white',display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:700,marginRight:4}}>{r[0]}</div>
+            {r} ({cnt})
+          </button>
+        );})}
+        <button className={`btn btn-sm ${repView==='unassigned'?'btn-danger':'btn-outline'}`} onClick={()=>setRepView(v=>v==='unassigned'?'':' unassigned')} style={repView==='unassigned'?{}:{borderColor:'var(--warn)',color:'var(--warn)'}}>
+          Unassigned ({unassigned.length})
+        </button>
+      </div>
+      <LeadsTable leads={display} onEdit={onSave} onBulkAssign={onBulkAssign} showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap} filename="lead_management" printTitle="Lead Management Report"/>
+    </div>
+  );
+}
+
+// ─── HISTORY VIEW ─────────────────────────────────────────
+function HistoryView({history,addToast,feats}) {
+  return (
+    <div className="history-list">
+      {history.map(e=>(
+        <div className="history-item" key={e.id}>
+          <div className="history-icon-wrap">{e.icon}</div>
+          <div className="history-text">{e.text}</div>
+          <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,flexShrink:0}}>
+            <div className="history-time">{e.time}</div>
+            {e.restorable && feats.historyRestore && <button className="btn btn-ghost btn-xs" onClick={()=>addToast('Action restored','success')}>↩ Restore</button>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── SETTINGS DRAWER ──────────────────────────────────────
+function SettingsDrawer({config,onConfig,onClose,addToast}) {
+  const [local,setLocal]=useState(()=>JSON.parse(JSON.stringify(config)));
+  const [newRep,setNewRep]=useState('');
+  const [newTag,setNewTag]=useState('');
+  const [newCamp,setNewCamp]=useState({label:'',color:'#1366D6'});
+  function set(path,val){setLocal(prev=>{const n=JSON.parse(JSON.stringify(prev));const parts=path.split('.');let o=n;for(let i=0;i<parts.length-1;i++)o=o[parts[i]];o[parts[parts.length-1]]=val;return n;});}
+  function addRep(){const n=newRep.trim();if(!n||local.salesReps.includes(n))return;setLocal(l=>({...l,salesReps:[...l.salesReps,n]}));setNewRep('');}
+  function remRep(r){setLocal(l=>({...l,salesReps:l.salesReps.filter(x=>x!==r)}));}
+  function editRep(i,v){setLocal(l=>{const a=[...l.salesReps];a[i]=v;return{...l,salesReps:a};});}
+  function addTag(){const n=newTag.trim();if(!n||local.statusTags.includes(n))return;setLocal(l=>({...l,statusTags:[...l.statusTags,n]}));setNewTag('');}
+  function remTag(t){setLocal(l=>({...l,statusTags:l.statusTags.filter(x=>x!==t)}));}
+  function addCamp(){const lab=newCamp.label.trim().toUpperCase();if(!lab)return;setLocal(l=>({...l,campaigns:[...l.campaigns,{id:lab,label:lab,color:newCamp.color}]}));setNewCamp({label:'',color:'#1366D6'});}
+  function remCamp(id){setLocal(l=>({...l,campaigns:l.campaigns.filter(c=>c.id!==id)}));}
+  function updCampColor(id,col){setLocal(l=>({...l,campaigns:l.campaigns.map(c=>c.id===id?{...c,color:col}:c)}));}
+  function apply(){onConfig(local);addToast('Settings saved','success');onClose();}
+  function reset(){setLocal(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));}
+
+  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'prev-scraped':{label:'Previously Scraped',icon:'💾'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},potential:{label:'Potential Leads',icon:'⭐'},nq:{label:'NQ Leads',icon:'❌'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},recent:{label:'Recently Assigned',icon:'🕐'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
+  const COL_META={thumbnail:'Thumbnail',channelName:'Channel Name',url:'URL',platform:'Platform',niche:'Niche',followers:'Followers',emails:'Email(s)',tags:'Status Tags',campaign:'Campaign',assignedTo:'Assigned To',dateAssigned:'Date Assigned'};
+  const FEAT_META={bulkAssign:{label:'Bulk Assign'},exportCSV:{label:'Export CSV'},exportPDF:{label:'Export PDF'},dailyRefresh:{label:'Daily Auto-Refresh'},colorHighlights:{label:'Campaign Color Rows'},webhookTrigger:{label:'n8n Webhook'},historyRestore:{label:'History Restore'},emailValidation:{label:'Email Validation (future)'}};
+
+  return (
+    <>
+      <div className="drawer-overlay" onClick={onClose}/>
+      <div className="drawer">
+        <div className="drawer-header">
+          <h2>⚙️ Dashboard Customizer</h2>
+          <button className="btn-icon" onClick={onClose}>✕</button>
+        </div>
+        <div className="drawer-body">
+          <div className="drawer-section">
+            <div className="drawer-section-title">Navigation Tabs <span style={{fontSize:9,opacity:.6}}>Show / Hide</span></div>
+            {Object.entries(TAB_META).map(([id,m])=>(
+              <div className="toggle-row" key={id}>
+                <div className="toggle-label">{m.icon} {m.label}</div>
+                <Toggle checked={!!local.tabs[id]} onChange={v=>set(`tabs.${id}`,v)}/>
+              </div>
+            ))}
+          </div>
+          <div className="drawer-section">
+            <div className="drawer-section-title">Table Columns</div>
+            {Object.entries(COL_META).map(([id,label])=>(
+              <div className="toggle-row" key={id}>
+                <div className="toggle-label">{label}</div>
+                <Toggle checked={!!local.columns[id]} onChange={v=>set(`columns.${id}`,v)}/>
+              </div>
+            ))}
+          </div>
+          <div className="drawer-section">
+            <div className="drawer-section-title">Features</div>
+            {Object.entries(FEAT_META).map(([id,m])=>(
+              <div className="toggle-row" key={id}>
+                <div className="toggle-label">{m.label}</div>
+                <Toggle checked={!!local.features[id]} onChange={v=>set(`features.${id}`,v)}/>
+              </div>
+            ))}
+          </div>
+          <div className="drawer-section">
+            <div className="drawer-section-title">Webhook URLs</div>
+            <div className="edit-list">
+              <div>
+                <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Scraper Webhook (n8n)</div>
+                <input value={local.scrapeWebhook||''} onChange={e=>setLocal(l=>({...l,scrapeWebhook:e.target.value}))} placeholder="https://app.n8n.cloud/webhook/..." style={{width:'100%'}}/>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Close — Save Webhook (push leads → Close)</div>
+                <input value={local.closeWebhook||''} onChange={e=>setLocal(l=>({...l,closeWebhook:e.target.value}))} placeholder="https://app.n8n.cloud/webhook/..." style={{width:'100%'}}/>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Close — Load Webhook (pull leads ← Close)</div>
+                <input value={local.closeLoadWebhook||''} onChange={e=>setLocal(l=>({...l,closeLoadWebhook:e.target.value}))} placeholder="https://app.n8n.cloud/webhook/..." style={{width:'100%'}}/>
+              </div>
+            </div>
+          </div>
+          <div className="drawer-section">
+            <div className="drawer-section-title">Campaigns</div>
+            <div className="edit-list">
+              {local.campaigns.map(c=>(
+                <div className="edit-row" key={c.id}>
+                  <input type="color" className="color-swatch" value={c.color} onChange={e=>updCampColor(c.id,e.target.value)}/>
+                  <input value={c.label} readOnly style={{color:'var(--text-dim)',flex:1}}/>
+                  <button className="btn btn-danger btn-xs" onClick={()=>remCamp(c.id)}>✕</button>
+                </div>
+              ))}
+              <div className="edit-row">
+                <input type="color" className="color-swatch" value={newCamp.color} onChange={e=>setNewCamp(n=>({...n,color:e.target.value}))}/>
+                <input placeholder="Campaign name..." value={newCamp.label} onChange={e=>setNewCamp(n=>({...n,label:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&addCamp()} style={{flex:1}}/>
+                <button className="btn btn-outline btn-xs" onClick={addCamp}>+ Add</button>
+              </div>
+            </div>
+          </div>
+          <div className="drawer-section">
+            <div className="drawer-section-title">Sales Reps</div>
+            <div className="edit-list">
+              {local.salesReps.map((r,i)=>(
+                <div className="edit-row" key={i}>
+                  <input value={r} onChange={e=>editRep(i,e.target.value)} style={{flex:1}}/>
+                  <button className="btn btn-danger btn-xs" onClick={()=>remRep(r)}>✕</button>
+                </div>
+              ))}
+              <div className="edit-row">
+                <input placeholder="Add sales rep..." value={newRep} onChange={e=>setNewRep(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addRep()} style={{flex:1}}/>
+                <button className="btn btn-outline btn-xs" onClick={addRep}>+ Add</button>
+              </div>
+            </div>
+          </div>
+          <div className="drawer-section">
+            <div className="drawer-section-title">Rep Avatars <span style={{fontSize:9,opacity:.6}}>Photo · Color · Emoji</span></div>
+            <div style={{display:'flex',flexDirection:'column',gap:12}}>
+              {local.salesReps.map(r=>{
+                const color=(local.repColors||{})[r]||'#6366F1';
+                const emoji=(local.repEmojis||{})[r]||'';
+                const photo=(local.repPhotos||{})[r]||'';
+                function setPhoto(val){setLocal(l=>({...l,repPhotos:{...(l.repPhotos||{}),[r]:val}}));}
+                function handleFile(e){
+                  const file=e.target.files[0];if(!file)return;
+                  const reader=new FileReader();
+                  reader.onload=ev=>setPhoto(ev.target.result);
+                  reader.readAsDataURL(file);
+                }
+                return(
+                  <div key={r} style={{background:'var(--bg)',borderRadius:'var(--radius)',padding:'10px 12px',display:'flex',gap:12,alignItems:'center'}}>
+                    <div style={{width:44,height:44,borderRadius:'50%',overflow:'hidden',flexShrink:0,background:color,display:'flex',alignItems:'center',justifyContent:'center',color:'white',fontWeight:700,fontSize:18,border:'2px solid var(--border)'}}>
+                      {photo?<img src={photo} style={{width:'100%',height:'100%',objectFit:'cover'}}/>:(emoji||r[0].toUpperCase())}
+                    </div>
+                    <div style={{flex:1,display:'flex',flexDirection:'column',gap:6}}>
+                      <div style={{fontWeight:600,fontSize:13}}>{r}</div>
+                      <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                        <input type="color" className="color-swatch" value={color} title="Avatar color"
+                          onChange={e=>setLocal(l=>({...l,repColors:{...(l.repColors||{}),[r]:e.target.value}}))}/>
+                        <input value={emoji} onChange={e=>setLocal(l=>({...l,repEmojis:{...(l.repEmojis||{}),[r]:e.target.value}}))}
+                          placeholder="emoji" style={{width:72,textAlign:'center',fontSize:15,padding:'4px 6px'}}/>
+                        <label style={{cursor:'pointer',fontSize:11,padding:'5px 10px',borderRadius:'var(--radius)',border:'1px solid var(--border)',background:'var(--card)',color:'var(--text-dim)',whiteSpace:'nowrap'}}>
+                          Upload photo
+                          <input type="file" accept="image/*" style={{display:'none'}} onChange={handleFile}/>
+                        </label>
+                        {photo&&<button className="btn btn-danger btn-xs" onClick={()=>setPhoto('')}>Remove</button>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="drawer-section">
+            <div className="drawer-section-title">Status Tags</div>
+            <div className="edit-list">
+              {local.statusTags.map((t,i)=>(
+                <div className="edit-row" key={i}>
+                  <input value={t} readOnly style={{flex:1,color:'var(--text-dim)'}}/>
+                  <button className="btn btn-danger btn-xs" onClick={()=>remTag(t)}>✕</button>
+                </div>
+              ))}
+              <div className="edit-row">
+                <input placeholder="Add tag..." value={newTag} onChange={e=>setNewTag(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addTag()} style={{flex:1}}/>
+                <button className="btn btn-outline btn-xs" onClick={addTag}>+ Add</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="drawer-footer">
+          <button className="btn btn-ghost btn-sm" onClick={reset}>↺ Reset</button>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary btn-sm" style={{marginLeft:'auto'}} onClick={apply}>✓ Apply Changes</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── LOGIN SCREEN ─────────────────────────────────────────
+function LoginScreen({config,onLogin}) {
+  const users=config.users||[];
+  const [selected,setSelected]=useState(null);
+  const [pw,setPw]=useState('');
+  const [err,setErr]=useState('');
+  const pwRef=useRef(null);
+
+  function pick(u){ setSelected(u); setPw(''); setErr(''); setTimeout(()=>pwRef.current&&pwRef.current.focus(),50); }
+  function submit(e){
+    e&&e.preventDefault();
+    if(!selected) return;
+    if(pw===effectivePassword(selected)){ onLogin(selected); }
+    else { setErr('Incorrect password'); setPw(''); }
+  }
+
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <div className="login-brand">
+          <div className="logo" style={{width:48,height:48,fontSize:24}}>E</div>
+          <div>
+            <div className="login-title">Enfinity</div>
+            <div className="login-sub">Sales Dashboard</div>
+          </div>
+        </div>
+
+        {!selected ? (
+          <>
+            <div className="login-prompt">Select your profile to sign in</div>
+            <div className="login-grid">
+              {users.map(u=>(
+                <button key={u.name} className="login-user" onClick={()=>pick(u)}>
+                  <RepAvatar rep={u.name} config={config} size={48} bgOverride="var(--card)"/>
+                  <div className="login-user-name">{u.name}</div>
+                  <div className={`login-role ${u.role}`}>{u.role==='admin'?'★ Admin':'Employee'}</div>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <form className="login-form" onSubmit={submit}>
+            <button type="button" className="btn btn-ghost btn-xs" style={{alignSelf:'flex-start'}} onClick={()=>setSelected(null)}>← Back</button>
+            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:8,margin:'8px 0'}}>
+              <RepAvatar rep={selected.name} config={config} size={64} bgOverride="var(--card)"/>
+              <div style={{fontWeight:700,fontSize:16}}>{selected.name}</div>
+              <div className={`login-role ${selected.role}`}>{selected.role==='admin'?'★ Admin':'Employee'}</div>
+            </div>
+            <input ref={pwRef} type="password" placeholder="Password" value={pw}
+              onChange={e=>{setPw(e.target.value);setErr('');}} autoFocus/>
+            {err && <div className="login-err">{err}</div>}
+            <button type="submit" className="btn btn-primary" style={{width:'100%'}}>Sign In</button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── CHANGE PASSWORD MODAL ────────────────────────────────
+function ChangePasswordModal({user,onClose,addToast}) {
+  const [cur,setCur]=useState('');
+  const [next,setNext]=useState('');
+  const [confirm,setConfirm]=useState('');
+  const [err,setErr]=useState('');
+  const hasOverride=(()=>{try{return localStorage.getItem(pwKey(user.name))!=null;}catch(e){return false;}})();
+
+  function submit(e){
+    e&&e.preventDefault();
+    if(cur!==effectivePassword(user)){ setErr('Current password is incorrect'); return; }
+    if(next.length<4){ setErr('New password must be at least 4 characters'); return; }
+    if(next!==confirm){ setErr('New passwords do not match'); return; }
+    try{ localStorage.setItem(pwKey(user.name),next); }catch(e){ setErr('Could not save password'); return; }
+    addToast('Password updated on this device','success');
+    onClose();
+  }
+  function resetToDefault(){
+    try{ localStorage.removeItem(pwKey(user.name)); }catch(e){}
+    addToast('Password reset to the default from config.js','info');
+    onClose();
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:420}}>
+        <div className="modal-header">
+          <div>
+            <h2>Change Password</h2>
+            <p style={{color:'var(--text-dim)',fontSize:13,marginTop:3}}>{user.name} · {user.role}</p>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
+        </div>
+        <form onSubmit={submit} style={{display:'flex',flexDirection:'column',gap:12}}>
+          <div className="form-group"><label className="form-label">Current Password</label>
+            <input type="password" value={cur} onChange={e=>{setCur(e.target.value);setErr('');}} autoFocus/></div>
+          <div className="form-group"><label className="form-label">New Password</label>
+            <input type="password" value={next} onChange={e=>{setNext(e.target.value);setErr('');}}/></div>
+          <div className="form-group"><label className="form-label">Confirm New Password</label>
+            <input type="password" value={confirm} onChange={e=>{setConfirm(e.target.value);setErr('');}}/></div>
+          {err && <div className="login-err" style={{textAlign:'left'}}>{err}</div>}
+          <div style={{fontSize:11,color:'var(--text-light)',lineHeight:1.5,background:'var(--bg)',padding:'8px 10px',borderRadius:'var(--radius)'}}>
+            ⓘ Your new password is saved in <b>this browser only</b> — there's no server to sync it. On another device you'll still use the default until you change it there too.
+          </div>
+          <div className="modal-footer">
+            <div>{hasOverride && <button type="button" className="btn btn-ghost btn-sm" onClick={resetToDefault}>↺ Reset to default</button>}</div>
+            <div className="modal-footer-right">
+              <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+              <button type="submit" className="btn btn-primary">Save Password</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── GLOBAL SEARCH (command palette) ──────────────────────
+function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenLead,onOpenSettings,onOpenChangePw,onToggleDark,onLogout}) {
+  const [q,setQ]=useState('');
+  const inputRef=useRef(null);
+  useEffect(()=>{
+    inputRef.current&&inputRef.current.focus();
+    function key(e){ if(e.key==='Escape') onClose(); }
+    document.addEventListener('keydown',key);
+    return()=>document.removeEventListener('keydown',key);
+  },[]);
+  const ql=q.trim().toLowerCase();
+  const match=s=>String(s||'').toLowerCase().includes(ql);
+
+  // Pages
+  const PAGE_DEFS=[
+    {id:'home',label:'Home',icon:'⊟'},{id:'scraper',label:'Scraper',icon:'◎'},
+    {id:'history',label:'History',icon:'◷'},{id:'prev-scraped',label:'Previously Scraped',icon:'◈'},
+    {id:'lead-mgmt',label:'Lead Management',icon:'◉'},{id:'google-import',label:'Google Sheets Import',icon:'◫'},
+    {id:'potential',label:'Potential Leads',icon:'★'},{id:'nq',label:'NQ Leads',icon:'✕'},
+    {id:'contacted',label:'Contacted Leads',icon:'✉'},{id:'recycle',label:'For Recycle',icon:'↻'},
+    {id:'recent',label:'Recently Assigned',icon:'◑'},
+  ].filter(p=>(config.tabs||{})[p.id]);
+  (config.campaigns||[]).forEach(c=>PAGE_DEFS.push({id:c.id.toLowerCase(),label:`${c.label} Campaign`,icon:'●'}));
+  const pages=PAGE_DEFS.filter(p=>!ql||match(p.label)).map(p=>({...p,kind:'Pages',run:()=>{onNavigate(p.id);onClose();}}));
+
+  const reps=(config.salesReps||[]).filter(r=>!ql||match(r)).map(r=>({label:`${r}'s Dashboard`,icon:'👤',kind:'Sales Reps',run:()=>{onOpenRep(r);onClose();}}));
+
+  const leadHits=(!ql?[]:leads.filter(l=>match(l.channelName)||match(l.niche)||match(l.platform)||(l.emails||[]).some(match)).slice(0,8))
+    .map(l=>({label:l.channelName,lead:l,kind:'Leads',run:()=>{onOpenLead(l);onClose();}}));
+
+  const ACTION_DEFS=[
+    ...(isAdmin?[{label:'Open Customize / Settings',icon:'⚙',run:()=>{onOpenSettings();onClose();}}]:[]),
+    {label:'Change Password',icon:'🔑',run:()=>{onOpenChangePw();onClose();}},
+    {label:'Toggle Dark Mode',icon:'🌙',run:()=>{onToggleDark();onClose();}},
+    {label:'Logout',icon:'⎋',run:()=>{onLogout();onClose();}},
+  ];
+  const actions=ACTION_DEFS.filter(a=>!ql||match(a.label)).map(a=>({...a,kind:'Actions'}));
+
+  const groups=[['Leads',leadHits],['Pages',pages],['Sales Reps',reps],['Actions',actions]].filter(([,arr])=>arr.length);
+  const flat=groups.flatMap(([,arr])=>arr);
+
+  function onKeyDown(e){ if(e.key==='Enter'&&flat.length){ e.preventDefault(); flat[0].run(); } }
+
+  return (
+    <div className="cmdk-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="cmdk">
+        <div className="cmdk-input-row">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input ref={inputRef} value={q} onChange={e=>setQ(e.target.value)} onKeyDown={onKeyDown}
+            placeholder="Search pages, leads, reps, settings…"/>
+          <span className="cmdk-esc">ESC</span>
+        </div>
+        <div className="cmdk-results">
+          {flat.length===0 && <div className="cmdk-empty">No matches{ql?` for “${q}”`:''}</div>}
+          {groups.map(([name,arr])=>(
+            <div key={name} className="cmdk-group">
+              <div className="cmdk-group-label">{name}</div>
+              {arr.map((it,i)=>{
+                const active=flat[0]===it;
+                if(it.lead){
+                  const l=it.lead;
+                  return (
+                    <div key={i} className={`cmdk-item cmdk-lead${active?' cmdk-active':''}`} onClick={it.run}>
+                      <div className="cmdk-lead-av">{avatarLetter(l.channelName)}</div>
+                      <div className="cmdk-lead-main">
+                        <div className="cmdk-lead-name">{l.channelName}
+                          <span className="cmdk-lead-plat">{PLATFORM_ICON[l.platform]||''} {l.platform}</span>
+                        </div>
+                        <div className="cmdk-lead-meta">
+                          {l.niche||'—'} · {l.followers||'—'} followers · {l.assignedTo?('@'+l.assignedTo):'Unassigned'}
+                          {leadOrigin(l)==='Fresh'?' · Fresh':' · Imported'}
+                        </div>
+                        {(l.tags||[]).length>0 && <div className="cmdk-lead-tags">
+                          {l.tags.slice(0,4).map(t=>{ const c=TAG_COLORS[t]||{bg:'#F0F2F5',color:'#68737D'}; return <span key={t} style={{background:c.bg,color:c.color}}>{t==='HT'?'⚡ HT':t}</span>; })}
+                        </div>}
+                      </div>
+                      <span className="cmdk-kind">Open ↵</span>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={i} className={`cmdk-item${active?' cmdk-active':''}`} onClick={it.run}>
+                    <span className="cmdk-icon">{it.icon}</span>
+                    <span className="cmdk-label">{it.label}{it.sub&&<span className="cmdk-sub"> — {it.sub}</span>}</span>
+                    <span className="cmdk-kind">{it.kind}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        <div className="cmdk-foot"><b>Enter</b> to open first result · <b>Esc</b> to close</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── APP ──────────────────────────────────────────────────
+function App() {
+  const [tab,setTab]=useState('home');
+  const [leads,setLeads]=useState(SAMPLE_LEADS);
+  const [history,setHistory]=useState(SAMPLE_HISTORY);
+  const [toasts,setToasts]=useState([]);
+  const [config,setConfig]=useState(DEFAULT_CONFIG);
+  const [showSettings,setShowSettings]=useState(false);
+  const [activeRep,setActiveRep]=useState(()=>localStorage.getItem('activeRep')||null);
+  const [showRepSelect,setShowRepSelect]=useState(false);
+  const [darkMode,setDarkMode]=useState(()=>localStorage.getItem('darkMode')==='true');
+  const [currentUser,setCurrentUser]=useState(()=>{ try{return JSON.parse(localStorage.getItem('currentUser')||'null');}catch(e){return null;} });
+  const [showChangePw,setShowChangePw]=useState(false);
+  const [showSearch,setShowSearch]=useState(false);
+  const [searchLead,setSearchLead]=useState(null);
+  const [closeSyncing,setCloseSyncing]=useState(false);
+  const closeLoadedRef=useRef(false);
+  const isAdmin=isAdminUser(currentUser);
+
+  function login(u){ setCurrentUser(u); localStorage.setItem('currentUser',JSON.stringify(u)); addToast(`Welcome, ${u.name}`,'success'); }
+  function logout(){ setCurrentUser(null); localStorage.removeItem('currentUser'); setActiveRep(null); setTab('home'); }
+
+  useEffect(()=>{
+    function key(e){
+      if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){ e.preventDefault(); setShowSearch(s=>!s); }
+    }
+    document.addEventListener('keydown',key);
+    return()=>document.removeEventListener('keydown',key);
+  },[]);
+
+  useEffect(()=>{
+    document.documentElement.setAttribute('data-dark', darkMode ? 'true' : '');
+    if(!darkMode) document.documentElement.removeAttribute('data-dark');
+    localStorage.setItem('darkMode',darkMode);
+  },[darkMode]);
+
+  useEffect(()=>{
+    if(activeRep) localStorage.setItem('activeRep',activeRep);
+    else localStorage.removeItem('activeRep');
+  },[activeRep]);
+
+  function addToast(msg,type='info'){const id=Date.now();setToasts(t=>[...t,{id,msg,type}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);}
+  function saveL(upd){
+    const old=leads.find(l=>l.id===upd.id);
+    // Employees may only edit leads that are unassigned or assigned to themselves.
+    if(!isAdmin && old && old.assignedTo && old.assignedTo!==currentUser.name){
+      addToast(`Only ${old.assignedTo} or an admin can edit this lead`,'error');
+      return;
+    }
+    let updated={...upd};
+    if(old&&!old.tags.includes('Contacted')&&upd.tags.includes('Contacted')){
+      updated.lastContactDate=new Date().toISOString().split('T')[0];
+      addToast(`"${upd.channelName}" marked Contacted — date recorded`,'success');
+    }
+    setLeads(ls=>ls.map(l=>l.id===updated.id?updated:l));
+    logH('✏️',`Lead "${updated.channelName}" updated`);
+  }
+  function delL(id){
+    if(!isAdmin){ addToast('Only admins can delete leads','error'); return; }
+    const l=leads.find(x=>x.id===id);setLeads(ls=>ls.filter(x=>x.id!==id));logH('🗑',`Lead "${l?.channelName}" deleted`);addToast(`"${l?.channelName}" deleted`,'error');
+  }
+  function logH(icon,text){setHistory(h=>[{id:Date.now(),icon,text,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:true},...h]);}
+  function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
+  function applyConfig(cfg){setConfig(cfg);if(!cfg.tabs[tab])setTab('home');}
+  function importLeads(newLeads){
+    setLeads(existing=>{
+      // Dedupe per (channel + rep): skip a lead only if the SAME rep already has
+      // that channel. The same channel under a DIFFERENT rep is kept on purpose,
+      // so the Duplicates tab can flag that two reps are working the same lead.
+      const seen=new Set(existing.map(l=>leadKey(l)+'|'+(l.assignedTo||'')));
+      const fresh=[];
+      newLeads.forEach(l=>{
+        const k=leadKey(l)+'|'+(l.assignedTo||'');
+        if(leadKey(l) && seen.has(k)) return;     // same channel already under this rep
+        seen.add(k);
+        fresh.push({...l,source:'import'});
+      });
+      const skipped=newLeads.length-fresh.length;
+      logH('📊',`Google Sheets import: ${fresh.length} lead(s) added${skipped>0?` · ${skipped} same-rep duplicate(s) skipped`:''}`);
+      return[...existing,...fresh];
+    });
+    setTab('lead-mgmt');
+  }
+
+  function addDiscovered(items){
+    const arr=Array.isArray(items)?items:[];
+    setLeads(existing=>{
+      // De-dupe by channel (ID > URL > name), both within the batch and vs existing leads.
+      const seen=new Set(existing.map(leadKey).filter(Boolean));
+      const fresh=[];
+      arr.forEach(l=>{
+        const k=leadKey(l);
+        if(k && seen.has(k)) return;     // same channel already in the list
+        if(k) seen.add(k);
+        fresh.push(l);
+      });
+      const dropped=arr.length-fresh.length;
+      logH('🔎',`Discovery: ${fresh.length} unique channel(s) added${dropped>0?` · ${dropped} duplicate(s) skipped`:''}`);
+      return[...fresh,...existing];   // newest results first (top of the list / page 1)
+    });
+  }
+
+  // Normalize a lead object coming back from Close (via n8n) into the shape
+  // the dashboard expects, so missing fields don't crash the UI.
+  function normalizeLead(x,i){
+    x=x||{};
+    return {
+      id: x.id || (Date.now()+Math.floor(Math.random()*1e6)+i),
+      closeLeadId: x.closeLeadId || x.close_id || null,
+      channelName: x.channelName || x.name || ('lead_'+(i+1)),
+      url: x.url || '', platform: x.platform || 'YouTube', niche: x.niche || '',
+      followers: x.followers || '', emails: Array.isArray(x.emails)?x.emails:(x.email?[x.email]:[]),
+      thumbnail: x.thumbnail || '', channelId: x.channelId || '',
+      tags: Array.isArray(x.tags)?x.tags:[], campaigns: Array.isArray(x.campaigns)?x.campaigns:[],
+      assignedTo: x.assignedTo || null, dateAssigned: x.dateAssigned || null,
+      lastContactDate: x.lastContactDate || null, channels: Array.isArray(x.channels)?x.channels:[],
+      source: x.source,
+    };
+  }
+
+  function loadFromClose(opts){
+    opts=opts||{};
+    const wh=(config.closeLoadWebhook||'').trim();
+    if(!wh || wh.includes('your-')){ if(!opts.silent) addToast('Set the Close Load Webhook in ⚙ Customize','info'); return; }
+    setCloseSyncing(true);
+    if(!opts.silent) addToast('Loading leads from Close…','info');
+    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+      .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+      .then(text=>{
+        if(!text || !text.trim()){ if(!opts.silent) addToast('Close returned no leads','info'); return; }
+        let data; try{ data=JSON.parse(text); }catch(e){ addToast('Close load: response was not JSON','error'); return; }
+        const arr=Array.isArray(data)?data:(data.leads||data.results||data.data||[]);
+        const loaded=arr.map(normalizeLead);
+        setLeads(loaded);
+        logH('☁️',`Loaded ${loaded.length} lead(s) from Close`);
+        if(!opts.silent) addToast(`✓ Loaded ${loaded.length} lead(s) from Close`,'success');
+      })
+      .catch(e=>{ if(!opts.silent) addToast('Close load failed: '+e.message,'error'); })
+      .finally(()=>setCloseSyncing(false));
+  }
+
+  function saveToClose(){
+    const wh=(config.closeWebhook||'').trim();
+    if(!wh || wh.includes('your-')){ addToast('Set the Close Save Webhook in ⚙ Customize','info'); return; }
+    if(!leads.length){ addToast('No leads to save','info'); return; }
+    setCloseSyncing(true);
+    addToast(`Saving ${leads.length} lead(s) to Close…`,'info');
+    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads})})
+      .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+      .then(text=>{
+        // Optional: Close returns [{id, closeLeadId}] so we can update without duplicating next time.
+        let data=null; try{ data=text&&text.trim()?JSON.parse(text):null; }catch(e){}
+        const idMap=Array.isArray(data)?data:(data&&Array.isArray(data.saved)?data.saved:null);
+        if(idMap){
+          const byId={}; idMap.forEach(m=>{ if(m && m.id!=null) byId[m.id]=m.closeLeadId||m.close_id; });
+          setLeads(ls=>ls.map(l=>byId[l.id]?{...l,closeLeadId:byId[l.id]}:l));
+        }
+        logH('☁️',`Saved ${leads.length} lead(s) to Close`);
+        addToast(`✓ Saved ${leads.length} lead(s) to Close`,'success');
+      })
+      .catch(e=>addToast('Close save failed: '+e.message,'error'))
+      .finally(()=>setCloseSyncing(false));
+  }
+
+  // Auto-load from Close once after login, if a load webhook is configured.
+  useEffect(()=>{
+    if(currentUser && !closeLoadedRef.current){
+      const wh=(config.closeLoadWebhook||'').trim();
+      if(wh && !wh.includes('your-')){ closeLoadedRef.current=true; loadFromClose({silent:true}); }
+    }
+  },[currentUser]);
+
+  function importToClose(rep,repLeads){
+    const CLOSE_WEBHOOK=config.closeWebhook||'https://app.n8n.cloud/webhook/your-close-import-webhook';
+    const payload={rep,leads:repLeads.map(l=>({channelName:l.channelName,url:l.url,platform:l.platform,niche:l.niche,emails:l.emails,tags:l.tags,campaigns:l.campaigns,dateAssigned:l.dateAssigned}))};
+    addToast(`Sending ${repLeads.length} leads to Close.io for ${rep}...`,'info');
+    fetch(CLOSE_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      .then(()=>{ addToast(`✓ ${repLeads.length} leads imported to Close.io for ${rep}`,'success'); logH('⬆',`Close.io import: ${repLeads.length} leads for ${rep}`); })
+      .catch(()=>{ addToast(`Close.io import triggered for ${rep} (configure webhook to go live)`,'info'); logH('⬆',`Close.io import triggered for ${rep}`); });
+  }
+
+  useEffect(()=>{
+    function checkRecycle(){
+      const now=new Date();
+      setLeads(ls=>{
+        const recycled=[];
+        const updated=ls.map(l=>{
+          if(!l.tags.includes('Contacted')||l.tags.includes('For Recycle')||!l.lastContactDate) return l;
+          const diff=Math.floor((now-new Date(l.lastContactDate))/86400000);
+          const isVVV=l.campaigns.includes('VVV');
+          const isMSN=l.campaigns.includes('MSN');
+          const threshold=isVVV?30:isMSN?90:Infinity;
+          if(diff>=threshold){
+            recycled.push(l.channelName);
+            return{...l,tags:[...l.tags.filter(t=>t!=='Contacted'),'For Recycle']};
+          }
+          return l;
+        });
+        if(recycled.length>0){
+          setHistory(h=>[{id:Date.now(),icon:'♻️',text:`Auto-recycled ${recycled.length} lead(s): ${recycled.join(', ')}`,time:now.toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:false},...h]);
+        }
+        return updated;
+      });
+    }
+    checkRecycle();
+    const t=setInterval(checkRecycle,3600000);
+    return()=>clearInterval(t);
+  },[]);
+
+  const campColorMap={};
+  (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
+
+  const vLeads = leads;
+
+  // Duplicate detection: group leads by channel identity (channelId>url>name);
+  // a group is a duplicate when the same channel exists in 2+ lead records.
+  // These are surfaced in the Duplicates tab so two reps don't unknowingly work
+  // the same lead. Cross-rep conflicts (2+ distinct reps) are sorted to the top.
+  const dupGroups=(function(){
+    const byKey={};
+    vLeads.forEach(l=>{ const k=leadKey(l); if(!k) return; (byKey[k]=byKey[k]||[]).push(l); });
+    return Object.keys(byKey).map(k=>{
+      const ls=byKey[k];
+      return {key:k, leads:ls, reps:[...new Set(ls.map(l=>l.assignedTo).filter(Boolean))]};
+    }).filter(g=>g.leads.length>1)
+      .sort((a,b)=>(b.reps.length-a.reps.length)||(b.leads.length-a.leads.length));
+  })();
+
+  const recentCutoff=new Date();recentCutoff.setDate(recentCutoff.getDate()-7);
+  const counts={
+    potential:vLeads.filter(l=>l.tags.includes('Potential')).length,
+    nq:vLeads.filter(l=>l.tags.includes('Not Qualified')).length,
+    contacted:vLeads.filter(l=>l.tags.includes('Contacted')).length,
+    recycle:vLeads.filter(l=>l.tags.includes('For Recycle')).length,
+    recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff).length,
+    duplicates:dupGroups.length,
+  };
+
+  const NAV_MAIN=[
+    {id:'home',icon:'⊟',label:'Home'},
+    {id:'scraper',icon:'◎',label:'Scraper'},
+    {id:'history',icon:'◷',label:'History'},
+    {id:'prev-scraped',icon:'◈',label:'Previously Scraped'},
+    {id:'lead-mgmt',icon:'◉',label:'Lead Management'},
+    {id:'google-import',icon:'◫',label:'Google Sheets'},
+  ];
+  const NAV_FILTER=[
+    {id:'potential',icon:'★',label:'Potential',count:counts.potential,cls:'green'},
+    {id:'nq',icon:'✕',label:'NQ Leads',count:counts.nq,cls:'red'},
+    {id:'contacted',icon:'✉',label:'Contacted',count:counts.contacted,cls:'blue'},
+    {id:'recycle',icon:'↻',label:'For Recycle',count:counts.recycle,cls:'orange'},
+    {id:'recent',icon:'◑',label:'Recently Assigned',count:counts.recent,cls:''},
+    {id:'duplicates',icon:'⧉',label:'Duplicates',count:counts.duplicates,cls:'red'},
+  ];
+
+  function renderMain(){
+    if(showRepSelect) return <RepSelectScreen leads={vLeads} config={config} activeRep={activeRep} onSelect={r=>{if(r){setActiveRep(r);setTab('rep-home');}setShowRepSelect(false);}}/>;
+    if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose}/>;
+    if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
+    if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config}/>;
+    if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;
+    if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
+    if(tab==='lead-mgmt') return <LeadMgmtView leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
+    if(tab==='potential') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('Potential'))} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="potential_leads" printTitle="Potential Leads"/>;
+    if(tab==='nq') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('Not Qualified'))} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="nq_leads" printTitle="NQ Leads"/>;
+    if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap}/>;
+    if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;
+    if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
+    if(tab==='duplicates') return <DuplicatesView groups={dupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
+    if(tab==='google-import') return <GoogleImportView onImport={importLeads} addToast={addToast}/>;
+    const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);
+    if(camp) return <CampaignView campaign={camp} campColor={camp.color} leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
+    return null;
+  }
+
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',potential:'Potential Leads',nq:'NQ Leads',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+
+  // Gate the entire app behind login.
+  if(!currentUser) return <LoginScreen config={config} onLogin={login}/>;
+
+  return (
+    <div id="root" style={{display:'flex',flexDirection:'column',height:'100vh'}}>
+      {/* TOPBAR */}
+      <div className="topbar">
+        <div className="topbar-brand">
+          <div className="logo">E</div>
+          <div>
+            <div>Enfinity</div>
+            <div className="tagline">Sales Dashboard</div>
+          </div>
+        </div>
+        <div style={{flex:1}}/>
+        <div className="topbar-right">
+          <button className="topbar-icon-btn" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          </button>
+          {(config.features||{}).webhookTrigger && <div className="topbar-badge"><span className="webhook-dot"></span> n8n Live</div>}
+          <div className="topbar-user-pill" title={`Signed in as ${currentUser.name} (${currentUser.role})`}>
+            <RepAvatar rep={currentUser.name} config={config} size={26} online bgOverride="var(--card)"/>
+            <div className="topbar-rep-name">{currentUser.name}</div>
+            {isAdmin && <span className="role-chip">ADMIN</span>}
+          </div>
+          <button className={`btn btn-outline btn-sm dark-mode-btn`} onClick={()=>setDarkMode(d=>!d)} title="Toggle dark mode" style={{fontSize:16,padding:'6px 10px'}}>
+            {darkMode ? '☀' : '🌙'}
+          </button>
+          {isAdmin && <button className="btn btn-outline btn-sm" onClick={()=>setShowSettings(true)}>⚙ Customize</button>}
+          <button className="btn btn-ghost btn-sm" onClick={logout} title="Sign out">⎋ Logout</button>
+        </div>
+      </div>
+
+      <div className="app-body">
+        {/* SIDEBAR */}
+        <nav className="sidebar">
+          <div style={{height:8}}/>
+          <div className="sidebar-section-label">Main</div>
+          {NAV_MAIN.filter(n=>config.tabs[n.id]).map(n=>(
+            <div key={n.id} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
+              <span className="nav-icon">{n.icon}</span>{n.label}
+            </div>
+          ))}
+          <div className="nav-divider"/>
+          <div className="sidebar-section-label">Lead Filters</div>
+          {NAV_FILTER.filter(n=>config.tabs[n.id]).map(n=>(
+            <div key={n.id} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
+              <span className="nav-icon">{n.icon}</span>{n.label}
+              <span className={`nav-badge ${n.cls}`}>{n.count}</span>
+            </div>
+          ))}
+          {(config.campaigns||[]).length>0 && <>
+            <div className="nav-divider"/>
+            <div className="sidebar-section-label">Campaigns</div>
+            {(config.campaigns||[]).map(c=>{
+              const id=c.id.toLowerCase();
+              const cnt=vLeads.filter(l=>l.campaigns.includes(c.id)).length;
+              return(
+                <div key={id} className={`nav-item ${tab===id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(id);}}>
+                  <span className="nav-icon" style={{color:c.color}}>●</span>{c.label}
+                  <span className="nav-badge">{cnt}</span>
+                </div>
+              );
+            })}
+          </>}
+          <div className="nav-divider"/>
+          <div className="sidebar-section-label">Sales Reps</div>
+          {(config.salesReps||[]).map(r=>{
+            // Active (non-contacted) leads — the rep's remaining work queue.
+            const cnt=vLeads.filter(l=>l.assignedTo===r && !l.tags.includes('Contacted')).length;
+            return(
+              <div key={r} className={`nav-item ${tab==='rep-home'&&activeRep===r?'active':''}`} onClick={()=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}>
+                <div style={{position:'relative',flexShrink:0}}>
+                  <RepAvatar rep={r} config={config} size={20} online={activeRep===r} bgOverride="var(--sidebar)"/>
+                </div>
+                {r}
+                <span className="nav-badge">{cnt}</span>
+              </div>
+            );
+          })}
+          <div style={{flex:1}}/>
+          <div className="sidebar-footer">
+            {isAdmin && <div className="nav-item settings" onClick={()=>closeSyncing?null:loadFromClose()}>
+              <span className="nav-icon">☁</span>{closeSyncing?'Syncing…':'Load from Close'}
+            </div>}
+            {isAdmin && <div className="nav-item settings" onClick={()=>closeSyncing?null:saveToClose()}>
+              <span className="nav-icon">⬆</span>Save to Close
+            </div>}
+            {isAdmin && <div className="nav-item settings" onClick={()=>setShowSettings(true)}>
+              <span className="nav-icon">⚙</span>Settings &amp; Customize
+            </div>}
+            <div className="nav-item settings" onClick={()=>setShowChangePw(true)}>
+              <span className="nav-icon">🔑</span>Change Password
+            </div>
+            <div className="nav-item settings" onClick={logout}>
+              <span className="nav-icon">⎋</span>Logout ({currentUser.name})
+            </div>
+          </div>
+        </nav>
+
+        {/* MAIN */}
+        <div className="main">
+          {!showRepSelect && !activeRep && (
+            <div className="main-header">
+              <div>
+                <h2>{PAGE_TITLE[tab]||tab}</h2>
+              </div>
+              <div className="main-header-right">
+                {tab==='scraper' && <button className="btn btn-ghost btn-sm" onClick={()=>addToast('Manual refresh triggered','info')}>🔄 Refresh All</button>}
+              </div>
+            </div>
+          )}
+          {renderMain()}
+        </div>
+      </div>
+
+      <Toast toasts={toasts}/>
+      {showSettings && <SettingsDrawer config={config} onConfig={applyConfig} onClose={()=>setShowSettings(false)} addToast={addToast}/>}
+      {showChangePw && <ChangePasswordModal user={currentUser} onClose={()=>setShowChangePw(false)} addToast={addToast}/>}
+      {showSearch && <GlobalSearch leads={leads} config={config} isAdmin={isAdmin}
+        onClose={()=>setShowSearch(false)}
+        onNavigate={id=>{setShowRepSelect(false);setTab(id);}}
+        onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}
+        onOpenLead={l=>setSearchLead(l)}
+        onOpenSettings={()=>setShowSettings(true)}
+        onOpenChangePw={()=>setShowChangePw(true)}
+        onToggleDark={()=>setDarkMode(d=>!d)}
+        onLogout={logout}/>}
+      {searchLead && <LeadModal lead={searchLead} config={config} onClose={()=>setSearchLead(null)} onSave={saveL} onDelete={delL}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
