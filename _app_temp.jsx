@@ -2319,7 +2319,7 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   function apply(){onConfig(local);addToast('Settings saved','success');onClose();}
   function reset(){setLocal(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));}
 
-  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'prev-scraped':{label:'Previously Scraped',icon:'💾'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},potential:{label:'Potential Leads',icon:'⭐'},pending:{label:'Pending Qualification',icon:'⏳'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},recent:{label:'Recently Assigned',icon:'🕐'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
+  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'prev-scraped':{label:'Previously Scraped',icon:'💾'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},agency:{label:'Agency',icon:'🏢'},potential:{label:'Potential Leads',icon:'⭐'},pending:{label:'Pending Qualification',icon:'⏳'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},recent:{label:'Recently Assigned',icon:'🕐'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
   const COL_META={thumbnail:'Thumbnail',channelName:'Channel Name',url:'URL',platform:'Platform',niche:'Niche',followers:'Followers',emails:'Email(s)',tags:'Status Tags',campaign:'Campaign',assignedTo:'Assigned To',dateAssigned:'Date Assigned'};
   const FEAT_META={bulkAssign:{label:'Bulk Assign'},exportCSV:{label:'Export CSV'},exportPDF:{label:'Export PDF'},dailyRefresh:{label:'Daily Auto-Refresh'},colorHighlights:{label:'Campaign Color Rows'},webhookTrigger:{label:'n8n Webhook'},historyRestore:{label:'History Restore'},emailValidation:{label:'Email Validation (future)'}};
 
@@ -2606,6 +2606,7 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
     {id:'home',label:'Home',icon:'⊟'},{id:'scraper',label:'Scraper',icon:'◎'},
     {id:'history',label:'History',icon:'◷'},{id:'prev-scraped',label:'Previously Scraped',icon:'◈'},
     {id:'lead-mgmt',label:'Lead Management',icon:'◉'},{id:'google-import',label:'Google Sheets Import',icon:'◫'},
+    {id:'agency',label:'Agency Folders',icon:'▦'},
     {id:'potential',label:'Potential Leads',icon:'★'},{id:'pending',label:'Pending Qualification',icon:'◔'},
     {id:'contacted',label:'Contacted Leads',icon:'✉'},{id:'recycle',label:'For Recycle',icon:'↻'},
     {id:'recent',label:'Recently Assigned',icon:'◑'},
@@ -2685,6 +2686,125 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
   );
 }
 
+// ─── AGENCY VIEW ──────────────────────────────────────────
+// Per-rep "agency folders": when a rep closes an agency, they create a folder
+// named after it and drop the relevant leads in. Folders are owned by the
+// logged-in user (admins see everyone's). Membership is stored by stable
+// leadKey, and the whole set is persisted to localStorage, so folders survive
+// reloads even though the in-memory leads do not.
+function AgencyView({agencies,setAgencies,leads,config,currentUser,isAdmin,addToast}) {
+  const myName=currentUser?currentUser.name:'';
+  const [newName,setNewName]=useState('');
+  const visible=isAdmin?agencies:agencies.filter(a=>a.owner===myName);
+
+  function createFolder(){
+    const n=newName.trim();
+    if(!n){ addToast('Enter an agency name','error'); return; }
+    if(agencies.some(a=>a.owner===myName && (a.name||'').toLowerCase()===n.toLowerCase())){ addToast('You already have a folder with that name','error'); return; }
+    const id='ag_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
+    setAgencies(a=>[...a,{id,name:n,owner:myName,leadKeys:[],createdAt:new Date().toISOString()}]);
+    setNewName(''); addToast(`Agency folder "${n}" created`,'success');
+  }
+  function updateFolder(id,patch){ setAgencies(a=>a.map(f=>f.id===id?{...f,...patch}:f)); }
+  function deleteFolder(id){ const f=agencies.find(x=>x.id===id); setAgencies(a=>a.filter(x=>x.id!==id)); if(f) addToast(`Deleted agency "${f.name}"`,'error'); }
+
+  return (
+    <div className="home-content">
+      <div className="card">
+        <div className="card-header"><div className="card-title">🏢 Agency Folders</div></div>
+        <div className="card-body" style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+          <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')createFolder();}}
+            placeholder="New agency name (e.g. Acme Media)"
+            style={{padding:'7px 10px',border:'1px solid var(--border)',borderRadius:8,fontSize:13,background:'var(--bg)',color:'var(--text)',minWidth:240}}/>
+          <button className="btn btn-primary btn-sm" onClick={createFolder}>＋ Add Agency Folder</button>
+          <span style={{fontSize:12,color:'var(--text-dim)',marginLeft:'auto'}}>
+            {isAdmin?'Admin view — showing every rep’s agencies':`Signed in as ${myName} — these folders are yours`}
+          </span>
+        </div>
+      </div>
+      {visible.length===0 &&
+        <div className="card"><div className="card-body" style={{textAlign:'center',color:'var(--text-dim)',padding:'40px 24px'}}>
+          <div style={{fontSize:30,marginBottom:6}}>🏢</div>
+          <div style={{fontWeight:700,color:'var(--text)'}}>No agency folders yet</div>
+          <div style={{marginTop:4}}>Closed an agency? Add a folder above and drop its leads in.</div>
+        </div></div>}
+      {visible.map(f=>(
+        <AgencyFolder key={f.id} folder={f} leads={leads} config={config} isAdmin={isAdmin}
+          canEdit={isAdmin||f.owner===myName} onUpdate={updateFolder} onDelete={deleteFolder} addToast={addToast}/>
+      ))}
+    </div>
+  );
+}
+
+function AgencyFolder({folder,leads,config,isAdmin,canEdit,onUpdate,onDelete,addToast}) {
+  const [renaming,setRenaming]=useState(false);
+  const [nameDraft,setNameDraft]=useState(folder.name);
+  const [pick,setPick]=useState('');
+  const campColorMap={}; (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
+  const keys=folder.leadKeys||[];
+  const members=leads.filter(l=>leadKey(l) && keys.includes(leadKey(l)));
+  // Candidate leads to add: the owner's own leads not already in the folder
+  // (falls back to all leads for an admin whose name isn't a sales rep).
+  const ownerLeads=leads.filter(l=>leadKey(l) && !keys.includes(leadKey(l)) && l.assignedTo===folder.owner);
+  const candidates=(ownerLeads.length||!isAdmin)?ownerLeads:leads.filter(l=>leadKey(l) && !keys.includes(leadKey(l)));
+
+  function addLead(){ if(!pick||keys.includes(pick)) return; onUpdate(folder.id,{leadKeys:[...keys,pick]}); setPick(''); addToast('Lead added to agency','success'); }
+  function removeLead(l){ onUpdate(folder.id,{leadKeys:keys.filter(k=>k!==leadKey(l))}); }
+  function saveName(){ const n=nameDraft.trim(); if(!n){ setNameDraft(folder.name); setRenaming(false); return; } onUpdate(folder.id,{name:n}); setRenaming(false); }
+
+  return (
+    <div className="card" style={{borderLeft:'3px solid var(--accent)'}}>
+      <div className="card-header" style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+        <div className="card-title" style={{display:'flex',alignItems:'center',gap:8}}>
+          <span>🏢</span>
+          {renaming
+            ? <input value={nameDraft} autoFocus onChange={e=>setNameDraft(e.target.value)}
+                onKeyDown={e=>{if(e.key==='Enter')saveName();if(e.key==='Escape'){setNameDraft(folder.name);setRenaming(false);}}}
+                style={{padding:'4px 8px',border:'1px solid var(--border)',borderRadius:6,fontSize:14,background:'var(--bg)',color:'var(--text)'}}/>
+            : <span>{folder.name}</span>}
+          <span style={{fontSize:11,fontWeight:500,color:'var(--text-dim)'}}>· {members.length} lead{members.length!==1?'s':''}</span>
+          {isAdmin && <span style={{fontSize:10,fontWeight:700,color:'var(--accent)',background:'var(--accent-light)',padding:'2px 7px',borderRadius:20}}>@{folder.owner}</span>}
+        </div>
+        {canEdit && <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+          {renaming
+            ? <button className="btn btn-primary btn-xs" onClick={saveName}>Save</button>
+            : <button className="btn btn-ghost btn-xs" onClick={()=>{setNameDraft(folder.name);setRenaming(true);}}>✎ Rename</button>}
+          <button className="btn btn-ghost btn-xs" title="Delete this agency folder" onClick={()=>onDelete(folder.id)}>🗑 Delete</button>
+        </div>}
+      </div>
+      <div className="card-body" style={{padding:0,overflowX:'auto'}}>
+        {canEdit && <div style={{display:'flex',gap:8,alignItems:'center',padding:'10px 14px',borderBottom:'1px solid var(--border)',flexWrap:'wrap'}}>
+          <select value={pick} onChange={e=>setPick(e.target.value)}
+            style={{padding:'6px 8px',border:'1px solid var(--border)',borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)',minWidth:220,maxWidth:360}}>
+            <option value="">{candidates.length?'Select a lead to add…':'No leads available to add'}</option>
+            {candidates.map(l=><option key={leadKey(l)} value={leadKey(l)}>{l.channelName}{l.assignedTo?` · @${l.assignedTo}`:''}{(l.campaigns||[]).length?` · ${l.campaigns.join('/')}`:''}</option>)}
+          </select>
+          <button className="btn btn-outline btn-sm" disabled={!pick} onClick={addLead}>＋ Add Lead</button>
+        </div>}
+        <table className="kpi-table">
+          <thead><tr>
+            <th>Channel</th><th>Platform</th><th>Status</th><th>Campaign</th><th>Assigned</th><th>Email(s)</th>{canEdit&&<th className="no-print">Action</th>}
+          </tr></thead>
+          <tbody>
+            {members.length===0 && <tr><td colSpan={canEdit?7:6} style={{textAlign:'center',padding:24,color:'var(--text-dim)'}}>No leads in this agency yet.</td></tr>}
+            {members.map(l=>(
+              <tr key={l.id}>
+                <td style={{fontWeight:600}}>{l.channelName}</td>
+                <td style={{whiteSpace:'nowrap'}}>{PLATFORM_ICON[l.platform]||''} {l.platform}</td>
+                <td>{(l.tags||[]).length?l.tags.map(t=><TagBadge key={t} tag={t}/>):<span style={{color:'var(--text-dim)'}}>—</span>}</td>
+                <td style={{whiteSpace:'nowrap'}}>{(l.campaigns||[]).map(c=><span key={c} style={{color:campColorMap[c]||'var(--accent)',fontWeight:700,marginRight:4}}>● {c}</span>)}{(l.campaigns||[]).length?'':'—'}</td>
+                <td>{l.assignedTo||<span style={{color:'var(--text-dim)'}}>—</span>}</td>
+                <td style={{fontSize:12}}>{(l.emails||[]).join(', ')||'—'}</td>
+                {canEdit&&<td className="no-print"><button className="btn btn-ghost btn-xs" title="Remove from this agency" onClick={()=>removeLead(l)}>✕ Remove</button></td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP ──────────────────────────────────────────────────
 function App() {
   const [tab,setTab]=useState('home');
@@ -2697,6 +2817,9 @@ function App() {
   const [showRepSelect,setShowRepSelect]=useState(false);
   const [darkMode,setDarkMode]=useState(()=>localStorage.getItem('darkMode')==='true');
   const [currentUser,setCurrentUser]=useState(()=>{ try{return JSON.parse(localStorage.getItem('currentUser')||'null');}catch(e){return null;} });
+  // Agency folders (per-rep). Persisted to localStorage — membership is by
+  // stable leadKey, so folders survive reloads even though leads are in-memory.
+  const [agencies,setAgencies]=useState(()=>{ try{return JSON.parse(localStorage.getItem('agencies')||'[]');}catch(e){return [];} });
   const [showChangePw,setShowChangePw]=useState(false);
   const [showSearch,setShowSearch]=useState(false);
   const [searchLead,setSearchLead]=useState(null);
@@ -2725,6 +2848,8 @@ function App() {
     if(activeRep) localStorage.setItem('activeRep',activeRep);
     else localStorage.removeItem('activeRep');
   },[activeRep]);
+
+  useEffect(()=>{ try{localStorage.setItem('agencies',JSON.stringify(agencies));}catch(e){} },[agencies]);
 
   function addToast(msg,type='info'){const id=Date.now();setToasts(t=>[...t,{id,msg,type}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);}
   function saveL(upd){
@@ -2931,6 +3056,7 @@ function App() {
     {id:'prev-scraped',icon:'◈',label:'Previously Scraped'},
     {id:'lead-mgmt',icon:'◉',label:'Lead Management'},
     {id:'google-import',icon:'◫',label:'Google Sheets'},
+    {id:'agency',icon:'▦',label:'Agency'},
   ];
   const NAV_FILTER=[
     {id:'potential',icon:'★',label:'Potential',count:counts.potential,cls:'green'},
@@ -2956,12 +3082,13 @@ function App() {
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
     if(tab==='duplicates') return <DuplicatesView groups={dupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
     if(tab==='google-import') return <GoogleImportView onImport={importLeads} addToast={addToast}/>;
+    if(tab==='agency') return <AgencyView agencies={agencies} setAgencies={setAgencies} leads={vLeads} config={config} currentUser={currentUser} isAdmin={isAdmin} addToast={addToast}/>;
     const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);
     if(camp) return <CampaignView campaign={camp} campColor={camp.color} leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
     return null;
   }
 
-  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',potential:'Potential Leads',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders',potential:'Potential Leads',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // Gate the entire app behind login.
   if(!currentUser) return <LoginScreen config={config} onLogin={login}/>;

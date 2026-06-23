@@ -4779,6 +4779,10 @@ function SettingsDrawer({
       label: 'Google Sheets Import',
       icon: '📊'
     },
+    agency: {
+      label: 'Agency',
+      icon: '🏢'
+    },
     potential: {
       label: 'Potential Leads',
       icon: '⭐'
@@ -5526,6 +5530,10 @@ function GlobalSearch({
     label: 'Google Sheets Import',
     icon: '◫'
   }, {
+    id: 'agency',
+    label: 'Agency Folders',
+    icon: '▦'
+  }, {
     id: 'potential',
     label: 'Potential Leads',
     icon: '★'
@@ -5709,6 +5717,344 @@ function GlobalSearch({
   }, /*#__PURE__*/React.createElement("b", null, "Enter"), " to open first result · ", /*#__PURE__*/React.createElement("b", null, "Esc"), " to close")));
 }
 
+// ─── AGENCY VIEW ──────────────────────────────────────────
+// Per-rep "agency folders": when a rep closes an agency, they create a folder
+// named after it and drop the relevant leads in. Folders are owned by the
+// logged-in user (admins see everyone's). Membership is stored by stable
+// leadKey, and the whole set is persisted to localStorage, so folders survive
+// reloads even though the in-memory leads do not.
+function AgencyView({
+  agencies,
+  setAgencies,
+  leads,
+  config,
+  currentUser,
+  isAdmin,
+  addToast
+}) {
+  const myName = currentUser ? currentUser.name : '';
+  const [newName, setNewName] = useState('');
+  const visible = isAdmin ? agencies : agencies.filter(a => a.owner === myName);
+  function createFolder() {
+    const n = newName.trim();
+    if (!n) {
+      addToast('Enter an agency name', 'error');
+      return;
+    }
+    if (agencies.some(a => a.owner === myName && (a.name || '').toLowerCase() === n.toLowerCase())) {
+      addToast('You already have a folder with that name', 'error');
+      return;
+    }
+    const id = 'ag_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+    setAgencies(a => [...a, {
+      id,
+      name: n,
+      owner: myName,
+      leadKeys: [],
+      createdAt: new Date().toISOString()
+    }]);
+    setNewName('');
+    addToast(`Agency folder "${n}" created`, 'success');
+  }
+  function updateFolder(id, patch) {
+    setAgencies(a => a.map(f => f.id === id ? {
+      ...f,
+      ...patch
+    } : f));
+  }
+  function deleteFolder(id) {
+    const f = agencies.find(x => x.id === id);
+    setAgencies(a => a.filter(x => x.id !== id));
+    if (f) addToast(`Deleted agency "${f.name}"`, 'error');
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "home-content"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title"
+  }, "🏢 Agency Folders")), /*#__PURE__*/React.createElement("div", {
+    className: "card-body",
+    style: {
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: newName,
+    onChange: e => setNewName(e.target.value),
+    onKeyDown: e => {
+      if (e.key === 'Enter') createFolder();
+    },
+    placeholder: "New agency name (e.g. Acme Media)",
+    style: {
+      padding: '7px 10px',
+      border: '1px solid var(--border)',
+      borderRadius: 8,
+      fontSize: 13,
+      background: 'var(--bg)',
+      color: 'var(--text)',
+      minWidth: 240
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    onClick: createFolder
+  }, "＋ Add Agency Folder"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-dim)',
+      marginLeft: 'auto'
+    }
+  }, isAdmin ? 'Admin view — showing every rep’s agencies' : `Signed in as ${myName} — these folders are yours`))), visible.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-body",
+    style: {
+      textAlign: 'center',
+      color: 'var(--text-dim)',
+      padding: '40px 24px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 30,
+      marginBottom: 6
+    }
+  }, "🏢"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      color: 'var(--text)'
+    }
+  }, "No agency folders yet"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 4
+    }
+  }, "Closed an agency? Add a folder above and drop its leads in."))), visible.map(f => /*#__PURE__*/React.createElement(AgencyFolder, {
+    key: f.id,
+    folder: f,
+    leads: leads,
+    config: config,
+    isAdmin: isAdmin,
+    canEdit: isAdmin || f.owner === myName,
+    onUpdate: updateFolder,
+    onDelete: deleteFolder,
+    addToast: addToast
+  })));
+}
+function AgencyFolder({
+  folder,
+  leads,
+  config,
+  isAdmin,
+  canEdit,
+  onUpdate,
+  onDelete,
+  addToast
+}) {
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(folder.name);
+  const [pick, setPick] = useState('');
+  const campColorMap = {};
+  (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
+  const keys = folder.leadKeys || [];
+  const members = leads.filter(l => leadKey(l) && keys.includes(leadKey(l)));
+  // Candidate leads to add: the owner's own leads not already in the folder
+  // (falls back to all leads for an admin whose name isn't a sales rep).
+  const ownerLeads = leads.filter(l => leadKey(l) && !keys.includes(leadKey(l)) && l.assignedTo === folder.owner);
+  const candidates = ownerLeads.length || !isAdmin ? ownerLeads : leads.filter(l => leadKey(l) && !keys.includes(leadKey(l)));
+  function addLead() {
+    if (!pick || keys.includes(pick)) return;
+    onUpdate(folder.id, {
+      leadKeys: [...keys, pick]
+    });
+    setPick('');
+    addToast('Lead added to agency', 'success');
+  }
+  function removeLead(l) {
+    onUpdate(folder.id, {
+      leadKeys: keys.filter(k => k !== leadKey(l))
+    });
+  }
+  function saveName() {
+    const n = nameDraft.trim();
+    if (!n) {
+      setNameDraft(folder.name);
+      setRenaming(false);
+      return;
+    }
+    onUpdate(folder.id, {
+      name: n
+    });
+    setRenaming(false);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      borderLeft: '3px solid var(--accent)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header",
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title",
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "🏢"), renaming ? /*#__PURE__*/React.createElement("input", {
+    value: nameDraft,
+    autoFocus: true,
+    onChange: e => setNameDraft(e.target.value),
+    onKeyDown: e => {
+      if (e.key === 'Enter') saveName();
+      if (e.key === 'Escape') {
+        setNameDraft(folder.name);
+        setRenaming(false);
+      }
+    },
+    style: {
+      padding: '4px 8px',
+      border: '1px solid var(--border)',
+      borderRadius: 6,
+      fontSize: 14,
+      background: 'var(--bg)',
+      color: 'var(--text)'
+    }
+  }) : /*#__PURE__*/React.createElement("span", null, folder.name), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      fontWeight: 500,
+      color: 'var(--text-dim)'
+    }
+  }, "· ", members.length, " lead", members.length !== 1 ? 's' : ''), isAdmin && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      fontWeight: 700,
+      color: 'var(--accent)',
+      background: 'var(--accent-light)',
+      padding: '2px 7px',
+      borderRadius: 20
+    }
+  }, "@", folder.owner)), canEdit && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginLeft: 'auto',
+      display: 'flex',
+      gap: 6
+    }
+  }, renaming ? /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-xs",
+    onClick: saveName
+  }, "Save") : /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-xs",
+    onClick: () => {
+      setNameDraft(folder.name);
+      setRenaming(true);
+    }
+  }, "✎ Rename"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-xs",
+    title: "Delete this agency folder",
+    onClick: () => onDelete(folder.id)
+  }, "🗑 Delete"))), /*#__PURE__*/React.createElement("div", {
+    className: "card-body",
+    style: {
+      padding: 0,
+      overflowX: 'auto'
+    }
+  }, canEdit && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center',
+      padding: '10px 14px',
+      borderBottom: '1px solid var(--border)',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("select", {
+    value: pick,
+    onChange: e => setPick(e.target.value),
+    style: {
+      padding: '6px 8px',
+      border: '1px solid var(--border)',
+      borderRadius: 8,
+      fontSize: 12,
+      background: 'var(--bg)',
+      color: 'var(--text)',
+      minWidth: 220,
+      maxWidth: 360
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, candidates.length ? 'Select a lead to add…' : 'No leads available to add'), candidates.map(l => /*#__PURE__*/React.createElement("option", {
+    key: leadKey(l),
+    value: leadKey(l)
+  }, l.channelName, l.assignedTo ? ` · @${l.assignedTo}` : '', (l.campaigns || []).length ? ` · ${l.campaigns.join('/')}` : ''))), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    disabled: !pick,
+    onClick: addLead
+  }, "＋ Add Lead")), /*#__PURE__*/React.createElement("table", {
+    className: "kpi-table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Channel"), /*#__PURE__*/React.createElement("th", null, "Platform"), /*#__PURE__*/React.createElement("th", null, "Status"), /*#__PURE__*/React.createElement("th", null, "Campaign"), /*#__PURE__*/React.createElement("th", null, "Assigned"), /*#__PURE__*/React.createElement("th", null, "Email(s)"), canEdit && /*#__PURE__*/React.createElement("th", {
+    className: "no-print"
+  }, "Action"))), /*#__PURE__*/React.createElement("tbody", null, members.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: canEdit ? 7 : 6,
+    style: {
+      textAlign: 'center',
+      padding: 24,
+      color: 'var(--text-dim)'
+    }
+  }, "No leads in this agency yet.")), members.map(l => /*#__PURE__*/React.createElement("tr", {
+    key: l.id
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 600
+    }
+  }, l.channelName), /*#__PURE__*/React.createElement("td", {
+    style: {
+      whiteSpace: 'nowrap'
+    }
+  }, PLATFORM_ICON[l.platform] || '', " ", l.platform), /*#__PURE__*/React.createElement("td", null, (l.tags || []).length ? l.tags.map(t => /*#__PURE__*/React.createElement(TagBadge, {
+    key: t,
+    tag: t
+  })) : /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-dim)'
+    }
+  }, "—")), /*#__PURE__*/React.createElement("td", {
+    style: {
+      whiteSpace: 'nowrap'
+    }
+  }, (l.campaigns || []).map(c => /*#__PURE__*/React.createElement("span", {
+    key: c,
+    style: {
+      color: campColorMap[c] || 'var(--accent)',
+      fontWeight: 700,
+      marginRight: 4
+    }
+  }, "● ", c)), (l.campaigns || []).length ? '' : '—'), /*#__PURE__*/React.createElement("td", null, l.assignedTo || /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-dim)'
+    }
+  }, "—")), /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontSize: 12
+    }
+  }, (l.emails || []).join(', ') || '—'), canEdit && /*#__PURE__*/React.createElement("td", {
+    className: "no-print"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-xs",
+    title: "Remove from this agency",
+    onClick: () => removeLead(l)
+  }, "✕ Remove"))))))));
+}
+
 // ─── APP ──────────────────────────────────────────────────
 function App() {
   const [tab, setTab] = useState('home');
@@ -5725,6 +6071,15 @@ function App() {
       return JSON.parse(localStorage.getItem('currentUser') || 'null');
     } catch (e) {
       return null;
+    }
+  });
+  // Agency folders (per-rep). Persisted to localStorage — membership is by
+  // stable leadKey, so folders survive reloads even though leads are in-memory.
+  const [agencies, setAgencies] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('agencies') || '[]');
+    } catch (e) {
+      return [];
     }
   });
   const [showChangePw, setShowChangePw] = useState(false);
@@ -5762,6 +6117,11 @@ function App() {
   useEffect(() => {
     if (activeRep) localStorage.setItem('activeRep', activeRep);else localStorage.removeItem('activeRep');
   }, [activeRep]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('agencies', JSON.stringify(agencies));
+    } catch (e) {}
+  }, [agencies]);
   function addToast(msg, type = 'info') {
     const id = Date.now();
     setToasts(t => [...t, {
@@ -6109,6 +6469,10 @@ function App() {
     id: 'google-import',
     icon: '◫',
     label: 'Google Sheets'
+  }, {
+    id: 'agency',
+    icon: '▦',
+    label: 'Agency'
   }];
   const NAV_FILTER = [{
     id: 'potential',
@@ -6284,6 +6648,15 @@ function App() {
       onImport: importLeads,
       addToast: addToast
     });
+    if (tab === 'agency') return /*#__PURE__*/React.createElement(AgencyView, {
+      agencies: agencies,
+      setAgencies: setAgencies,
+      leads: vLeads,
+      config: config,
+      currentUser: currentUser,
+      isAdmin: isAdmin,
+      addToast: addToast
+    });
     const camp = (config.campaigns || []).find(c => c.id.toLowerCase() === tab);
     if (camp) return /*#__PURE__*/React.createElement(CampaignView, {
       campaign: camp,
@@ -6303,6 +6676,7 @@ function App() {
     'prev-scraped': 'Previously Scraped Leads',
     'lead-mgmt': 'Lead Management',
     'google-import': 'Google Sheets Import',
+    agency: 'Agency Folders',
     potential: 'Potential Leads',
     pending: 'Pending Qualification',
     contacted: 'Contacted Leads',

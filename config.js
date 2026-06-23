@@ -48,7 +48,7 @@ var DEFAULT_CONFIG = {
   // Which sidebar tabs are visible by default
   tabs: {
     home: true, scraper: true, history: true,
-    'prev-scraped': true, 'lead-mgmt': true, 'google-import': true,
+    'prev-scraped': true, 'lead-mgmt': true, 'google-import': true, agency: true,
     potential: true, pending: true, contacted: true,
     recycle: true, recent: true, duplicates: true, msn: true, vvv: true,
   },
