@@ -1,0 +1,71 @@
+{
+  "name": "Enfinity — Close batch import (rep → Close)",
+  "flow": [
+    {
+      "id": 1,
+      "module": "gateway:CustomWebHook",
+      "version": 1,
+      "parameters": { "hook": null, "maxResults": 1 },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 0, "y": 0 },
+        "restore": { "parameters": { "hook": { "label": "Enfinity Close Batch Import" } } },
+        "comment": "Receives { action:'close.create', rep, leads:[{name,email,url,platform,niche,followers,status,campaigns,assignedTo,dateAssigned,leadJson}] } from the rep dashboard's 'Send to Close.io' button."
+      }
+    },
+    {
+      "id": 2,
+      "module": "gateway:WebhookRespond",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "status": "200",
+        "body": "{ \"ok\": true, \"rep\": \"{{1.rep}}\", \"received\": \"{{length(1.leads)}}\" }",
+        "headers": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Access-Control-Allow-Origin", "value": "*" },
+          { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+        ]
+      },
+      "metadata": { "designer": { "x": 300, "y": 0 }, "comment": "Ack the dashboard immediately (with CORS), then keep creating leads below." }
+    },
+    {
+      "id": 3,
+      "module": "builtin:BasicFeeder",
+      "version": 1,
+      "parameters": {},
+      "mapper": { "array": "{{1.leads}}" },
+      "metadata": { "designer": { "x": 600, "y": 0 }, "comment": "Iterate each lead. PER-REP ROUTING: add a Router or Data Store here keyed on {{1.rep}} to pick that rep's own Close API key for module 4." }
+    },
+    {
+      "id": 4,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+      "mapper": {
+        "url": "https://api.close.com/api/v1/lead/",
+        "method": "post",
+        "headers": [
+          { "name": "Authorization", "value": "Basic YOUR_CLOSE_API_KEY_BASE64" },
+          { "name": "Content-Type", "value": "application/json" }
+        ],
+        "qs": [],
+        "bodyType": "raw",
+        "contentType": "application/json",
+        "data": "{ \"name\": \"{{3.name}}\", \"description\": \"URL: {{3.url}} | Platform: {{3.platform}} | Niche: {{3.niche}} | Followers: {{3.followers}} | Status: {{3.status}} | Campaign: {{join(3.campaigns; \", \")}} | Rep: {{3.assignedTo}} | Assigned: {{3.dateAssigned}}\", \"contacts\": [ { \"name\": \"{{3.name}}\", \"emails\": [ { \"email\": \"{{3.email}}\", \"type\": \"office\" } ] } ] }",
+        "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+        "followRedirect": true, "useQuerystring": false, "gzip": true,
+        "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+        "timeout": "", "ca": "", "authUser": "", "authPass": ""
+      },
+      "metadata": { "designer": { "x": 900, "y": 0 }, "comment": "Create the lead in Close with a contact email so campaigns can target it. To round-trip the full dashboard object instead, store {{3.leadJson}} in a Close custom field (raw JSON-in-description needs escaping)." }
+    }
+  ],
+  "metadata": {
+    "instant": true,
+    "version": 1,
+    "scenario": { "roundtrips": 1, "maxErrors": 3, "autoCommit": true, "autoCommitTriggerLast": true, "sequential": false, "confidential": false, "dataloss": false, "dlq": false },
+    "designer": { "orphans": [] },
+    "zone": "eu1.make.com"
+  }
+}
