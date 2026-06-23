@@ -18,12 +18,15 @@
           { "name": "_limit", "value": "25" },
           { "name": "date_created__gt", "value": "{{formatDate(addMinutes(now; -15); \"YYYY-MM-DDTHH:mm:ssZ\")}}" }
         ],
-        "parseResponse": true
+        "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+        "followRedirect": true, "useQuerystring": false, "gzip": true,
+        "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+        "bodyType": "", "timeout": "", "ca": "", "authUser": "", "authPass": ""
       },
       "metadata": {
         "designer": { "x": 0, "y": 0 },
         "restore": {},
-        "comment": "Trigger on a schedule (e.g. every 15 min). Pulls inbound email replies from Close created since the last poll."
+        "comment": "Trigger on a schedule (e.g. every 15 min). Pulls inbound Close email replies since the last poll."
       }
     },
     {
@@ -47,9 +50,12 @@
           { "name": "Accept", "value": "application/json" }
         ],
         "qs": [{ "name": "_fields", "value": "id,display_name,description,status_label" }],
-        "parseResponse": true
+        "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+        "followRedirect": true, "useQuerystring": false, "gzip": true,
+        "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+        "bodyType": "", "timeout": "", "ca": "", "authUser": "", "authPass": ""
       },
-      "metadata": { "designer": { "x": 600, "y": 0 }, "comment": "Fetch the lead so we can read the assigned rep (stored in the dashboard JSON in description)." }
+      "metadata": { "designer": { "x": 600, "y": 0 }, "comment": "Fetch the lead to read the assigned rep (in the dashboard JSON in description)." }
     },
     {
       "id": 4,
@@ -63,9 +69,13 @@
         "qs": [],
         "bodyType": "raw",
         "contentType": "application/json",
-        "data": "{\n  \"text\": \":email: *New reply* on *{{3.data.display_name}}*\\nRep: {{get(parseJSON(3.data.description); \"assignedTo\")}}\\nFrom: {{2.sender}}\\nSubject: {{2.subject}}\\n> {{substring(2.body_text; 0; 280)}}\\nStatus: {{3.data.status_label}}\"\n}"
+        "data": "{\n  \"text\": \":email: *New reply* on *{{3.data.display_name}}*\\nRep: {{get(parseJSON(3.data.description); \"assignedTo\")}}\\nFrom: {{2.sender}}\\nSubject: {{2.subject}}\\n> {{substring(2.body_text; 0; 280)}}\\nStatus: {{3.data.status_label}}\"\n}",
+        "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+        "followRedirect": true, "useQuerystring": false, "gzip": true,
+        "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+        "timeout": "", "ca": "", "authUser": "", "authPass": ""
       },
-      "metadata": { "designer": { "x": 900, "y": 0 }, "comment": "Post to Slack. Swap the incoming-webhook URL for a per-rep channel/DM to route by sales rep (see README)." }
+      "metadata": { "designer": { "x": 900, "y": 0 }, "comment": "Post to Slack. Swap the incoming-webhook URL for a per-rep channel/DM to route by rep." }
     }
   ],
   "metadata": {
@@ -73,6 +83,6 @@
     "version": 1,
     "scenario": { "roundtrips": 1, "maxErrors": 3, "autoCommit": true, "autoCommitTriggerLast": true, "sequential": false, "confidential": false, "dataloss": false, "dlq": false },
     "designer": { "orphans": [] },
-    "zone": "eu2.make.com"
+    "zone": "eu1.make.com"
   }
 }

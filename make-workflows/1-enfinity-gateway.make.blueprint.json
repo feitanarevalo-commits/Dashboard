@@ -9,17 +9,7 @@
       "mapper": {},
       "metadata": {
         "designer": { "x": 0, "y": 0 },
-        "restore": { "parameters": { "hook": { "label": "Enfinity Dashboard Gateway" } } },
-        "expect": [
-          { "name": "action", "type": "text", "label": "scrape | close.pull | close.create | close.update | close.read" },
-          { "name": "platform", "type": "text" },
-          { "name": "keyword", "type": "text" },
-          { "name": "limit", "type": "number" },
-          { "name": "leadId", "type": "text", "label": "Close lead id (for close.read / close.update)" },
-          { "name": "leadJson", "type": "text", "label": "Dashboard lead object, JSON-stringified (for close.create/update)" },
-          { "name": "channelName", "type": "text" },
-          { "name": "primaryEmail", "type": "text" }
-        ]
+        "restore": { "parameters": { "hook": { "label": "Enfinity Dashboard Gateway" } } }
       }
     },
     {
@@ -37,8 +27,11 @@
               "version": 3,
               "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
               "filter": {
-                "name": "1) Scrape — YouTube search",
-                "conditions": [[{ "a": "{{1.action}}", "o": "text:equal", "b": "scrape" }]]
+                "name": "1) Scrape (action=scrape OR type=search)",
+                "conditions": [
+                  [{ "a": "{{1.action}}", "o": "text:equal", "b": "scrape" }],
+                  [{ "a": "{{1.type}}", "o": "text:equal", "b": "search" }]
+                ]
               },
               "mapper": {
                 "url": "https://www.googleapis.com/youtube/v3/search",
@@ -51,7 +44,10 @@
                   { "name": "maxResults", "value": "{{ifempty(1.limit; 25)}}" },
                   { "name": "key", "value": "YOUR_YOUTUBE_API_KEY" }
                 ],
-                "parseResponse": true
+                "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+                "followRedirect": true, "useQuerystring": false, "gzip": true,
+                "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+                "bodyType": "", "timeout": "", "ca": "", "authUser": "", "authPass": ""
               },
               "metadata": { "designer": { "x": 600, "y": -450 } }
             },
@@ -70,7 +66,10 @@
                   { "name": "maxResults", "value": "50" },
                   { "name": "key", "value": "YOUR_YOUTUBE_API_KEY" }
                 ],
-                "parseResponse": true
+                "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+                "followRedirect": true, "useQuerystring": false, "gzip": true,
+                "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+                "bodyType": "", "timeout": "", "ca": "", "authUser": "", "authPass": ""
               },
               "metadata": { "designer": { "x": 900, "y": -450 } }
             },
@@ -100,7 +99,7 @@
               "version": 3,
               "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
               "filter": {
-                "name": "2) Close.pull — list all leads",
+                "name": "2) Close.pull — list leads",
                 "conditions": [[{ "a": "{{1.action}}", "o": "text:equal", "b": "close.pull" }]]
               },
               "mapper": {
@@ -111,7 +110,10 @@
                   { "name": "Accept", "value": "application/json" }
                 ],
                 "qs": [{ "name": "_limit", "value": "200" }],
-                "parseResponse": true
+                "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+                "followRedirect": true, "useQuerystring": false, "gzip": true,
+                "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+                "bodyType": "", "timeout": "", "ca": "", "authUser": "", "authPass": ""
               },
               "metadata": { "designer": { "x": 600, "y": -150 } }
             },
@@ -154,8 +156,11 @@
                 "qs": [],
                 "bodyType": "raw",
                 "contentType": "application/json",
-                "parseResponse": true,
-                "data": "{\n  \"name\": \"{{1.channelName}}\",\n  \"description\": \"{{1.leadJson}}\",\n  \"contacts\": [ { \"name\": \"{{1.channelName}}\", \"emails\": [ { \"email\": \"{{1.primaryEmail}}\", \"type\": \"office\" } ] } ]\n}"
+                "data": "{\n  \"name\": \"{{1.channelName}}\",\n  \"description\": \"{{1.leadJson}}\",\n  \"contacts\": [ { \"name\": \"{{1.channelName}}\", \"emails\": [ { \"email\": \"{{1.primaryEmail}}\", \"type\": \"office\" } ] } ]\n}",
+                "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+                "followRedirect": true, "useQuerystring": false, "gzip": true,
+                "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+                "timeout": "", "ca": "", "authUser": "", "authPass": ""
               },
               "metadata": { "designer": { "x": 600, "y": 150 } }
             },
@@ -171,7 +176,11 @@
                 "qs": [],
                 "bodyType": "raw",
                 "contentType": "application/json",
-                "data": "{ \"text\": \":inbox_tray: New lead in Close: *{{1.channelName}}* (close id {{8.data.id}})\" }"
+                "data": "{ \"text\": \":inbox_tray: New lead in Close: *{{1.channelName}}* (close id {{8.data.id}})\" }",
+                "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+                "followRedirect": true, "useQuerystring": false, "gzip": true,
+                "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+                "timeout": "", "ca": "", "authUser": "", "authPass": ""
               },
               "metadata": { "designer": { "x": 900, "y": 150 } }
             },
@@ -214,8 +223,11 @@
                 "qs": [],
                 "bodyType": "raw",
                 "contentType": "application/json",
-                "parseResponse": true,
-                "data": "{\n  \"name\": \"{{1.channelName}}\",\n  \"description\": \"{{1.leadJson}}\"\n}"
+                "data": "{\n  \"name\": \"{{1.channelName}}\",\n  \"description\": \"{{1.leadJson}}\"\n}",
+                "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+                "followRedirect": true, "useQuerystring": false, "gzip": true,
+                "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+                "timeout": "", "ca": "", "authUser": "", "authPass": ""
               },
               "metadata": { "designer": { "x": 600, "y": 450 } }
             },
@@ -245,7 +257,7 @@
               "version": 3,
               "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
               "filter": {
-                "name": "5) Close.read — lead status + email replies",
+                "name": "5) Close.read — status + replies",
                 "conditions": [[{ "a": "{{1.action}}", "o": "text:equal", "b": "close.read" }]]
               },
               "mapper": {
@@ -259,7 +271,10 @@
                   { "name": "lead_id", "value": "{{1.leadId}}" },
                   { "name": "_limit", "value": "50" }
                 ],
-                "parseResponse": true
+                "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+                "followRedirect": true, "useQuerystring": false, "gzip": true,
+                "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+                "bodyType": "", "timeout": "", "ca": "", "authUser": "", "authPass": ""
               },
               "metadata": { "designer": { "x": 600, "y": 750 } }
             },
@@ -289,6 +304,6 @@
     "version": 1,
     "scenario": { "roundtrips": 1, "maxErrors": 3, "autoCommit": true, "autoCommitTriggerLast": true, "sequential": false, "confidential": false, "dataloss": false, "dlq": false },
     "designer": { "orphans": [] },
-    "zone": "eu2.make.com"
+    "zone": "eu1.make.com"
   }
 }

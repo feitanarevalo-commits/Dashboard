@@ -79,6 +79,20 @@ All webhook responses set `Access-Control-Allow-Origin: *` (the dashboard is a s
 The app's CSP already allows `*.make.com` / `*.app.n8n.cloud`; a custom Make domain would
 need adding to `connect-src` in `vercel.json`.
 
+## Import notes (learned from a live run)
+- **HTTP modules include the full required param set** (`gzip`, `serializeUrl`,
+  `shareCookies`, `followRedirect`, `useQuerystring`, `followAllRedirects`,
+  `rejectUnauthorized`, `useMtls`). Omitting these passes schema validation but fails at
+  runtime with `BundleValidationError: Validation failed for N parameter(s)`.
+- **Webhook scenarios** (Gateway, Form): if you create them via the Make **API**, the
+  webhook hook is **not** auto-created (`hook: null` → "Invalid device"). Create a
+  `gateway-webhook` hook and set `parameters.hook` to its id, or just import via the Make
+  **UI**, which creates the hook for you. (The Gateway scenario already in the account,
+  id `6306514`, was fixed this way and **scrape is verified working**.)
+- The **scrape route accepts `action=scrape` OR `type=search`**, so the dashboard's
+  existing scraper payload (`{type:"search", keyword, limit}`) works as a drop-in — just
+  point its scrape webhook at the Gateway URL.
+
 ## Notes
 - Built with the same portable module set as the existing blueprints (`gateway:*`,
   `http:ActionSendData`, `builtin:BasicRouter`/`BasicFeeder`) so they import without a
