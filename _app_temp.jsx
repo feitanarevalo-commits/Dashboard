@@ -314,12 +314,29 @@ function Toggle({checked,onChange}) {
   );
 }
 
+// Build the editable per-URL links list for a lead: each entry is
+// {url, campaigns}. Prefers an existing structured `lead.links`; otherwise
+// derives one from url + channels, attaching the lead's campaigns to the
+// primary URL. Reconciles any lead.campaigns not yet mapped to a URL.
+function buildLeadLinks(lead){
+  if(Array.isArray(lead.links) && lead.links.length){
+    const links=lead.links.map(l=>({url:l.url||'',campaigns:[...(l.campaigns||[])]}));
+    const known=new Set(links.flatMap(l=>l.campaigns));
+    const extras=(lead.campaigns||[]).filter(c=>!known.has(c));
+    if(extras.length && links[0]) links[0].campaigns=[...new Set([...links[0].campaigns,...extras])];
+    return links;
+  }
+  const urls=[lead.url||'', ...((lead.channels)||[]).filter(Boolean)];
+  return urls.map((u,i)=>({url:u, campaigns:i===0?[...(lead.campaigns||[])]:[]}));
+}
+
 // ─── LEAD MODAL ───────────────────────────────────────────
 function LeadModal({lead,onClose,onSave,onDelete,config}) {
   const [form,setForm] = useState({
     ...lead,
     emails:[...(lead.emails||[])],
     tags: Array.isArray(lead.tags) ? [...lead.tags] : [],
+    links: buildLeadLinks(lead),
   });
   const [newEmail,setNewEmail] = useState('');
   const [newUrl,setNewUrl] = useState('');
@@ -327,8 +344,20 @@ function LeadModal({lead,onClose,onSave,onDelete,config}) {
   function upd(k,v){setForm(f=>({...f,[k]:v}));}
   function addEmail(){if(newEmail&&!form.emails.includes(newEmail)){setForm(f=>({...f,emails:[...f.emails,newEmail]}));setNewEmail('');}}
   function delEmail(e){setForm(f=>({...f,emails:f.emails.filter(x=>x!==e)}));}
-  function addUrl(){const u=newUrl.trim();if(u){setForm(f=>({...f,channels:[...(f.channels||[]),u]}));setNewUrl('');}}
-  function delUrl(i){setForm(f=>({...f,channels:(f.channels||[]).filter((_,j)=>j!==i)}));}
+  function addLink(){const u=newUrl.trim();if(u){setForm(f=>({...f,links:[...(f.links||[]),{url:u,campaigns:[]}]}));setNewUrl('');}}
+  function delLink(i){setForm(f=>({...f,links:(f.links||[]).filter((_,j)=>j!==i)}));}
+  function updLink(i,patch){setForm(f=>{const links=[...(f.links||[])];links[i]={...links[i],...patch};return{...f,links};});}
+  function toggleLinkCampaign(i,campId){setForm(f=>{const links=[...(f.links||[])];const cur=links[i].campaigns||[];links[i]={...links[i],campaigns:cur.includes(campId)?cur.filter(x=>x!==campId):[...cur,campId]};return{...f,links};});}
+  // Derive url / channels / campaigns from the per-URL links, then save.
+  function saveLead(){
+    const links=(form.links||[]).map(l=>({url:(l.url||'').trim(),campaigns:[...(l.campaigns||[])]}));
+    const primary=links[0]||{url:'',campaigns:[]};
+    const extra=links.slice(1).filter(l=>l.url);
+    const ordered=[primary,...extra];
+    const campaigns=[...new Set(ordered.flatMap(l=>l.campaigns))];
+    onSave({...form, links:ordered, url:primary.url, channels:extra.map(l=>l.url), campaigns});
+    onClose();
+  }
   function toggleTag(t){
     const tags=form.tags||[];
     upd('tags', tags.includes(t) ? tags.filter(x=>x!==t) : [...tags,t]);
@@ -355,21 +384,32 @@ function LeadModal({lead,onClose,onSave,onDelete,config}) {
         <div className="form-group">
           <label className="form-label" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
             Channel URLs
-            <span style={{fontSize:10,fontWeight:400,color:'var(--text-light)',textTransform:'none',letterSpacing:0}}>First URL = primary link shown in table</span>
+            <span style={{fontSize:10,fontWeight:400,color:'var(--text-light)',textTransform:'none',letterSpacing:0}}>First URL = primary · tag each URL with the campaign it qualifies for</span>
           </label>
           <div className="email-rows">
-            <div className="email-row">
-              <input value={form.url||''} onChange={e=>upd('url',e.target.value)} placeholder="Primary channel URL (e.g. youtube.com/@handle)" style={{flex:1}}/>
-            </div>
-            {(form.channels||[]).map((u,i)=>(
-              <div className="email-row" key={i}>
-                <input value={u} onChange={e=>{const arr=[...(form.channels||[])];arr[i]=e.target.value;upd('channels',arr);}} placeholder="Additional channel URL..."/>
-                <button className="btn btn-danger btn-xs" onClick={()=>delUrl(i)}>✕</button>
+            {(form.links||[]).map((lnk,i)=>(
+              <div key={i} style={{display:'flex',flexDirection:'column',gap:6,padding:'8px 10px',border:'1px solid var(--border)',borderRadius:8,marginBottom:6,background:'var(--bg)'}}>
+                <div className="email-row" style={{margin:0}}>
+                  <input value={lnk.url} onChange={e=>updLink(i,{url:e.target.value})} placeholder={i===0?'Primary channel URL (e.g. youtube.com/@handle)':'Additional channel URL...'} style={{flex:1}}/>
+                  {i===0
+                    ? <span style={{fontSize:10,color:'var(--text-light)',padding:'0 6px',whiteSpace:'nowrap'}}>primary</span>
+                    : <button className="btn btn-danger btn-xs" onClick={()=>delLink(i)}>✕</button>}
+                </div>
+                <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                  <span style={{fontSize:10,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'.3px',fontWeight:600}}>Campaign</span>
+                  {(config.campaigns||[]).map(c=>{
+                    const on=(lnk.campaigns||[]).includes(c.id);
+                    return <button key={c.id} type="button" onClick={()=>toggleLinkCampaign(i,c.id)}
+                      style={{fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:20,cursor:'pointer',border:`1px solid ${on?c.color:'var(--border)'}`,background:on?c.color+'22':'transparent',color:on?c.color:'var(--text-dim)'}}>
+                      {on?'● ':'○ '}{c.label}</button>;
+                  })}
+                  {(config.campaigns||[]).length===0 && <span style={{fontSize:11,color:'var(--text-light)'}}>No campaigns configured</span>}
+                </div>
               </div>
             ))}
             <div className="email-row">
-              <input placeholder="Add another channel URL..." value={newUrl} onChange={e=>setNewUrl(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addUrl()}/>
-              <button className="btn btn-outline btn-xs" onClick={addUrl}>+ Add URL</button>
+              <input placeholder="Add another channel URL..." value={newUrl} onChange={e=>setNewUrl(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addLink()}/>
+              <button className="btn btn-outline btn-xs" onClick={addLink}>+ Add URL</button>
             </div>
           </div>
         </div>
@@ -414,7 +454,7 @@ function LeadModal({lead,onClose,onSave,onDelete,config}) {
           </div>
           <div className="modal-footer-right">
             <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button className="btn btn-primary" onClick={()=>{onSave(form);onClose();}}>Save Changes</button>
+            <button className="btn btn-primary" onClick={saveLead}>Save Changes</button>
           </div>
         </div>
       </div>
@@ -3081,6 +3121,7 @@ function App() {
       tags: Array.isArray(x.tags)?x.tags:[], campaigns: Array.isArray(x.campaigns)?x.campaigns:[],
       assignedTo: x.assignedTo || null, dateAssigned: x.dateAssigned || null,
       lastContactDate: x.lastContactDate || null, channels: Array.isArray(x.channels)?x.channels:[],
+      links: Array.isArray(x.links)?x.links:[],
       addedAt: x.addedAt || null,
       source: x.source,
     };
