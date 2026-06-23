@@ -3167,7 +3167,8 @@ function gsRowsToLeads(rows, mapping, idBase, defaultRep) {
       lastContactDate: null,
       channels: [name],
       imported,
-      addedAt
+      addedAt,
+      agency: get(row, 'agency') || null
     };
   });
 }
@@ -3317,7 +3318,8 @@ function GoogleImportView({
       campaigns: ['services', 'service', 'campaign', 'campaigns'],
       assignedTo: ['assigned to', 'assigned', 'sales rep', 'lg scraper', 'scraper', 'rep', 'owner', 'agent'],
       dateAssigned: ['date of dump', 'date assigned', 'dump date', 'date'],
-      imported: ['imported', 'is imported', 'import status']
+      imported: ['imported', 'is imported', 'import status'],
+      agency: ['agency', 'agency name', 'partner', 'partner agency']
     };
     const r = {};
     headers.forEach((h, i) => {
@@ -3420,7 +3422,8 @@ function GoogleImportView({
         lastContactDate: null,
         channels: [name],
         imported,
-        addedAt
+        addedAt,
+        agency: get(row, 'agency') || null
       };
     });
     onImport(imported);
@@ -6580,6 +6583,7 @@ function App() {
       logH('📊', `Google Sheets import: ${fresh.length} lead(s) added${skipped > 0 ? ` · ${skipped} same-rep duplicate(s) skipped` : ''}`);
       return [...existing, ...fresh];
     });
+    autoFileAgencies(newLeads); // any rows with an "agency" column drop into that Agency folder
     setTab('lead-mgmt');
   }
 
@@ -6651,8 +6655,55 @@ function App() {
       channels: Array.isArray(x.channels) ? x.channels : [],
       links: Array.isArray(x.links) ? x.links : [],
       addedAt: x.addedAt || null,
+      agency: x.agency || null,
       source: x.source
     };
+  }
+
+  // Auto-file leads that carry an `agency` name into the matching Agency-tab
+  // folder (one per rep+agency), creating the folder if needed. Drives the
+  // Google-Form workflow: rep bulk-imports an agency's roster → lands in Close
+  // with the agency name → on load it appears under that agency's folder.
+  function autoFileAgencies(ls) {
+    const groups = {};
+    (ls || []).forEach(l => {
+      const ag = String(l.agency || '').trim();
+      if (!ag) return;
+      const k = leadKey(l);
+      if (!k) return;
+      const owner = l.assignedTo || '';
+      const id = owner + '|||' + ag.toLowerCase();
+      (groups[id] = groups[id] || {
+        name: ag,
+        owner,
+        keys: new Set()
+      }).keys.add(k);
+    });
+    const list = Object.values(groups);
+    if (!list.length) return;
+    setAgencies(prev => {
+      let next = [...prev];
+      list.forEach(g => {
+        let folder = next.find(f => f.owner === g.owner && String(f.name || '').toLowerCase() === g.name.toLowerCase());
+        if (!folder) {
+          folder = {
+            id: 'ag_' + Date.now() + '_' + Math.floor(Math.random() * 1e6),
+            name: g.name,
+            owner: g.owner,
+            leadKeys: [],
+            createdAt: new Date().toISOString(),
+            source: 'google-form'
+          };
+          next = [...next, folder];
+        }
+        const merged = [...new Set([...(folder.leadKeys || []), ...g.keys])];
+        next = next.map(f => f.id === folder.id ? {
+          ...f,
+          leadKeys: merged
+        } : f);
+      });
+      return next;
+    });
   }
   function loadFromClose(opts) {
     opts = opts || {};
@@ -6687,6 +6738,9 @@ function App() {
       const arr = Array.isArray(data) ? data : data.leads || data.results || data.data || [];
       const loaded = arr.map(normalizeLead);
       setLeads(loaded);
+      autoFileAgencies(loaded);
+      const agencyCount = loaded.filter(l => l.agency).length;
+      if (agencyCount) logH('🏢', `Auto-filed ${agencyCount} agency lead(s) into Agency folders`);
       logH('☁️', `Loaded ${loaded.length} lead(s) from Close`);
       if (!opts.silent) addToast(`✓ Loaded ${loaded.length} lead(s) from Close`, 'success');
     }).catch(e => {
