@@ -1,0 +1,294 @@
+{
+  "name": "Enfinity — Dashboard Gateway (Scraper + Close.io)",
+  "flow": [
+    {
+      "id": 1,
+      "module": "gateway:CustomWebHook",
+      "version": 1,
+      "parameters": { "hook": null, "maxResults": 1 },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 0, "y": 0 },
+        "restore": { "parameters": { "hook": { "label": "Enfinity Dashboard Gateway" } } },
+        "expect": [
+          { "name": "action", "type": "text", "label": "scrape | close.pull | close.create | close.update | close.read" },
+          { "name": "platform", "type": "text" },
+          { "name": "keyword", "type": "text" },
+          { "name": "limit", "type": "number" },
+          { "name": "leadId", "type": "text", "label": "Close lead id (for close.read / close.update)" },
+          { "name": "leadJson", "type": "text", "label": "Dashboard lead object, JSON-stringified (for close.create/update)" },
+          { "name": "channelName", "type": "text" },
+          { "name": "primaryEmail", "type": "text" }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "module": "builtin:BasicRouter",
+      "version": 1,
+      "mapper": null,
+      "metadata": { "designer": { "x": 300, "y": 0 } },
+      "routes": [
+        {
+          "flow": [
+            {
+              "id": 3,
+              "module": "http:ActionSendData",
+              "version": 3,
+              "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+              "filter": {
+                "name": "1) Scrape — YouTube search",
+                "conditions": [[{ "a": "{{1.action}}", "o": "text:equal", "b": "scrape" }]]
+              },
+              "mapper": {
+                "url": "https://www.googleapis.com/youtube/v3/search",
+                "method": "get",
+                "headers": [],
+                "qs": [
+                  { "name": "part", "value": "snippet" },
+                  { "name": "type", "value": "video" },
+                  { "name": "q", "value": "{{1.keyword}}" },
+                  { "name": "maxResults", "value": "{{ifempty(1.limit; 25)}}" },
+                  { "name": "key", "value": "YOUR_YOUTUBE_API_KEY" }
+                ],
+                "parseResponse": true
+              },
+              "metadata": { "designer": { "x": 600, "y": -450 } }
+            },
+            {
+              "id": 4,
+              "module": "http:ActionSendData",
+              "version": 3,
+              "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+              "mapper": {
+                "url": "https://www.googleapis.com/youtube/v3/channels",
+                "method": "get",
+                "headers": [],
+                "qs": [
+                  { "name": "part", "value": "snippet,statistics" },
+                  { "name": "id", "value": "{{join(map(3.data.items; \"snippet.channelId\"); \",\")}}" },
+                  { "name": "maxResults", "value": "50" },
+                  { "name": "key", "value": "YOUR_YOUTUBE_API_KEY" }
+                ],
+                "parseResponse": true
+              },
+              "metadata": { "designer": { "x": 900, "y": -450 } }
+            },
+            {
+              "id": 5,
+              "module": "gateway:WebhookRespond",
+              "version": 1,
+              "parameters": {},
+              "mapper": {
+                "status": "200",
+                "body": "{{4.data.items}}",
+                "headers": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Access-Control-Allow-Origin", "value": "*" },
+                  { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                ]
+              },
+              "metadata": { "designer": { "x": 1200, "y": -450 } }
+            }
+          ]
+        },
+        {
+          "flow": [
+            {
+              "id": 6,
+              "module": "http:ActionSendData",
+              "version": 3,
+              "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+              "filter": {
+                "name": "2) Close.pull — list all leads",
+                "conditions": [[{ "a": "{{1.action}}", "o": "text:equal", "b": "close.pull" }]]
+              },
+              "mapper": {
+                "url": "https://api.close.com/api/v1/lead/",
+                "method": "get",
+                "headers": [
+                  { "name": "Authorization", "value": "Basic YOUR_CLOSE_API_KEY_BASE64" },
+                  { "name": "Accept", "value": "application/json" }
+                ],
+                "qs": [{ "name": "_limit", "value": "200" }],
+                "parseResponse": true
+              },
+              "metadata": { "designer": { "x": 600, "y": -150 } }
+            },
+            {
+              "id": 7,
+              "module": "gateway:WebhookRespond",
+              "version": 1,
+              "parameters": {},
+              "mapper": {
+                "status": "200",
+                "body": "{{6.data.data}}",
+                "headers": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Access-Control-Allow-Origin", "value": "*" },
+                  { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                ]
+              },
+              "metadata": { "designer": { "x": 900, "y": -150 } }
+            }
+          ]
+        },
+        {
+          "flow": [
+            {
+              "id": 8,
+              "module": "http:ActionSendData",
+              "version": 3,
+              "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+              "filter": {
+                "name": "3) Close.create — new lead",
+                "conditions": [[{ "a": "{{1.action}}", "o": "text:equal", "b": "close.create" }]]
+              },
+              "mapper": {
+                "url": "https://api.close.com/api/v1/lead/",
+                "method": "post",
+                "headers": [
+                  { "name": "Authorization", "value": "Basic YOUR_CLOSE_API_KEY_BASE64" },
+                  { "name": "Content-Type", "value": "application/json" }
+                ],
+                "qs": [],
+                "bodyType": "raw",
+                "contentType": "application/json",
+                "parseResponse": true,
+                "data": "{\n  \"name\": \"{{1.channelName}}\",\n  \"description\": \"{{1.leadJson}}\",\n  \"contacts\": [ { \"name\": \"{{1.channelName}}\", \"emails\": [ { \"email\": \"{{1.primaryEmail}}\", \"type\": \"office\" } ] } ]\n}"
+              },
+              "metadata": { "designer": { "x": 600, "y": 150 } }
+            },
+            {
+              "id": 9,
+              "module": "http:ActionSendData",
+              "version": 3,
+              "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+              "mapper": {
+                "url": "https://hooks.slack.com/services/YOUR/SLACK/INCOMING/WEBHOOK",
+                "method": "post",
+                "headers": [{ "name": "Content-Type", "value": "application/json" }],
+                "qs": [],
+                "bodyType": "raw",
+                "contentType": "application/json",
+                "data": "{ \"text\": \":inbox_tray: New lead in Close: *{{1.channelName}}* (close id {{8.data.id}})\" }"
+              },
+              "metadata": { "designer": { "x": 900, "y": 150 } }
+            },
+            {
+              "id": 10,
+              "module": "gateway:WebhookRespond",
+              "version": 1,
+              "parameters": {},
+              "mapper": {
+                "status": "200",
+                "body": "[{ \"id\": \"{{1.leadId}}\", \"closeLeadId\": \"{{8.data.id}}\" }]",
+                "headers": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Access-Control-Allow-Origin", "value": "*" },
+                  { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                ]
+              },
+              "metadata": { "designer": { "x": 1200, "y": 150 } }
+            }
+          ]
+        },
+        {
+          "flow": [
+            {
+              "id": 11,
+              "module": "http:ActionSendData",
+              "version": 3,
+              "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+              "filter": {
+                "name": "4) Close.update — existing lead",
+                "conditions": [[{ "a": "{{1.action}}", "o": "text:equal", "b": "close.update" }]]
+              },
+              "mapper": {
+                "url": "https://api.close.com/api/v1/lead/{{1.leadId}}/",
+                "method": "put",
+                "headers": [
+                  { "name": "Authorization", "value": "Basic YOUR_CLOSE_API_KEY_BASE64" },
+                  { "name": "Content-Type", "value": "application/json" }
+                ],
+                "qs": [],
+                "bodyType": "raw",
+                "contentType": "application/json",
+                "parseResponse": true,
+                "data": "{\n  \"name\": \"{{1.channelName}}\",\n  \"description\": \"{{1.leadJson}}\"\n}"
+              },
+              "metadata": { "designer": { "x": 600, "y": 450 } }
+            },
+            {
+              "id": 12,
+              "module": "gateway:WebhookRespond",
+              "version": 1,
+              "parameters": {},
+              "mapper": {
+                "status": "200",
+                "body": "[{ \"id\": \"{{1.leadId}}\", \"closeLeadId\": \"{{11.data.id}}\" }]",
+                "headers": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Access-Control-Allow-Origin", "value": "*" },
+                  { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                ]
+              },
+              "metadata": { "designer": { "x": 900, "y": 450 } }
+            }
+          ]
+        },
+        {
+          "flow": [
+            {
+              "id": 13,
+              "module": "http:ActionSendData",
+              "version": 3,
+              "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+              "filter": {
+                "name": "5) Close.read — lead status + email replies",
+                "conditions": [[{ "a": "{{1.action}}", "o": "text:equal", "b": "close.read" }]]
+              },
+              "mapper": {
+                "url": "https://api.close.com/api/v1/activity/email/",
+                "method": "get",
+                "headers": [
+                  { "name": "Authorization", "value": "Basic YOUR_CLOSE_API_KEY_BASE64" },
+                  { "name": "Accept", "value": "application/json" }
+                ],
+                "qs": [
+                  { "name": "lead_id", "value": "{{1.leadId}}" },
+                  { "name": "_limit", "value": "50" }
+                ],
+                "parseResponse": true
+              },
+              "metadata": { "designer": { "x": 600, "y": 750 } }
+            },
+            {
+              "id": 14,
+              "module": "gateway:WebhookRespond",
+              "version": 1,
+              "parameters": {},
+              "mapper": {
+                "status": "200",
+                "body": "{{13.data.data}}",
+                "headers": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Access-Control-Allow-Origin", "value": "*" },
+                  { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+                ]
+              },
+              "metadata": { "designer": { "x": 900, "y": 750 } }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "instant": true,
+    "version": 1,
+    "scenario": { "roundtrips": 1, "maxErrors": 3, "autoCommit": true, "autoCommitTriggerLast": true, "sequential": false, "confidential": false, "dataloss": false, "dlq": false },
+    "designer": { "orphans": [] },
+    "zone": "eu2.make.com"
+  }
+}

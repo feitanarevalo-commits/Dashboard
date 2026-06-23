@@ -1,0 +1,84 @@
+{
+  "name": "Enfinity — Google Form agency intake → Close (Agency tab)",
+  "flow": [
+    {
+      "id": 1,
+      "module": "gateway:CustomWebHook",
+      "version": 1,
+      "parameters": { "hook": null, "maxResults": 1 },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 0, "y": 0 },
+        "restore": { "parameters": { "hook": { "label": "Enfinity Agency Form Intake" } } },
+        "expect": [
+          { "name": "agency", "type": "text", "label": "Agency name — must match an Agency folder name in the dashboard" },
+          { "name": "assignedRep", "type": "text" },
+          { "name": "channelName", "type": "text" },
+          { "name": "url", "type": "text" },
+          { "name": "email", "type": "text" },
+          { "name": "platform", "type": "text" },
+          { "name": "niche", "type": "text" }
+        ],
+        "comment": "Point a Google Form's on-submit Apps Script (or Make's Google Forms 'Watch Responses') at this webhook, one POST per response."
+      }
+    },
+    {
+      "id": 2,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+      "mapper": {
+        "url": "https://api.close.com/api/v1/lead/",
+        "method": "post",
+        "headers": [
+          { "name": "Authorization", "value": "Basic YOUR_CLOSE_API_KEY_BASE64" },
+          { "name": "Content-Type", "value": "application/json" }
+        ],
+        "qs": [],
+        "bodyType": "raw",
+        "contentType": "application/json",
+        "parseResponse": true,
+        "data": "{ \"name\": \"{{1.channelName}}\", \"description\": \"{\\\"channelName\\\":\\\"{{1.channelName}}\\\",\\\"url\\\":\\\"{{1.url}}\\\",\\\"platform\\\":\\\"{{1.platform}}\\\",\\\"niche\\\":\\\"{{1.niche}}\\\",\\\"emails\\\":[\\\"{{1.email}}\\\"],\\\"assignedTo\\\":\\\"{{1.assignedRep}}\\\",\\\"agency\\\":\\\"{{1.agency}}\\\",\\\"source\\\":\\\"google-form\\\"}\", \"contacts\": [ { \"name\": \"{{1.channelName}}\", \"emails\": [ { \"email\": \"{{1.email}}\", \"type\": \"office\" } ] } ] }"
+      },
+      "metadata": { "designer": { "x": 300, "y": 0 }, "comment": "Create the lead in Close. The dashboard JSON (incl. the agency name) is round-tripped in 'description'." }
+    },
+    {
+      "id": 3,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+      "mapper": {
+        "url": "https://hooks.slack.com/services/YOUR/SLACK/INCOMING/WEBHOOK",
+        "method": "post",
+        "headers": [{ "name": "Content-Type", "value": "application/json" }],
+        "qs": [],
+        "bodyType": "raw",
+        "contentType": "application/json",
+        "data": "{ \"text\": \":handshake: New agency lead from *{{1.agency}}* → {{1.channelName}} (rep: {{1.assignedRep}})\" }"
+      },
+      "metadata": { "designer": { "x": 600, "y": 0 } }
+    },
+    {
+      "id": 4,
+      "module": "gateway:WebhookRespond",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "status": "200",
+        "body": "{ \"ok\": true, \"closeLeadId\": \"{{2.data.id}}\", \"agency\": \"{{1.agency}}\" }",
+        "headers": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Access-Control-Allow-Origin", "value": "*" }
+        ]
+      },
+      "metadata": { "designer": { "x": 900, "y": 0 } }
+    }
+  ],
+  "metadata": {
+    "instant": true,
+    "version": 1,
+    "scenario": { "roundtrips": 1, "maxErrors": 3, "autoCommit": true, "autoCommitTriggerLast": true, "sequential": false, "confidential": false, "dataloss": false, "dlq": false },
+    "designer": { "orphans": [] },
+    "zone": "eu2.make.com"
+  }
+}
