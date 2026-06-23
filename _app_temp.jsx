@@ -212,6 +212,22 @@ function exportCSV(leads, filename='leads.csv') {
   downloadFile(rows, filename);
 }
 
+// Close.io-ready export — one row per lead with the columns Close's lead
+// importer recognises (Company / Contact Name / Contact Email + useful custom
+// fields). The rep downloads this and imports it in her own Close account; it's
+// the same data the automated Make push sends.
+function exportCloseCSV(leads, filename='close_import.csv') {
+  const cols = ['Company','Contact Name','Contact Email','URL','Platform','Niche',
+    'Followers','Status','Campaign','Assigned Rep','Date Assigned'];
+  const rows = [csvRow(cols), ...leads.map(l => csvRow([
+    l.channelName, l.channelName, (l.emails||[])[0]||'',
+    l.url, l.platform, l.niche, l.followers,
+    (l.tags||[]).join('; '), (l.campaigns||[]).join(', '),
+    l.assignedTo||'', l.dateAssigned||''
+  ]))].join('\n');
+  downloadFile(rows, filename);
+}
+
 // Comprehensive Sales KPI report (one row per rep + a totals row). Includes
 // raw counts, derived conversion rates, email coverage, average audience size,
 // and per-campaign / per-platform splits, under a titled header block.
@@ -1387,7 +1403,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
   const total=myLeads.length;
   const active=activeLeads.length;
-  const potential=myLeads.filter(l=>l.tags.includes('Potential')).length;
+  const potentialLeads=myLeads.filter(l=>l.tags.includes('Potential'));   // campaign-ready set
+  const potential=potentialLeads.length;
   const contacted=myLeads.filter(l=>l.tags.includes('Contacted')).length;
   const ht=myLeads.filter(l=>l.tags.includes('HT')).length;
   const feats=config.features||{};
@@ -1412,8 +1429,15 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
           <div style={{fontSize:11,color:'var(--text-dim)'}}>{total} lead{total!==1?'s':''} · {active} active</div>
         </div>
         <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
-          <button className="btn btn-primary btn-sm" onClick={()=>importToClose(rep,myLeads)} title="Import this rep's leads into Close.io CRM via n8n webhook">⬆ Import to Close.io</button>
+          <button className="btn btn-primary btn-sm" disabled={!potential}
+            onClick={()=>importToClose(rep,potentialLeads)}
+            title={potential?`Send ${rep}'s ${potential} Potential lead(s) to Close.io to run campaigns`:'No Potential leads to send yet'}>
+            ⬆ Send {potential} to Close.io
+          </button>
           <div className="export-group">
+            {feats.exportCSV && <button className="btn btn-outline btn-sm" disabled={!potential}
+              onClick={()=>exportCloseCSV(potentialLeads,`${rep}_close_import.csv`)}
+              title="Download a Close.io-ready CSV of the Potential leads to import in Close">⬇ Close CSV</button>}
             {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(myLeads,`${rep}_leads.csv`)}>⬇ Export CSV</button>}
             {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={()=>exportPDF(rep)}>🖨 Export PDF</button>}
           </div>
@@ -3216,12 +3240,25 @@ function App() {
   },[currentUser]);
 
   function importToClose(rep,repLeads){
-    const CLOSE_WEBHOOK=config.closeWebhook||'https://app.n8n.cloud/webhook/your-close-import-webhook';
-    const payload={rep,leads:repLeads.map(l=>({channelName:l.channelName,url:l.url,platform:l.platform,niche:l.niche,emails:l.emails,tags:l.tags,campaigns:l.campaigns,dateAssigned:l.dateAssigned}))};
-    addToast(`Sending ${repLeads.length} leads to Close.io for ${rep}...`,'info');
+    const CLOSE_WEBHOOK=(config.closeWebhook||'').trim();
+    if(!CLOSE_WEBHOOK || CLOSE_WEBHOOK.includes('your-')){ addToast('Set the Close Save Webhook in ⚙ Customize first','info'); return; }
+    if(!repLeads || !repLeads.length){ addToast(`No leads to send for ${rep}`,'info'); return; }
+    // Per-lead shape the Make/n8n "close batch import" scenario iterates over;
+    // leadJson round-trips the full dashboard object into Close's description.
+    const payload={action:'close.create', rep, leads:repLeads.map(l=>({
+      name:l.channelName, email:(l.emails||[])[0]||'', emails:l.emails||[],
+      url:l.url, platform:l.platform, niche:l.niche, followers:l.followers,
+      status:(l.tags||[]).join(', '), campaigns:l.campaigns||[],
+      assignedTo:l.assignedTo, dateAssigned:l.dateAssigned, closeLeadId:l.closeLeadId||null,
+      leadJson:JSON.stringify(l)
+    }))};
+    setCloseSyncing(true);
+    addToast(`Sending ${repLeads.length} lead(s) to Close.io for ${rep}…`,'info');
     fetch(CLOSE_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-      .then(()=>{ addToast(`✓ ${repLeads.length} leads imported to Close.io for ${rep}`,'success'); logH('⬆',`Close.io import: ${repLeads.length} leads for ${rep}`); })
-      .catch(()=>{ addToast(`Close.io import triggered for ${rep} (configure webhook to go live)`,'info'); logH('⬆',`Close.io import triggered for ${rep}`); });
+      .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+      .then(()=>{ addToast(`✓ ${repLeads.length} lead(s) sent to Close.io for ${rep}`,'success'); logH('⬆',`Close.io import: ${repLeads.length} lead(s) for ${rep}`); })
+      .catch(e=>{ addToast(`Close.io import failed for ${rep}: ${e.message}`,'error'); logH('⬆',`Close.io import failed for ${rep}`); })
+      .finally(()=>setCloseSyncing(false));
   }
 
   useEffect(()=>{
