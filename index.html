@@ -6087,6 +6087,7 @@ function AgencyFolder({
   importing,
   sheetReady
 }) {
+  const [open, setOpen] = useState(false); // collapsed by default — click the header to open
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(folder.name);
   const [pick, setPick] = useState('');
@@ -6141,11 +6142,27 @@ function AgencyFolder({
     style: {
       display: 'flex',
       alignItems: 'center',
-      gap: 8
+      gap: 8,
+      cursor: renaming ? 'default' : 'pointer',
+      userSelect: 'none'
+    },
+    onClick: () => {
+      if (!renaming) setOpen(o => !o);
+    },
+    title: renaming ? undefined : open ? 'Click to collapse' : 'Click to open folder'
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-dim)',
+      width: 10,
+      display: 'inline-block',
+      transition: 'transform .15s',
+      transform: open ? 'rotate(90deg)' : 'none'
     }
-  }, /*#__PURE__*/React.createElement("span", null, "🏢"), renaming ? /*#__PURE__*/React.createElement("input", {
+  }, "▶"), /*#__PURE__*/React.createElement("span", null, open ? '📂' : '🗂'), renaming ? /*#__PURE__*/React.createElement("input", {
     value: nameDraft,
     autoFocus: true,
+    onClick: e => e.stopPropagation(),
     onChange: e => setNameDraft(e.target.value),
     onKeyDown: e => {
       if (e.key === 'Enter') saveName();
@@ -6201,7 +6218,7 @@ function AgencyFolder({
     className: "btn btn-ghost btn-xs",
     title: "Delete this agency folder",
     onClick: () => onDelete(folder.id)
-  }, "🗑 Delete"))), /*#__PURE__*/React.createElement("div", {
+  }, "🗑 Delete"))), open && /*#__PURE__*/React.createElement("div", {
     className: "card-body",
     style: {
       padding: 0,

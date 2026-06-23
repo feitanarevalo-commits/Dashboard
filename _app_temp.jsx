@@ -2868,6 +2868,7 @@ function AgencyView({agencies,setAgencies,leads,config,currentUser,isAdmin,addTo
 }
 
 function AgencyFolder({folder,leads,config,isAdmin,canEdit,onUpdate,onDelete,addToast,onImportTab,importing,sheetReady}) {
+  const [open,setOpen]=useState(false);   // collapsed by default — click the header to open
   const [renaming,setRenaming]=useState(false);
   const [nameDraft,setNameDraft]=useState(folder.name);
   const [pick,setPick]=useState('');
@@ -2886,10 +2887,13 @@ function AgencyFolder({folder,leads,config,isAdmin,canEdit,onUpdate,onDelete,add
   return (
     <div className="card" style={{borderLeft:'3px solid var(--accent)'}}>
       <div className="card-header" style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-        <div className="card-title" style={{display:'flex',alignItems:'center',gap:8}}>
-          <span>🏢</span>
+        <div className="card-title" style={{display:'flex',alignItems:'center',gap:8,cursor:renaming?'default':'pointer',userSelect:'none'}}
+          onClick={()=>{ if(!renaming) setOpen(o=>!o); }}
+          title={renaming?undefined:(open?'Click to collapse':'Click to open folder')}>
+          <span style={{fontSize:11,color:'var(--text-dim)',width:10,display:'inline-block',transition:'transform .15s',transform:open?'rotate(90deg)':'none'}}>▶</span>
+          <span>{open?'📂':'🗂'}</span>
           {renaming
-            ? <input value={nameDraft} autoFocus onChange={e=>setNameDraft(e.target.value)}
+            ? <input value={nameDraft} autoFocus onClick={e=>e.stopPropagation()} onChange={e=>setNameDraft(e.target.value)}
                 onKeyDown={e=>{if(e.key==='Enter')saveName();if(e.key==='Escape'){setNameDraft(folder.name);setRenaming(false);}}}
                 style={{padding:'4px 8px',border:'1px solid var(--border)',borderRadius:6,fontSize:14,background:'var(--bg)',color:'var(--text)'}}/>
             : <span>{folder.name}</span>}
@@ -2906,7 +2910,7 @@ function AgencyFolder({folder,leads,config,isAdmin,canEdit,onUpdate,onDelete,add
           <button className="btn btn-ghost btn-xs" title="Delete this agency folder" onClick={()=>onDelete(folder.id)}>🗑 Delete</button>
         </div>}
       </div>
-      <div className="card-body" style={{padding:0,overflowX:'auto'}}>
+      {open && <div className="card-body" style={{padding:0,overflowX:'auto'}}>
         {canEdit && <div style={{display:'flex',gap:8,alignItems:'center',padding:'10px 14px',borderBottom:'1px solid var(--border)',flexWrap:'wrap'}}>
           <select value={pick} onChange={e=>setPick(e.target.value)}
             style={{padding:'6px 8px',border:'1px solid var(--border)',borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)',minWidth:220,maxWidth:360}}>
@@ -2934,7 +2938,7 @@ function AgencyFolder({folder,leads,config,isAdmin,canEdit,onUpdate,onDelete,add
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
     </div>
   );
 }
