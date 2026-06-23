@@ -1493,6 +1493,71 @@ function ContactedView({leads,onSave,onDelete,onBulkAssign,config,campColorMap})
   );
 }
 
+// ─── GOOGLE SHEETS: fetch a worksheet BY TAB NAME ─────────
+// Used by the Agency import: addresses a tab by name (not gid) via the gviz
+// JSONP endpoint (the same CORS-free mechanism the main importer uses), so a
+// sheet tab can be matched to an agency folder of the same name.
+function gsExtractId(raw){ const m=String(raw||'').match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/); return m?m[1]:null; }
+function gsJsonp(id, selector){
+  return new Promise((resolve,reject)=>{
+    const cb='__gsx_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
+    const s=document.createElement('script');
+    s.src=`https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:json;responseHandler:${cb}&${selector}`;
+    const timer=setTimeout(()=>{cleanup();reject(new Error('Timeout'));},12000);
+    function cleanup(){ try{delete window[cb];}catch(e){} s.remove(); clearTimeout(timer); }
+    window[cb]=data=>{cleanup();resolve(data);};
+    s.onerror=()=>{cleanup();reject(new Error('Network/script error'));};
+    document.head.appendChild(s);
+  });
+}
+function gsFetchTableByName(id, sheetName){
+  return gsJsonp(id, 'headers=1&sheet='+encodeURIComponent(sheetName)).then(data=>{
+    if(!data) throw new Error('No response');
+    if(data.status==='error') throw new Error('No tab named "'+sheetName+'"');
+    if(!data.table) throw new Error('No table');
+    const headers=(data.table.cols||[]).map(c=>(c.label||c.id||'').trim());
+    const rows=(data.table.rows||[]).map(r=>(r.c||[]).map(cell=>{ if(!cell||cell.v==null) return ''; if(cell.f!=null) return String(cell.f); return String(cell.v).trim(); }));
+    return {headers, rows};
+  });
+}
+// Column auto-map + row→lead builder, mirroring the main Sheets importer's
+// conventions so agency tabs ingest identically (keep these two in sync).
+function gsAutoMap(headers){
+  const ALIASES={
+    channelName:['channel name','channel','name','creator','creator name','handle'],
+    url:['url','channel url','profile url','youtube url','youtube link'],
+    platform:['platform','social','network'],
+    niche:['niche','category','topic','industry','vertical'],
+    followers:['followers','subscribers','subs','audience','reach','follower count'],
+    emails:['email','emails','email address','contact email'],
+    tags:['tags','tag','status','label','stage'],
+    campaigns:['services','service','campaign','campaigns'],
+    assignedTo:['assigned to','assigned','sales rep','lg scraper','scraper','rep','owner','agent'],
+    dateAssigned:['date of dump','date assigned','dump date','date'],
+    imported:['imported','is imported','import status'],
+  };
+  const r={};
+  (headers||[]).forEach((h,i)=>{ const low=String(h).toLowerCase().trim(); for(const[field,aliases]of Object.entries(ALIASES)){ if(!r[field]&&aliases.some(a=>low.includes(a))) r[field]=String(i); } });
+  return r;
+}
+function gsRowsToLeads(rows, mapping, idBase, defaultRep){
+  const today=new Date().toISOString().split('T')[0];
+  const get=(row,key)=>mapping[key]!==undefined?String(row[parseInt(mapping[key])]||'').trim():'';
+  return (rows||[]).filter(r=>r.some(c=>String(c).trim())).map((row,i)=>{
+    const emails=get(row,'emails').split(/[;,]/).map(e=>e.trim()).filter(Boolean);
+    const tags=[...new Set(get(row,'tags').split(/[;,]/).map(canonTag).filter(Boolean))];
+    const campaigns=get(row,'campaigns').split(/[;,]/).map(c=>c.trim()).filter(Boolean);
+    const name=get(row,'channelName')||`Row ${i+1}`;
+    const rep=get(row,'assignedTo')||defaultRep||null;
+    const dateRaw=get(row,'dateAssigned');
+    const impRaw=get(row,'imported').trim().toLowerCase();
+    const imported=['yes','y','true','1'].includes(impRaw)?true:['no','n','false','0'].includes(impRaw)?false:undefined;
+    let addedAt=new Date().toISOString();
+    if(dateRaw){ const t=new Date(dateRaw).getTime(); if(!isNaN(t)) addedAt=new Date(t).toISOString(); }
+    return{id:(idBase||Date.now())+i,channelName:name,url:get(row,'url'),platform:get(row,'platform')||'YouTube',niche:get(row,'niche'),followers:get(row,'followers'),emails,tags,campaigns,assignedTo:rep,dateAssigned:(dateRaw||(rep?today:null)),lastContactDate:null,channels:[name],imported,addedAt};
+  });
+}
+
 // ─── GOOGLE SHEETS IMPORT ────────────────────────────────
 function GoogleImportView({onImport,addToast}) {
   const [url,setUrl]=useState('');
@@ -2692,10 +2757,38 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
 // logged-in user (admins see everyone's). Membership is stored by stable
 // leadKey, and the whole set is persisted to localStorage, so folders survive
 // reloads even though the in-memory leads do not.
-function AgencyView({agencies,setAgencies,leads,config,currentUser,isAdmin,addToast}) {
+function AgencyView({agencies,setAgencies,leads,config,currentUser,isAdmin,addToast,onImportSheet}) {
   const myName=currentUser?currentUser.name:'';
   const [newName,setNewName]=useState('');
+  const [sheetUrl,setSheetUrl]=useState('');
+  const [importing,setImporting]=useState(false);
   const visible=isAdmin?agencies:agencies.filter(a=>a.owner===myName);
+
+  // Bulk import: for each visible folder, fetch the sheet tab named exactly
+  // like the folder and drop its leads in. Tabs with no matching folder are
+  // ignored; folders with no matching tab are reported back.
+  async function importFromSheets(){
+    const id=gsExtractId(sheetUrl.trim());
+    if(!id){ addToast('Paste a valid Google Sheets URL','error'); return; }
+    if(!visible.length){ addToast('Create an agency folder first, then import','info'); return; }
+    setImporting(true);
+    let added=0, matched=0, idx=0; const misses=[];
+    for(const f of visible){
+      try{
+        const {headers,rows}=await gsFetchTableByName(id, f.name);
+        const data=(rows||[]).filter(r=>r.some(c=>String(c).trim()));
+        if(!headers.length || !data.length){ misses.push(f.name); continue; }
+        const defaultRep=(config.salesReps||[]).includes(f.owner)?f.owner:null;
+        const newLeads=gsRowsToLeads(data, gsAutoMap(headers), Date.now()+(idx++)*100000, defaultRep);
+        if(!newLeads.length){ misses.push(f.name); continue; }
+        if(onImportSheet) onImportSheet(f.id, newLeads);
+        added+=newLeads.length; matched++;
+      }catch(e){ misses.push(f.name); }
+    }
+    setImporting(false);
+    if(matched) addToast(`Imported ${added} lead(s) into ${matched} folder(s)${misses.length?` · no matching tab: ${misses.join(', ')}`:''}`,'success');
+    else addToast(`No matching tabs found. Name a sheet tab exactly like a folder${misses.length?` (tried: ${misses.join(', ')})`:''}.`,'error');
+  }
 
   function createFolder(){
     const n=newName.trim();
@@ -2722,6 +2815,24 @@ function AgencyView({agencies,setAgencies,leads,config,currentUser,isAdmin,addTo
           </span>
         </div>
       </div>
+
+      <div className="card">
+        <div className="card-header"><div className="card-title">📥 Bulk Import from Google Sheets</div></div>
+        <div className="card-body" style={{display:'flex',flexDirection:'column',gap:8}}>
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+            <input value={sheetUrl} onChange={e=>setSheetUrl(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!importing)importFromSheets();}}
+              placeholder="Paste a public Google Sheets URL"
+              style={{padding:'7px 10px',border:'1px solid var(--border)',borderRadius:8,fontSize:13,background:'var(--bg)',color:'var(--text)',flex:1,minWidth:260}}/>
+            <button className="btn btn-primary btn-sm" disabled={importing} onClick={importFromSheets}>{importing?'Importing…':'⇪ Import by Tab Name'}</button>
+          </div>
+          <div style={{fontSize:12,color:'var(--text-dim)'}}>
+            Name each tab in the sheet exactly like one of your agency folders below. Every tab whose name
+            matches a folder is imported straight into that folder. (Tab names must match the folder name — spaces and capitalization included.)
+            The sheet must be shared as “Anyone with the link can view.”
+          </div>
+        </div>
+      </div>
+
       {visible.length===0 &&
         <div className="card"><div className="card-body" style={{textAlign:'center',color:'var(--text-dim)',padding:'40px 24px'}}>
           <div style={{fontSize:30,marginBottom:6}}>🏢</div>
@@ -2892,6 +3003,23 @@ function App() {
       return[...existing,...fresh];
     });
     setTab('lead-mgmt');
+  }
+
+  // Agency Sheets import: add the parsed leads to the global pool (deduped per
+  // channel+rep, like a normal import) AND attach them to the agency folder by
+  // leadKey — including leads that already existed, so the folder is complete.
+  function importAgencyLeads(folderId,parsedLeads){
+    const arr=Array.isArray(parsedLeads)?parsedLeads:[];
+    setLeads(existing=>{
+      const seen=new Set(existing.map(l=>leadKey(l)+'|'+(l.assignedTo||'')));
+      const fresh=[];
+      arr.forEach(l=>{ const k=leadKey(l)+'|'+(l.assignedTo||''); if(leadKey(l)&&seen.has(k)) return; seen.add(k); fresh.push({...l,source:'import'}); });
+      return [...existing,...fresh];
+    });
+    const keys=[...new Set(arr.map(leadKey).filter(Boolean))];
+    setAgencies(a=>a.map(f=>f.id===folderId?{...f,leadKeys:[...new Set([...(f.leadKeys||[]),...keys])]}:f));
+    logH('🏢',`Agency import: ${arr.length} lead(s) added to a folder`);
+    return keys.length;
   }
 
   function addDiscovered(items){
@@ -3082,7 +3210,7 @@ function App() {
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
     if(tab==='duplicates') return <DuplicatesView groups={dupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
     if(tab==='google-import') return <GoogleImportView onImport={importLeads} addToast={addToast}/>;
-    if(tab==='agency') return <AgencyView agencies={agencies} setAgencies={setAgencies} leads={vLeads} config={config} currentUser={currentUser} isAdmin={isAdmin} addToast={addToast}/>;
+    if(tab==='agency') return <AgencyView agencies={agencies} setAgencies={setAgencies} leads={vLeads} config={config} currentUser={currentUser} isAdmin={isAdmin} addToast={addToast} onImportSheet={importAgencyLeads}/>;
     const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);
     if(camp) return <CampaignView campaign={camp} campColor={camp.color} leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
     return null;
