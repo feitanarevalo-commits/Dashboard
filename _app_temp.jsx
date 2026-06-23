@@ -177,6 +177,22 @@ function fmtAddedAt(l){
   return new Date(ms).toLocaleString('en-CA',
     {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).replace(',','');
 }
+// Local YYYY-MM-DD for a date/ms (uses local calendar day, not UTC).
+function ymdLocal(d){
+  const x=new Date(d); if(isNaN(x)) return '';
+  return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+}
+// The calendar day a lead belongs to for daily tracking: the day it was
+// assigned to the rep (a plain YYYY-MM-DD string, used as-is), else the day it
+// was added/scraped. Returns '' if neither is known.
+function leadDayStr(l){
+  if(l && l.dateAssigned){
+    const s=String(l.dateAssigned);
+    if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);   // already a date string — no TZ shift
+    const d=new Date(s); if(!isNaN(d)) return ymdLocal(d);
+  }
+  const ms=leadAddedMs(l); return ms?ymdLocal(ms):'';
+}
 
 // Per-lead export — one row per lead with the full detail set (raw + derived
 // fields) so the download is useful for offline analysis, not just a name list.
@@ -1263,6 +1279,17 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
   const ht=myLeads.filter(l=>l.tags.includes('HT')).length;
   const feats=config.features||{};
 
+  // Daily quota tracker: for the selected day, how many open (still Potential,
+  // not yet Contacted) leads the rep has per campaign. Because status is
+  // single-select, a lead tagged Contacted loses its Potential tag and drops
+  // out of these counts — so the day's potentials clear as she works them.
+  const todayStr=ymdLocal(new Date());
+  const [quotaDay,setQuotaDay]=useState(todayStr);
+  const dayLeads=myLeads.filter(l=>leadDayStr(l)===quotaDay);
+  const campPotential=(campId)=>dayLeads.filter(l=>l.tags.includes('Potential')&&!l.tags.includes('Contacted')&&(l.campaigns||[]).includes(campId)).length;
+  const dayContacted=dayLeads.filter(l=>l.tags.includes('Contacted')).length;
+  const dayPotentialTotal=dayLeads.filter(l=>l.tags.includes('Potential')&&!l.tags.includes('Contacted')).length;
+
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
       <div className="rep-view-header no-print">
@@ -1285,6 +1312,29 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
         <div className="stat-card green" style={{flex:1}}><div className="stat-label">Potential</div><div className="stat-value">{potential}</div></div>
         <div className="stat-card" style={{flex:1}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
         <div className="stat-card orange" style={{flex:1}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
+      </div>
+      <div className="no-print" style={{display:'flex',gap:12,padding:'12px 24px',flexShrink:0,borderBottom:'1px solid var(--border)',background:'var(--card)',alignItems:'center',flexWrap:'wrap'}}>
+        <div style={{display:'flex',flexDirection:'column',gap:2,marginRight:4}}>
+          <span style={{fontWeight:700,fontSize:13}}>📅 Daily Quota</span>
+          <span style={{fontSize:10,color:'var(--text-dim)'}}>open potentials per campaign</span>
+        </div>
+        <input type="date" value={quotaDay} max={todayStr} onChange={e=>setQuotaDay(e.target.value||todayStr)}
+          style={{padding:'5px 8px',border:'1px solid var(--border)',borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)'}}/>
+        <button className="btn btn-ghost btn-sm" onClick={()=>setQuotaDay(todayStr)} disabled={quotaDay===todayStr}>Today</button>
+        {(config.campaigns||[]).map(c=>(
+          <div key={c.id} className="stat-card" style={{flex:'0 0 auto',minWidth:118,borderLeft:`3px solid ${c.color}`}}>
+            <div className="stat-label">{c.label} Potentials</div>
+            <div className="stat-value" style={{color:c.color}}>{campPotential(c.id)}</div>
+          </div>
+        ))}
+        <div className="stat-card" style={{flex:'0 0 auto',minWidth:118}}>
+          <div className="stat-label">Open Total</div>
+          <div className="stat-value">{dayPotentialTotal}</div>
+        </div>
+        <div className="stat-card" style={{flex:'0 0 auto',minWidth:118}}>
+          <div className="stat-label">Contacted {quotaDay===todayStr?'Today':'That Day'}</div>
+          <div className="stat-value" style={{color:'var(--accent)'}}>{dayContacted}</div>
+        </div>
       </div>
       <LeadsTable
         leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkAssign={onBulkAssign}
