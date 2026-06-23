@@ -240,6 +240,20 @@ function toCloseLeadItem(l){
   };
 }
 
+// SmartReach is an email-outreach tool, so its export carries ONLY the channel
+// name + email (one prospect per lead's primary email; leads without an email
+// are skipped since they can't be emailed).
+function exportSmartReachCSV(leads, filename='smartreach.csv') {
+  const cols = ['Channel Name','Email'];
+  const rows = [csvRow(cols), ...leads
+    .filter(l=>(l.emails||[]).length>0)
+    .map(l => csvRow([l.channelName, (l.emails||[])[0]||'']))
+  ].join('\n');
+  downloadFile(rows, filename);
+}
+// One prospect for the Make "SmartReach add" scenario — name + email only.
+function toSmartReachItem(l){ return { name:l.channelName, email:(l.emails||[])[0]||'' }; }
+
 // Comprehensive Sales KPI report (one row per rep + a totals row). Includes
 // raw counts, derived conversion rates, email coverage, average audience size,
 // and per-campaign / per-platform splits, under a titled header block.
@@ -1402,9 +1416,12 @@ function RepAvatar({rep,config,size=36,online=false,bgOverride=null}) {
 }
 
 // ─── REP DASHBOARD VIEW ───────────────────────────────────
-function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onImportClose}) {
+function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onImportClose,onImportSmartReach}) {
   function importToClose(r,ls){
     if(onImportClose) onImportClose(r,ls);
+  }
+  function importToSmartReach(r,ls){
+    if(onImportSmartReach) onImportSmartReach(r,ls);
   }
   // myLeads = everything assigned to the rep (drives the stat cards & counts).
   // activeLeads = the rep's work queue shown in the table; once a lead is tagged
@@ -1417,6 +1434,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
   const active=activeLeads.length;
   const potentialLeads=myLeads.filter(l=>l.tags.includes('Potential'));   // campaign-ready set
   const potential=potentialLeads.length;
+  const smartReachLeads=potentialLeads.filter(l=>(l.emails||[]).length>0);  // emailable Potential leads
+  const srCount=smartReachLeads.length;
   const contacted=myLeads.filter(l=>l.tags.includes('Contacted')).length;
   const ht=myLeads.filter(l=>l.tags.includes('HT')).length;
   const feats=config.features||{};
@@ -1446,10 +1465,18 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
             title={potential?`Send ${rep}'s ${potential} Potential lead(s) to Close.io to run campaigns`:'No Potential leads to send yet'}>
             ⬆ Send {potential} to Close.io
           </button>
+          <button className="btn btn-primary btn-sm" disabled={!srCount}
+            onClick={()=>importToSmartReach(rep,smartReachLeads)}
+            title={srCount?`Send ${rep}'s ${srCount} emailable Potential lead(s) (name + email) to SmartReach`:'No Potential leads with an email yet'}>
+            ✉ Send {srCount} to SmartReach
+          </button>
           <div className="export-group">
             {feats.exportCSV && <button className="btn btn-outline btn-sm" disabled={!potential}
               onClick={()=>exportCloseCSV(potentialLeads,`${rep}_close_import.csv`)}
               title="Download a Close.io-ready CSV of the Potential leads to import in Close">⬇ Close CSV</button>}
+            {feats.exportCSV && <button className="btn btn-outline btn-sm" disabled={!srCount}
+              onClick={()=>exportSmartReachCSV(smartReachLeads,`${rep}_smartreach.csv`)}
+              title="Download a SmartReach CSV (channel name + email only) of the Potential leads">⬇ SmartReach CSV</button>}
             {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(myLeads,`${rep}_leads.csv`)}>⬇ Export CSV</button>}
             {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={()=>exportPDF(rep)}>🖨 Export PDF</button>}
           </div>
@@ -2516,6 +2543,10 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
                 <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Close — Load Webhook (pull leads ← Close)</div>
                 <input value={local.closeLoadWebhook||''} onChange={e=>setLocal(l=>({...l,closeLoadWebhook:e.target.value}))} placeholder="https://app.n8n.cloud/webhook/..." style={{width:'100%'}}/>
               </div>
+              <div>
+                <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>SmartReach Webhook (send prospects → SmartReach)</div>
+                <input value={local.smartreachWebhook||''} onChange={e=>setLocal(l=>({...l,smartreachWebhook:e.target.value}))} placeholder="https://hook.eu1.make.com/..." style={{width:'100%'}}/>
+              </div>
             </div>
           </div>
           <div className="drawer-section">
@@ -3267,6 +3298,19 @@ function App() {
       .finally(()=>setCloseSyncing(false));
   }
 
+  // Send a rep's emailable Potential leads to SmartReach — name + email only.
+  function importToSmartReach(rep,repLeads){
+    const wh=(config.smartreachWebhook||'').trim();
+    if(!wh || wh.includes('your-')){ addToast('Set the SmartReach Webhook in ⚙ Customize first','info'); return; }
+    if(!repLeads || !repLeads.length){ addToast(`No emailable leads to send for ${rep}`,'info'); return; }
+    const payload={action:'smartreach.add', rep, leads:repLeads.map(toSmartReachItem)};
+    addToast(`Sending ${repLeads.length} prospect(s) to SmartReach for ${rep}…`,'info');
+    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+      .then(()=>{ addToast(`✓ ${repLeads.length} prospect(s) sent to SmartReach for ${rep}`,'success'); logH('✉',`SmartReach: ${repLeads.length} prospect(s) for ${rep}`); })
+      .catch(e=>{ addToast(`SmartReach send failed for ${rep}: ${e.message}`,'error'); logH('✉',`SmartReach send failed for ${rep}`); });
+  }
+
   useEffect(()=>{
     function checkRecycle(){
       const now=new Date();
@@ -3344,7 +3388,7 @@ function App() {
 
   function renderMain(){
     if(showRepSelect) return <RepSelectScreen leads={vLeads} config={config} activeRep={activeRep} onSelect={r=>{if(r){setActiveRep(r);setTab('rep-home');}setShowRepSelect(false);}}/>;
-    if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose}/>;
+    if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
     if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;

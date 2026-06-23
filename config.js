@@ -71,6 +71,7 @@ var DEFAULT_CONFIG = {
   closeWebhook:     'https://hook.eu1.make.com/s46mezye3pzk5vyxshdegdn1ze4ojiry', // SAVE leads → Close (batch import)
   closeLoadWebhook: 'https://app.n8n.cloud/webhook/your-close-load-webhook',       // LOAD leads ← Close (not wired yet)
   scrapeWebhook:    'https://hook.eu1.make.com/7mkf2sskmhscx672dkj5yxbhge6jtd98', // YouTube scraper gateway
+  smartreachWebhook:'https://app.n8n.cloud/webhook/your-smartreach-webhook',     // SEND prospects → SmartReach (name+email)
 
   // ── Campaigns ── add as many as you need
   campaigns: [
