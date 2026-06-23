@@ -243,6 +243,20 @@ function exportKpiCSV(repRows, info, filename='enfinity_sales_kpis.csv') {
   const cols = ['Sales Rep','Total Assigned','Fresh','Recycled','Potential','Contacted','High Ticket','Not Qualified',
     'Contact Rate %','Potential Rate %','Qualified Rate %','With Email','Email Coverage %','Avg Followers',
     ...camps.map(c=>`Campaign: ${c.label}`), ...plats.map(p=>`Platform: ${p}`)];
+  // Per-rep × campaign section: one row per (rep, campaign) + All Reps totals.
+  const campRow = (repLabel,c,s)=>csvRow([repLabel, c.label, s.total, s.potential,
+    pct(s.potential,s.total), s.contacted, pct(s.contacted,s.total), s.ht]);
+  const campSection = [];
+  if(camps.length){
+    campSection.push('', 'Per-Rep x Campaign Breakdown',
+      csvRow(['Sales Rep','Campaign','Total','Potential','Pot %','Contacted','Contact %','High Ticket']));
+    const blank = {total:0,potential:0,contacted:0,ht:0};
+    repRows.forEach(r=>camps.forEach(c=>campSection.push(campRow(r.rep,c,(r.campaignStats&&r.campaignStats[c.id])||blank))));
+    camps.forEach(c=>{
+      const s=repRows.reduce((a,r)=>{const x=(r.campaignStats&&r.campaignStats[c.id])||{};a.total+=x.total||0;a.potential+=x.potential||0;a.contacted+=x.contacted||0;a.ht+=x.ht||0;return a;},{total:0,potential:0,contacted:0,ht:0});
+      campSection.push(campRow('All Reps',c,s));
+    });
+  }
   const lines = [
     'Enfinity Sales Dashboard — Sales KPI Report',
     `Period:,${info.period||''}`,
@@ -252,6 +266,7 @@ function exportKpiCSV(repRows, info, filename='enfinity_sales_kpis.csv') {
     csvRow(cols),
     ...repRows.map(fmtRow),
     fmtRow(totals),
+    ...campSection,
   ];
   downloadFile(lines.join('\n'), filename);
 }
