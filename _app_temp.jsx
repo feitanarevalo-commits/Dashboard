@@ -2488,7 +2488,7 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   function apply(){onConfig(local);addToast('Settings saved','success');onClose();}
   function reset(){setLocal(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));}
 
-  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'prev-scraped':{label:'Previously Scraped',icon:'💾'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},agency:{label:'Agency',icon:'🏢'},potential:{label:'Potential Leads',icon:'⭐'},pending:{label:'Pending Qualification',icon:'⏳'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},recent:{label:'Recently Assigned',icon:'🕐'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
+  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'prev-scraped':{label:'Previously Scraped',icon:'💾'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},agency:{label:'Agency',icon:'🏢'},'close-data':{label:'Close Leads Data',icon:'☁️'},potential:{label:'Potential Leads',icon:'⭐'},pending:{label:'Pending Qualification',icon:'⏳'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},recent:{label:'Recently Assigned',icon:'🕐'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
   const COL_META={thumbnail:'Thumbnail',channelName:'Channel Name',url:'URL',platform:'Platform',niche:'Niche',followers:'Followers',emails:'Email(s)',tags:'Status Tags',campaign:'Campaign',assignedTo:'Assigned To',dateAssigned:'Date Assigned'};
   const FEAT_META={bulkAssign:{label:'Bulk Assign'},exportCSV:{label:'Export CSV'},exportPDF:{label:'Export PDF'},dailyRefresh:{label:'Daily Auto-Refresh'},colorHighlights:{label:'Campaign Color Rows'},webhookTrigger:{label:'n8n Webhook'},historyRestore:{label:'History Restore'},emailValidation:{label:'Email Validation (future)'}};
 
@@ -2780,6 +2780,7 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
     {id:'history',label:'History',icon:'◷'},{id:'prev-scraped',label:'Previously Scraped',icon:'◈'},
     {id:'lead-mgmt',label:'Lead Management',icon:'◉'},{id:'google-import',label:'Google Sheets Import',icon:'◫'},
     {id:'agency',label:'Agency Folders',icon:'▦'},
+    {id:'close-data',label:'Close Leads Data',icon:'☁'},
     {id:'potential',label:'Potential Leads',icon:'★'},{id:'pending',label:'Pending Qualification',icon:'◔'},
     {id:'contacted',label:'Contacted Leads',icon:'✉'},{id:'recycle',label:'For Recycle',icon:'↻'},
     {id:'recent',label:'Recently Assigned',icon:'◑'},
@@ -3239,7 +3240,7 @@ function App() {
         if(!text || !text.trim()){ if(!opts.silent) addToast('Close returned no leads','info'); return; }
         let data; try{ data=JSON.parse(text); }catch(e){ addToast('Close load: response was not JSON','error'); return; }
         const arr=Array.isArray(data)?data:(data.leads||data.results||data.data||[]);
-        const loaded=arr.map(normalizeLead);
+        const loaded=arr.map(normalizeLead).map(l=>({...l,fromClose:true}));  // tag for the Close Leads Data tab
         setLeads(loaded);
         autoFileAgencies(loaded);
         const agencyCount=loaded.filter(l=>l.agency).length;
@@ -3376,6 +3377,7 @@ function App() {
     {id:'lead-mgmt',icon:'◉',label:'Lead Management'},
     {id:'google-import',icon:'◫',label:'Google Sheets'},
     {id:'agency',icon:'▦',label:'Agency'},
+    {id:'close-data',icon:'☁',label:'Close Leads Data'},
   ];
   const NAV_FILTER=[
     {id:'potential',icon:'★',label:'Potential',count:counts.potential,cls:'green'},
@@ -3402,12 +3404,13 @@ function App() {
     if(tab==='duplicates') return <DuplicatesView groups={dupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
     if(tab==='google-import') return <GoogleImportView onImport={importLeads} addToast={addToast}/>;
     if(tab==='agency') return <AgencyView agencies={agencies} setAgencies={setAgencies} leads={vLeads} config={config} currentUser={currentUser} isAdmin={isAdmin} addToast={addToast} onImportSheet={importAgencyLeads}/>;
+    if(tab==='close-data') return <LeadsTable leads={vLeads.filter(l=>l.fromClose)} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="close_leads_data" printTitle="Close Leads Data"/>;
     const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);
     if(camp) return <CampaignView campaign={camp} campColor={camp.color} leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
     return null;
   }
 
-  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders',potential:'Potential Leads',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',potential:'Potential Leads',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // Gate the entire app behind login.
   if(!currentUser) return <LoginScreen config={config} onLogin={login}/>;

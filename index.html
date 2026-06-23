@@ -5091,6 +5091,10 @@ function SettingsDrawer({
       label: 'Agency',
       icon: '🏢'
     },
+    'close-data': {
+      label: 'Close Leads Data',
+      icon: '☁️'
+    },
     potential: {
       label: 'Potential Leads',
       icon: '⭐'
@@ -5857,6 +5861,10 @@ function GlobalSearch({
     id: 'agency',
     label: 'Agency Folders',
     icon: '▦'
+  }, {
+    id: 'close-data',
+    label: 'Close Leads Data',
+    icon: '☁'
   }, {
     id: 'potential',
     label: 'Potential Leads',
@@ -6821,7 +6829,10 @@ function App() {
         return;
       }
       const arr = Array.isArray(data) ? data : data.leads || data.results || data.data || [];
-      const loaded = arr.map(normalizeLead);
+      const loaded = arr.map(normalizeLead).map(l => ({
+        ...l,
+        fromClose: true
+      })); // tag for the Close Leads Data tab
       setLeads(loaded);
       autoFileAgencies(loaded);
       const agencyCount = loaded.filter(l => l.agency).length;
@@ -7062,6 +7073,10 @@ function App() {
     id: 'agency',
     icon: '▦',
     label: 'Agency'
+  }, {
+    id: 'close-data',
+    icon: '☁',
+    label: 'Close Leads Data'
   }];
   const NAV_FILTER = [{
     id: 'potential',
@@ -7248,6 +7263,20 @@ function App() {
       addToast: addToast,
       onImportSheet: importAgencyLeads
     });
+    if (tab === 'close-data') return /*#__PURE__*/React.createElement(LeadsTable, {
+      leads: vLeads.filter(l => l.fromClose),
+      onEdit: saveL,
+      onDelete: delL,
+      onBulkAssign: bulkAssign,
+      showAssigned: true,
+      showCampaign: true,
+      showOrigin: true,
+      config: config,
+      feats: config.features || {},
+      campColorMap: campColorMap,
+      filename: "close_leads_data",
+      printTitle: "Close Leads Data"
+    });
     const camp = (config.campaigns || []).find(c => c.id.toLowerCase() === tab);
     if (camp) return /*#__PURE__*/React.createElement(CampaignView, {
       campaign: camp,
@@ -7268,6 +7297,7 @@ function App() {
     'lead-mgmt': 'Lead Management',
     'google-import': 'Google Sheets Import',
     agency: 'Agency Folders',
+    'close-data': 'Close Leads Data',
     potential: 'Potential Leads',
     pending: 'Pending Qualification',
     contacted: 'Contacted Leads',
