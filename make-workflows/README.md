@@ -10,6 +10,7 @@ trigger, so the diagram is three scenarios:
 | `2-enfinity-slack-replies.make.blueprint.json` | Schedule (poll Close) | **Slack reply notifications** (flow 3) |
 | `3-enfinity-google-form-agency.make.blueprint.json` | Custom webhook (from a Google Form) | **Agency roster intake** (flow 4) |
 | `4-enfinity-close-batch-import.make.blueprint.json` | Custom webhook (from the rep dashboard) | **Rep → Close**: push a rep's Potential leads to Close to run campaigns |
+| `5-enfinity-smartreach.make.blueprint.json` | Custom webhook (from the rep dashboard) | **Rep → SmartReach**: push a rep's emailable Potential leads (name + email only) as prospects |
 
 Import each in Make → **Create a new scenario → ⋯ → Import Blueprint**.
 

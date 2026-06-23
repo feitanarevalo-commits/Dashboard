@@ -1,0 +1,71 @@
+{
+  "name": "Enfinity — SmartReach add prospects (rep → SmartReach)",
+  "flow": [
+    {
+      "id": 1,
+      "module": "gateway:CustomWebHook",
+      "version": 1,
+      "parameters": { "hook": null, "maxResults": 1 },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 0, "y": 0 },
+        "restore": { "parameters": { "hook": { "label": "Enfinity SmartReach Add" } } },
+        "comment": "Receives { action:'smartreach.add', rep, leads:[{name,email}] } from the rep dashboard's 'Send to SmartReach' button (name + email only)."
+      }
+    },
+    {
+      "id": 2,
+      "module": "gateway:WebhookRespond",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "status": "200",
+        "body": "{ \"ok\": true, \"rep\": \"{{1.rep}}\", \"received\": \"{{length(1.leads)}}\" }",
+        "headers": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Access-Control-Allow-Origin", "value": "*" },
+          { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+        ]
+      },
+      "metadata": { "designer": { "x": 300, "y": 0 }, "comment": "Ack the dashboard immediately (with CORS), then add prospects below." }
+    },
+    {
+      "id": 3,
+      "module": "builtin:BasicFeeder",
+      "version": 1,
+      "parameters": {},
+      "mapper": { "array": "{{1.leads}}" },
+      "metadata": { "designer": { "x": 600, "y": 0 }, "comment": "Iterate each prospect (name + email)." }
+    },
+    {
+      "id": 4,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": { "handleErrors": true, "useNewZLibDeFlate": true },
+      "mapper": {
+        "url": "https://api.smartreach.io/api/v1/prospects/",
+        "method": "post",
+        "headers": [
+          { "name": "X-API-KEY", "value": "YOUR_SMARTREACH_API_KEY" },
+          { "name": "Content-Type", "value": "application/json" }
+        ],
+        "qs": [],
+        "bodyType": "raw",
+        "contentType": "application/json",
+        "data": "{ \"email\": \"{{3.email}}\", \"first_name\": \"{{3.name}}\", \"company\": \"{{3.name}}\" }",
+        "serializeUrl": false, "shareCookies": false, "parseResponse": true,
+        "followRedirect": true, "useQuerystring": false, "gzip": true,
+        "useMtls": false, "followAllRedirects": false, "rejectUnauthorized": true,
+        "timeout": "", "ca": "", "authUser": "", "authPass": ""
+      },
+      "metadata": { "designer": { "x": 900, "y": 0 }, "comment": "PLACEHOLDER — confirm SmartReach's API endpoint, auth header, and prospect schema (campaign/list id, first_name/last_name) against SmartReach's API docs. Body carries name + email only." }
+    }
+  ],
+  "metadata": {
+    "instant": true,
+    "version": 1,
+    "scenario": { "roundtrips": 1, "maxErrors": 3, "autoCommit": true, "autoCommitTriggerLast": true, "sequential": false, "confidential": false, "dataloss": false, "dlq": false },
+    "designer": { "orphans": [] },
+    "zone": "eu1.make.com"
+  }
+}
