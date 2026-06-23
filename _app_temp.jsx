@@ -1076,6 +1076,16 @@ function HomeView({leads,config}) {
     const follNums=mine.map(l=>parseFollowers(l.followers)).filter(n=>n>0);
     const byCampaign={}; campDefs.forEach(c=>byCampaign[c.id]=mine.filter(l=>l.campaigns.includes(c.id)).length);
     const byPlatform={}; PLATFORMS.forEach(p=>byPlatform[p]=mine.filter(l=>l.platform===p).length);
+    // Per-campaign KPI split for this rep (Potential / Contacted / HT per campaign).
+    const campaignStats={}; campDefs.forEach(c=>{
+      const cm=mine.filter(l=>l.campaigns.includes(c.id));
+      campaignStats[c.id]={
+        total:cm.length,
+        potential:cm.filter(l=>l.tags.includes('Potential')).length,
+        contacted:cm.filter(l=>l.tags.includes('Contacted')).length,
+        ht:cm.filter(l=>l.tags.includes('HT')).length,
+      };
+    });
     return {
       rep:r,
       total:mine.length,
@@ -1088,7 +1098,7 @@ function HomeView({leads,config}) {
       withEmail:mine.filter(l=>(l.emails||[]).length>0).length,
       follKnown:follNums.length,
       avgFoll:follNums.length?Math.round(follNums.reduce((a,b)=>a+b,0)/follNums.length):0,
-      byCampaign, byPlatform,
+      byCampaign, byPlatform, campaignStats,
     };
   });
   const maxRep=Math.max(1,...repRows.map(r=>r.total));
@@ -1211,6 +1221,54 @@ function HomeView({leads,config}) {
           </table>
         </div>
       </div>
+
+      {campDefs.length>0 && <div className="card">
+        <div className="card-header"><div className="card-title">Per-Rep × Campaign KPIs ({pDef.label})</div></div>
+        <div className="card-body" style={{padding:0,overflowX:'auto'}}>
+          <table className="kpi-table">
+            <thead><tr>
+              <th>Sales Rep</th><th>Campaign</th><th>Total</th>
+              <th>Potential</th><th title="Potential ÷ this campaign's total for the rep">Pot %</th>
+              <th>Contacted</th><th title="Contacted ÷ this campaign's total for the rep">Contact %</th>
+              <th>High Ticket</th>
+            </tr></thead>
+            <tbody>
+              {repRows.map(r=>campDefs.map((c,ci)=>{
+                const s=r.campaignStats[c.id]||{total:0,potential:0,contacted:0,ht:0};
+                const color=campColorMap[c.id]||'var(--accent)';
+                return (
+                  <tr key={r.rep+'|'+c.id} style={ci===campDefs.length-1?{borderBottom:'1px solid var(--border)'}:undefined}>
+                    {ci===0 && <td style={{fontWeight:600}} rowSpan={campDefs.length}>{r.rep}</td>}
+                    <td style={{whiteSpace:'nowrap'}}><span style={{color,fontWeight:700}}>●</span> {c.label}</td>
+                    <td>{s.total}</td>
+                    <td style={{color:'var(--success,#00875A)',fontWeight:600}}>{s.potential}</td>
+                    <td>{pct(s.potential,s.total)}%</td>
+                    <td>{s.contacted}</td>
+                    <td>{pct(s.contacted,s.total)}%</td>
+                    <td>{s.ht}</td>
+                  </tr>
+                );
+              }))}
+              {repRows.length>0 && campDefs.map((c,ci)=>{
+                const t=repRows.reduce((a,r)=>{const s=r.campaignStats[c.id]||{};a.total+=s.total||0;a.potential+=s.potential||0;a.contacted+=s.contacted||0;a.ht+=s.ht||0;return a;},{total:0,potential:0,contacted:0,ht:0});
+                const color=campColorMap[c.id]||'var(--accent)';
+                return (
+                  <tr key={'all|'+c.id} style={{fontWeight:700,...(ci===0?{borderTop:'2px solid var(--border)'}:{})}}>
+                    {ci===0 && <td rowSpan={campDefs.length}>All Reps</td>}
+                    <td style={{whiteSpace:'nowrap'}}><span style={{color}}>●</span> {c.label}</td>
+                    <td>{t.total}</td>
+                    <td>{t.potential}</td>
+                    <td>{pct(t.potential,t.total)}%</td>
+                    <td>{t.contacted}</td>
+                    <td>{pct(t.contacted,t.total)}%</td>
+                    <td>{t.ht}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>}
 
       <div className="grid-2">
         <div className="card">
