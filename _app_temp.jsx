@@ -2196,7 +2196,7 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   function apply(){onConfig(local);addToast('Settings saved','success');onClose();}
   function reset(){setLocal(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));}
 
-  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'prev-scraped':{label:'Previously Scraped',icon:'💾'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},potential:{label:'Potential Leads',icon:'⭐'},unassigned:{label:'Unassigned Leads',icon:'⭕'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},recent:{label:'Recently Assigned',icon:'🕐'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
+  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'prev-scraped':{label:'Previously Scraped',icon:'💾'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},potential:{label:'Potential Leads',icon:'⭐'},pending:{label:'Pending Qualification',icon:'⏳'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},recent:{label:'Recently Assigned',icon:'🕐'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
   const COL_META={thumbnail:'Thumbnail',channelName:'Channel Name',url:'URL',platform:'Platform',niche:'Niche',followers:'Followers',emails:'Email(s)',tags:'Status Tags',campaign:'Campaign',assignedTo:'Assigned To',dateAssigned:'Date Assigned'};
   const FEAT_META={bulkAssign:{label:'Bulk Assign'},exportCSV:{label:'Export CSV'},exportPDF:{label:'Export PDF'},dailyRefresh:{label:'Daily Auto-Refresh'},colorHighlights:{label:'Campaign Color Rows'},webhookTrigger:{label:'n8n Webhook'},historyRestore:{label:'History Restore'},emailValidation:{label:'Email Validation (future)'}};
 
@@ -2483,7 +2483,7 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
     {id:'home',label:'Home',icon:'⊟'},{id:'scraper',label:'Scraper',icon:'◎'},
     {id:'history',label:'History',icon:'◷'},{id:'prev-scraped',label:'Previously Scraped',icon:'◈'},
     {id:'lead-mgmt',label:'Lead Management',icon:'◉'},{id:'google-import',label:'Google Sheets Import',icon:'◫'},
-    {id:'potential',label:'Potential Leads',icon:'★'},{id:'unassigned',label:'Unassigned Leads',icon:'○'},
+    {id:'potential',label:'Potential Leads',icon:'★'},{id:'pending',label:'Pending Qualification',icon:'◔'},
     {id:'contacted',label:'Contacted Leads',icon:'✉'},{id:'recycle',label:'For Recycle',icon:'↻'},
     {id:'recent',label:'Recently Assigned',icon:'◑'},
   ].filter(p=>(config.tabs||{})[p.id]);
@@ -2794,7 +2794,7 @@ function App() {
   const recentCutoff=new Date();recentCutoff.setDate(recentCutoff.getDate()-7);
   const counts={
     potential:vLeads.filter(l=>l.tags.includes('Potential')).length,
-    unassigned:vLeads.filter(l=>(l.campaigns||[]).length===0).length,
+    pending:vLeads.filter(l=>l.assignedTo&&(l.campaigns||[]).length===0).length,
     contacted:vLeads.filter(l=>l.tags.includes('Contacted')).length,
     recycle:vLeads.filter(l=>l.tags.includes('For Recycle')).length,
     recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff).length,
@@ -2811,7 +2811,7 @@ function App() {
   ];
   const NAV_FILTER=[
     {id:'potential',icon:'★',label:'Potential',count:counts.potential,cls:'green'},
-    {id:'unassigned',icon:'○',label:'Unassigned',count:counts.unassigned,cls:'orange'},
+    {id:'pending',icon:'◔',label:'Pending Qualification',count:counts.pending,cls:'orange'},
     {id:'contacted',icon:'✉',label:'Contacted',count:counts.contacted,cls:'blue'},
     {id:'recycle',icon:'↻',label:'For Recycle',count:counts.recycle,cls:'orange'},
     {id:'recent',icon:'◑',label:'Recently Assigned',count:counts.recent,cls:''},
@@ -2827,7 +2827,7 @@ function App() {
     if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
     if(tab==='lead-mgmt') return <LeadMgmtView leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
     if(tab==='potential') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('Potential'))} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="potential_leads" printTitle="Potential Leads"/>;
-    if(tab==='unassigned') return <LeadsTable leads={vLeads.filter(l=>(l.campaigns||[]).length===0)} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="unassigned_leads" printTitle="Unassigned Leads"/>;
+    if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&(l.campaigns||[]).length===0)} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap}/>;
     if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
@@ -2838,7 +2838,7 @@ function App() {
     return null;
   }
 
-  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',potential:'Potential Leads',unassigned:'Unassigned Leads',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',potential:'Potential Leads',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // Gate the entire app behind login.
   if(!currentUser) return <LoginScreen config={config} onLogin={login}/>;
