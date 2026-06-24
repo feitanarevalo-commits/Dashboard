@@ -316,24 +316,42 @@ function exportCloseCSV(leads, filename = 'close_import.csv') {
 // One lead in the shape the Make "Close batch import" scenario iterates over:
 // flat fields for the Close contact + leadJson (full object) for round-tripping.
 function toCloseLeadItem(l) {
-  // JSON-escape string fields so they survive Make's raw JSON body — a " or \
-  // (or newline) in a channel name would otherwise break the body and Close
-  // rejects it with 400 Bad Request.
+  // Make builds Close's JSON body by raw string-substitution, so:
+  //  - j()  : JSON-escaped string for QUOTED body slots ("name":"{{name}}").
+  //           A " or \ in a channel name would otherwise break the body (400).
+  //  - lit(): a JSON LITERAL ("value" or null) for UNQUOTED custom-field slots
+  //           ("custom.cf":{{x}}). Close rejects empty-string custom fields, so
+  //           empty values must become null, not "".
   const j = s => JSON.stringify(String(s == null ? '' : s)).slice(1, -1);
+  const lit = v => {
+    const s = String(v == null ? '' : v).trim();
+    return s ? JSON.stringify(s) : 'null';
+  };
+  const email0 = (l.emails || [])[0] || '';
+  // contacts as a JSON-array literal — Close rejects a contact with an empty
+  // email, so leads with no email get an empty array (no contact) instead.
+  const contacts = email0 ? JSON.stringify([{
+    name: String(l.channelName || ''),
+    emails: [{
+      email: email0,
+      type: 'office'
+    }]
+  }]) : '[]';
   return {
     name: j(l.channelName),
-    email: j((l.emails || [])[0] || ''),
+    email: j(email0),
     emails: l.emails || [],
+    contacts,
     url: j(l.url),
-    platform: j(l.platform),
-    niche: j(l.niche),
-    followers: j(l.followers),
-    status: j((l.tags || []).join(', ')),
-    campaigns: (l.campaigns || []).map(j),
-    assignedTo: j(l.assignedTo || ''),
-    dateAssigned: j(l.dateAssigned || ''),
     closeLeadId: l.closeLeadId || null,
-    leadJson: JSON.stringify(l)
+    leadJson: JSON.stringify(l),
+    platform: lit(l.platform),
+    niche: lit(l.niche),
+    followers: lit(l.followers),
+    status: lit((l.tags || []).join(', ')),
+    campaign: lit((l.campaigns || []).join(', ')),
+    assignedTo: lit(l.assignedTo),
+    dateAssigned: lit(l.dateAssigned)
   };
 }
 
