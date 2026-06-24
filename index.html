@@ -316,18 +316,22 @@ function exportCloseCSV(leads, filename = 'close_import.csv') {
 // One lead in the shape the Make "Close batch import" scenario iterates over:
 // flat fields for the Close contact + leadJson (full object) for round-tripping.
 function toCloseLeadItem(l) {
+  // JSON-escape string fields so they survive Make's raw JSON body — a " or \
+  // (or newline) in a channel name would otherwise break the body and Close
+  // rejects it with 400 Bad Request.
+  const j = s => JSON.stringify(String(s == null ? '' : s)).slice(1, -1);
   return {
-    name: l.channelName,
-    email: (l.emails || [])[0] || '',
+    name: j(l.channelName),
+    email: j((l.emails || [])[0] || ''),
     emails: l.emails || [],
-    url: l.url,
-    platform: l.platform,
-    niche: l.niche,
-    followers: l.followers,
-    status: (l.tags || []).join(', '),
-    campaigns: l.campaigns || [],
-    assignedTo: l.assignedTo,
-    dateAssigned: l.dateAssigned,
+    url: j(l.url),
+    platform: j(l.platform),
+    niche: j(l.niche),
+    followers: j(l.followers),
+    status: j((l.tags || []).join(', ')),
+    campaigns: (l.campaigns || []).map(j),
+    assignedTo: j(l.assignedTo || ''),
+    dateAssigned: j(l.dateAssigned || ''),
     closeLeadId: l.closeLeadId || null,
     leadJson: JSON.stringify(l)
   };
