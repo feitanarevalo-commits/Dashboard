@@ -73,6 +73,18 @@ var DEFAULT_CONFIG = {
   scrapeWebhook:    'https://hook.eu1.make.com/amu0xr93i4q214760zi9rqa1lcxlch55', // YouTube scraper gateway
   smartreachWebhook:'https://hook.eu1.make.com/rk8bt363npu9bclbpquev0avr9na6wal', // SEND prospects → SmartReach (name+email)
 
+  // Close.io lead custom-field IDs (so loaded leads map back from separate
+  // columns instead of the description). Match these to your Close custom fields.
+  closeFields: {
+    platform:  'cf_3I6WswyUcem4aIkbPuH3K0oJOMeBALyl4PDcKfqoN0i',
+    niche:     'cf_NGmsaHgyJvjOncLROmO47XO4KWKyItrKtyb2wvsnIqW',
+    followers: 'cf_YcckM323CSeoUI3AsfjTCnhaNfZxOL6f1oQNKBhGii1',
+    status:    'cf_jCpSD0TPP9wZ7EvfHkYPploR6owqOmw5bN5qBbrNAFb',
+    campaign:  'cf_eXC6A7sn7297LyoHaThBTc6sjLcgqQFFpEJGTxVQMDd',
+    rep:       'cf_1oxAKioArRCXyqidp6OsbEEzWdBD8EU82EtzmOM5ZdH',
+    assigned:  'cf_mV4TQoYmUEAWJOZyqzCjblulhPPyM3NczEb5TSe9zVt',
+  },
+
   // ── Campaigns ── add as many as you need
   campaigns: [
     { id: 'MSN', label: 'MSN', color: '#1366D6' },

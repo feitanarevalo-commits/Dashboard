@@ -6748,34 +6748,40 @@ function App() {
     // Tolerant of both dashboard-shaped leads and RAW Close lead objects
     // (name, contacts[].emails[].email, status_label, our pipe-text description).
     const meta = parseCloseDescription(x.description);
+    // Close custom fields come back keyed as `custom.<id>`; getCf reads ours.
+    const cf = config.closeFields || {};
+    const getCf = k => cf[k] ? x['custom.' + cf[k]] : undefined;
     const closeId = x.closeLeadId || x.close_id || (typeof x.id === 'string' && /^lead_/.test(x.id) ? x.id : null);
     let emails = Array.isArray(x.emails) ? x.emails : x.email ? [x.email] : [];
     if (!emails.length && Array.isArray(x.contacts)) emails = x.contacts.flatMap(c => (c && c.emails || []).map(e => e && e.email).filter(Boolean));
     let tags = Array.isArray(x.tags) ? x.tags : [];
     if (!tags.length) {
-      const st = meta.status || x.status_label;
+      const st = getCf('status') || meta.status || x.status_label;
       if (st) {
         const t = canonTag(st);
         if (t) tags = [t];
       }
     }
     let campaigns = Array.isArray(x.campaigns) ? x.campaigns : [];
-    if (!campaigns.length && meta.campaign) campaigns = meta.campaign.split(/[;,/]/).map(s => s.trim()).filter(Boolean);
+    if (!campaigns.length) {
+      const c = getCf('campaign') || meta.campaign;
+      if (c) campaigns = String(c).split(/[;,/]/).map(s => s.trim()).filter(Boolean);
+    }
     return {
       id: typeof x.id === 'number' ? x.id : Date.now() + Math.floor(Math.random() * 1e6) + i,
       closeLeadId: closeId,
       channelName: x.channelName || x.name || x.display_name || 'lead_' + (i + 1),
       url: x.url || meta.url || '',
-      platform: x.platform || meta.platform || 'YouTube',
-      niche: x.niche || meta.niche || '',
-      followers: x.followers || meta.followers || '',
+      platform: x.platform || getCf('platform') || meta.platform || 'YouTube',
+      niche: x.niche || getCf('niche') || meta.niche || '',
+      followers: x.followers || getCf('followers') || meta.followers || '',
       emails,
       thumbnail: x.thumbnail || '',
       channelId: x.channelId || '',
       tags,
       campaigns,
-      assignedTo: x.assignedTo || meta.rep || null,
-      dateAssigned: x.dateAssigned || meta.assigned || null,
+      assignedTo: x.assignedTo || getCf('rep') || meta.rep || null,
+      dateAssigned: x.dateAssigned || getCf('assigned') || meta.assigned || null,
       lastContactDate: x.lastContactDate || null,
       channels: Array.isArray(x.channels) ? x.channels : [],
       links: Array.isArray(x.links) ? x.links : [],
