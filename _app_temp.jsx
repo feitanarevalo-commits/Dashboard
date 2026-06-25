@@ -1474,8 +1474,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
   function importToClose(r,ls){
     if(onImportClose) onImportClose(r,ls);
   }
-  function importToSmartReach(r,ls){
-    if(onImportSmartReach) onImportSmartReach(r,ls);
+  function importToSmartReach(r,ls,campId,campLabel){
+    if(onImportSmartReach) onImportSmartReach(r,ls,campId,campLabel);
   }
   // myLeads = everything assigned to the rep (drives the stat cards & counts).
   // activeLeads = the rep's work queue shown in the table; once a lead is tagged
