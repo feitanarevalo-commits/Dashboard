@@ -2370,11 +2370,17 @@ function DiscoveryView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,co
 const SCRAPER_LANGUAGES=['All','English','Spanish','French','German','Portuguese','Other'];
 // Dashboard language name → YouTube `relevanceLanguage` code ('' = no preference).
 const LANG_CODES={ All:'', English:'en', Spanish:'es', French:'fr', German:'de', Portuguese:'pt', Other:'' };
+// Pair each language with a representative `regionCode` (market) — relevanceLanguage
+// alone is only a soft bias, so adding the region makes results stay in-language.
+// Tunable: e.g. Spanish→MX (largest Spanish YT), Portuguese→BR, English→US.
+const REGION_CODES={ All:'', English:'US', Spanish:'MX', French:'FR', German:'DE', Portuguese:'BR', Other:'' };
 
 function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,config}) {
   const [platform,setPlatform]=useState('All');
   const [minF,setMinF]=useState('10K');
-  const [language,setLanguage]=useState('All');
+  // Remember the chosen language across reloads so it "sticks".
+  const [language,setLanguage]=useState(()=>{ try{ return localStorage.getItem('srLanguage')||'All'; }catch(e){ return 'All'; } });
+  useEffect(()=>{ try{ localStorage.setItem('srLanguage',language); }catch(e){} },[language]);
   const [keyword,setKeyword]=useState('');
   const [loading,setLoading]=useState(false);
   const feats=config.features||{};
@@ -2395,8 +2401,17 @@ function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,conf
     let pageToken=''; try{ pageToken=localStorage.getItem(pageKey)||''; }catch(e){}
     // Pre-build the optional query fragment so Make just appends it (no fragile
     // conditional logic in the scenario). Empty when first page / all languages.
+    const regionCode=REGION_CODES[language]||'';
     let extraQuery='';
-    if(relevanceLanguage) extraQuery+='&relevanceLanguage='+relevanceLanguage;
+    if(relevanceLanguage){
+      // A chosen language uses relevance ordering + region so results stay
+      // in-language (order=date would flood with high-upload regions instead).
+      extraQuery+='&relevanceLanguage='+relevanceLanguage;
+      if(regionCode) extraQuery+='&regionCode='+regionCode;
+    } else {
+      // No language → newest-first for freshness.
+      extraQuery+='&order=date';
+    }
     if(pageToken) extraQuery+='&pageToken='+encodeURIComponent(pageToken);
     const payload={ type:'search', platform, keyword:kw, interest:'', language, relevanceLanguage, order:'date', pageToken, extraQuery, minFollowers:parseFollowers(minF), maxFollowers:null, sortBy:'date', limit:25 };
     setLoading(true);
