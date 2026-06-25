@@ -92,11 +92,13 @@ var DEFAULT_CONFIG = {
   // and the test campaign are intentionally left out. Re-pull when reps add or
   // rename campaigns (Make RPC smartreach-io:getCampaignList on connection 8529390).
   smartReachCampaigns: {
-    Pen:   [{ id: 195653, label: 'PENN | VVV' }, { id: 201846, label: 'Penn New | Boost' }],
-    Chase: [{ id: 196002, label: 'CHASE | VVV' }, { id: 195047, label: 'CHASE | ADCE' }],
-    Mikka: [{ id: 200573, label: 'MIKKA | VVV' }, { id: 195045, label: 'MIKKA | ADCE' }],
-    Rein:  [{ id: 195648, label: 'REIN | VVV' }, { id: 194054, label: 'REIN | ADCE' }, { id: 203665, label: 'REIN | MSN HIGH TICKET' }],
-    Chai:  [{ id: 198593, label: 'CHAI | VVV' }, { id: 194062, label: 'CHAI | ADCE' }, { id: 200522, label: 'CHAI | CREATORSHIELD' }, { id: 195643, label: 'CHAI | ENFINISHIELD' }, { id: 203661, label: 'CHAI | MSN HIGH TICKET' }],
+    Pen:     [{ id: 195653, label: 'PENN | VVV' }, { id: 201846, label: 'Penn New | Boost' }, { id: 203950, label: 'PENN | TERMINATED VVV' }],
+    Chase:   [{ id: 196002, label: 'CHASE | VVV' }, { id: 195047, label: 'CHASE | ADCE' }, { id: 203942, label: 'CHASE | TERMINATED VVV' }],
+    Mikka:   [{ id: 200573, label: 'MIKKA | VVV' }, { id: 195045, label: 'MIKKA | ADCE' }, { id: 203956, label: 'MIKKA | TERMINATED VVV' }],
+    Rein:    [{ id: 195648, label: 'REIN | VVV' }, { id: 194054, label: 'REIN | ADCE' }, { id: 203665, label: 'REIN | MSN HIGH TICKET' }],
+    Chai:    [{ id: 198593, label: 'CHAI | VVV' }, { id: 194062, label: 'CHAI | ADCE' }, { id: 200522, label: 'CHAI | CREATORSHIELD' }, { id: 195643, label: 'CHAI | ENFINISHIELD' }, { id: 203661, label: 'CHAI | MSN HIGH TICKET' }],
+    Jon:     [{ id: 203163, label: 'Jonathan | VVV' }, { id: 201174, label: 'Jonathan | CREATORSHIELD' }, { id: 194006, label: 'Jonathan | BOOST' }],
+    Czarina: [{ id: 195054, label: 'CZARINA | ADCE & BOOST' }, { id: 195652, label: 'CZARINA | MCN' }],
   },
 
   // ── Campaigns ── add as many as you need
@@ -106,9 +108,9 @@ var DEFAULT_CONFIG = {
   ],
 
   // ── Sales Reps ── names and appearance
-  salesReps:  ['Pen', 'Rein', 'Chase', 'Mikka'],
-  repColors:  { Pen: '#6366F1', Rein: '#10B981', Chase: '#F59E0B', Mikka: '#EC4899' },
-  repEmojis:  { Pen: '', Rein: '', Chase: '', Mikka: '' },
+  salesReps:  ['Pen', 'Rein', 'Chase', 'Mikka', 'Chai', 'Jon', 'Czarina'],
+  repColors:  { Pen: '#6366F1', Rein: '#10B981', Chase: '#F59E0B', Mikka: '#EC4899', Chai: '#0EA5E9', Jon: '#8B5CF6', Czarina: '#14B8A6' },
+  repEmojis:  { Pen: '', Rein: '', Chase: '', Mikka: '', Chai: '', Jon: '', Czarina: '' },
   repPhotos:  {},
 
   // ── USERS & LOGIN ──────────────────────────────────────────
@@ -118,14 +120,17 @@ var DEFAULT_CONFIG = {
   // ⚠ SECURITY NOTE: passwords are stored client-side. This gates casual
   //   access for an internal team, but anyone who views the page source can
   //   read them. It is NOT bank-grade security. Change the defaults below.
-  //   Admins are: Robert, Chai, Rein.
+  //   Admins are: Robert, Chai, Rein, Jon, Jake, Czarina.
   users: [
-    { name: 'Robert', role: 'admin',    password: 'enfinity' },
-    { name: 'Chai',   role: 'admin',    password: 'enfinity' },
-    { name: 'Rein',   role: 'admin',    password: 'enfinity' },
-    { name: 'Pen',    role: 'employee', password: 'enfinity' },
-    { name: 'Chase',  role: 'employee', password: 'enfinity' },
-    { name: 'Mikka',  role: 'employee', password: 'enfinity' },
+    { name: 'Robert',  role: 'admin',    password: 'enfinity' },
+    { name: 'Chai',    role: 'admin',    password: 'enfinity' },
+    { name: 'Rein',    role: 'admin',    password: 'enfinity' },
+    { name: 'Jon',     role: 'admin',    password: 'enfinity' },
+    { name: 'Jake',    role: 'admin',    password: 'enfinity' },
+    { name: 'Czarina', role: 'admin',    password: 'enfinity' },
+    { name: 'Pen',     role: 'employee', password: 'enfinity' },
+    { name: 'Chase',   role: 'employee', password: 'enfinity' },
+    { name: 'Mikka',   role: 'employee', password: 'enfinity' },
   ],
 
   // Tags shown in the Settings drawer "Status Tags" section
