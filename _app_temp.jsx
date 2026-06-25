@@ -1452,10 +1452,21 @@ function HomeView({leads,config}) {
 }
 
 // ─── REP AVATAR COMPONENT ────────────────────────────────
+// ── User profiles (photo + title/email/birthday) ───────────
+// Stored per-browser in localStorage (like passwords — no backend to sync).
+// profiles = { <name>: { photo, title, email, birthday } }.
+function loadProfiles(){ try{ return JSON.parse(localStorage.getItem('profiles')||'{}')||{}; }catch(e){ return {}; } }
+function getProfile(name){ return loadProfiles()[name] || {}; }
+function saveProfileData(name,data){
+  const all=loadProfiles(); all[name]={...(all[name]||{}),...data};
+  try{ localStorage.setItem('profiles',JSON.stringify(all)); }catch(e){}
+}
+
 function RepAvatar({rep,config,size=36,online=false,bgOverride=null}) {
   const color=(config.repColors||{})[rep]||'#6366F1';
   const emoji=(config.repEmojis||{})[rep]||'';
-  const photo=(config.repPhotos||{})[rep]||'';
+  // A photo uploaded via Edit Profile (localStorage) wins over a config photo.
+  const photo=getProfile(rep).photo || (config.repPhotos||{})[rep] || '';
   const fontSize=emoji?Math.round(size*.48):Math.round(size*.38);
   const dotSize=Math.max(6,Math.round(size*.28));
   const borderColor=bgOverride||'var(--bg)';
@@ -2751,7 +2762,9 @@ function LoginScreen({config,onLogin}) {
         {list.map(u=>(
           <div key={u.name} className="lg-card" tabIndex={0} role="button"
             onClick={()=>pick(u)} onKeyDown={e=>{if(e.key==='Enter')pick(u);}}>
-            <div className="lg-avatar" style={{background:colorFor(u),boxShadow:`0 6px 16px -6px ${colorFor(u)}`}}>{initial(u)}</div>
+            <div className="lg-avatar" style={{background:getProfile(u.name).photo?'transparent':colorFor(u),boxShadow:`0 6px 16px -6px ${colorFor(u)}`}}>
+              {getProfile(u.name).photo ? <img src={getProfile(u.name).photo} alt={u.name}/> : initial(u)}
+            </div>
             <div className="lg-card-name">{u.name}</div>
           </div>
         ))}
@@ -2810,7 +2823,9 @@ function LoginScreen({config,onLogin}) {
               </div>
             ) : (
               <form onSubmit={submit}>
-                <div className="lg-m-avatar" style={{background:colorFor(selected)}}>{initial(selected)}</div>
+                <div className="lg-m-avatar" style={{background:getProfile(selected.name).photo?'transparent':colorFor(selected)}}>
+                  {getProfile(selected.name).photo ? <img src={getProfile(selected.name).photo} alt={selected.name}/> : initial(selected)}
+                </div>
                 <div className="lg-m-as">Signing in as</div>
                 <div className="lg-m-name">{selected.name}</div>
                 <span className={`lg-badge ${selected.role==='admin'?'admin':'sales'}`}>{selected.role==='admin'?'ADMIN':'SALES'}</span>
@@ -2877,6 +2892,89 @@ function ChangePasswordModal({user,onClose,addToast}) {
             <div className="modal-footer-right">
               <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
               <button type="submit" className="btn btn-primary">Save Password</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── EDIT PROFILE MODAL ───────────────────────────────────
+// Photo + title/email/birthday for a user. Photo is resized to a 240px square
+// JPEG and stored (with the other fields) per-browser in localStorage.
+function ProfileModal({user,config,onClose,addToast}) {
+  const name=user.name;
+  const ex=getProfile(name);
+  const color=(config.repColors||{})[name]||'#6366F1';
+  const [photo,setPhoto]=useState(ex.photo||'');
+  const [title,setTitle]=useState(ex.title||'');
+  const [email,setEmail]=useState(ex.email||'');
+  const [birthday,setBirthday]=useState(ex.birthday||'');
+  const fileRef=useRef(null);
+
+  function onFile(e){
+    const f=e.target.files&&e.target.files[0]; if(e.target) e.target.value='';
+    if(!f) return;
+    if(!/^image\//.test(f.type)){ addToast('Please choose an image file','error'); return; }
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        // center-crop to a square and downscale to 240px to keep localStorage small
+        const S=240, c=document.createElement('canvas'); c.width=S; c.height=S;
+        const ctx=c.getContext('2d');
+        const m=Math.min(img.width,img.height), sx=(img.width-m)/2, sy=(img.height-m)/2;
+        ctx.drawImage(img,sx,sy,m,m,0,0,S,S);
+        try{ setPhoto(c.toDataURL('image/jpeg',0.82)); }catch(err){ addToast('Could not process that image','error'); }
+      };
+      img.onerror=()=>addToast('Could not load that image','error');
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(f);
+  }
+  function save(e){
+    e&&e.preventDefault();
+    saveProfileData(name,{photo,title:title.trim(),email:email.trim(),birthday});
+    addToast('Profile saved on this device','success');
+    onClose();
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:440}}>
+        <div className="modal-header">
+          <div>
+            <h2>Edit Profile</h2>
+            <p style={{color:'var(--text-dim)',fontSize:13,marginTop:3}}>{name} · {user.role}</p>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
+        </div>
+        <form onSubmit={save} style={{display:'flex',flexDirection:'column',gap:14}}>
+          <div style={{display:'flex',alignItems:'center',gap:16}}>
+            <div className="rep-avatar" style={{width:72,height:72,background:photo?'transparent':color,color:'#fff',fontSize:28,flexShrink:0}}>
+              {photo ? <img src={photo} alt={name}/> : name[0].toUpperCase()}
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={onFile}/>
+              <button type="button" className="btn btn-outline btn-sm" onClick={()=>fileRef.current&&fileRef.current.click()}>📷 {photo?'Change photo':'Upload photo'}</button>
+              {photo && <button type="button" className="btn btn-ghost btn-sm" onClick={()=>setPhoto('')}>Remove photo</button>}
+            </div>
+          </div>
+          <div className="form-group"><label className="form-label">Title</label>
+            <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Senior Sales Rep" autoFocus/></div>
+          <div className="form-group"><label className="form-label">Email</label>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@enfinity.co"/></div>
+          <div className="form-group"><label className="form-label">Birthday</label>
+            <input type="date" value={birthday} onChange={e=>setBirthday(e.target.value)}/></div>
+          <div style={{fontSize:11,color:'var(--text-light)',lineHeight:1.5,background:'var(--bg)',padding:'8px 10px',borderRadius:'var(--radius)'}}>
+            ⓘ Your profile is saved in <b>this browser only</b> — there's no server to sync it across devices yet.
+          </div>
+          <div className="modal-footer">
+            <div/>
+            <div className="modal-footer-right">
+              <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+              <button type="submit" className="btn btn-primary">Save Profile</button>
             </div>
           </div>
         </form>
@@ -3192,6 +3290,7 @@ function App() {
   // stable leadKey, so folders survive reloads even though leads are in-memory.
   const [agencies,setAgencies]=useState(()=>{ try{return JSON.parse(localStorage.getItem('agencies')||'[]');}catch(e){return [];} });
   const [showChangePw,setShowChangePw]=useState(false);
+  const [showProfile,setShowProfile]=useState(false);
   const [showSearch,setShowSearch]=useState(false);
   const [searchLead,setSearchLead]=useState(null);
   const [closeSyncing,setCloseSyncing]=useState(false);
@@ -3582,7 +3681,9 @@ function App() {
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </button>
           {(config.features||{}).webhookTrigger && <div className="topbar-badge"><span className="webhook-dot"></span> n8n Live</div>}
-          <div className="topbar-user-pill" title={`Signed in as ${currentUser.name} (${currentUser.role})`}>
+          <div className="topbar-user-pill" role="button" tabIndex={0} style={{cursor:'pointer'}}
+            title={`${currentUser.name} — click to edit your profile`}
+            onClick={()=>setShowProfile(true)} onKeyDown={e=>{if(e.key==='Enter')setShowProfile(true);}}>
             <RepAvatar rep={currentUser.name} config={config} size={26} online bgOverride="var(--card)"/>
             <div className="topbar-rep-name">{currentUser.name}</div>
             {isAdmin && <span className="role-chip">ADMIN</span>}
@@ -3681,6 +3782,7 @@ function App() {
       <Toast toasts={toasts}/>
       {showSettings && <SettingsDrawer config={config} onConfig={applyConfig} onClose={()=>setShowSettings(false)} addToast={addToast}/>}
       {showChangePw && <ChangePasswordModal user={currentUser} onClose={()=>setShowChangePw(false)} addToast={addToast}/>}
+      {showProfile && <ProfileModal user={currentUser} config={config} onClose={()=>setShowProfile(false)} addToast={addToast}/>}
       {showSearch && <GlobalSearch leads={leads} config={config} isAdmin={isAdmin}
         onClose={()=>setShowSearch(false)}
         onNavigate={id=>{setShowRepSelect(false);setTab(id);}}
