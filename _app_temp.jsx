@@ -3336,19 +3336,25 @@ function App() {
     const CLOSE_WEBHOOK=(config.closeWebhook||'').trim();
     if(!CLOSE_WEBHOOK || CLOSE_WEBHOOK.includes('your-')){ addToast('Set the Close Save Webhook in ⚙ Customize first','info'); return; }
     if(!repLeads || !repLeads.length){ addToast(`No leads to send for ${rep}`,'info'); return; }
-    // Per-lead shape the Make/n8n "close batch import" scenario iterates over;
-    // leadJson round-trips the full dashboard object into Close's description.
-    const payload={action:'close.create', rep, leads:repLeads.map(toCloseLeadItem)};
+    // Importing to Close = the campaign now contacts the lead, so it becomes
+    // Contacted everywhere: the value written to Close's Status field AND the
+    // dashboard tag both flip to Contacted (and we stamp the contact date,
+    // which starts the auto-recycle timer). markContacted is single-select:
+    // it drops Potential and sets Contacted.
+    const today=new Date().toISOString().split('T')[0];
+    const markContacted=l=>({...l, tags:[...(l.tags||[]).filter(t=>t!=='Potential'&&t!=='Contacted'),'Contacted'], lastContactDate:today});
+    // Build the push from the contacted shape so Close's Status field = Contacted.
+    const payload={action:'close.create', rep, leads:repLeads.map(l=>toCloseLeadItem(markContacted(l)))};
     const sentIds=new Set(repLeads.map(l=>l.id));
     setCloseSyncing(true);
     addToast(`Sending ${repLeads.length} lead(s) to Close.io for ${rep}…`,'info');
     fetch(CLOSE_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
       .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
       .then(()=>{
-        // Flip the sent leads Fresh → Imported so they aren't pushed (and
-        // duplicated in Close) on the next click.
-        setLeads(ls=>ls.map(l=>sentIds.has(l.id)?{...l,importedToClose:true}:l));
-        addToast(`✓ ${repLeads.length} lead(s) sent to Close.io for ${rep}`,'success'); logH('⬆',`Close.io import: ${repLeads.length} lead(s) for ${rep}`);
+        // Flip the sent leads Fresh → Imported (so they aren't re-pushed/duplicated)
+        // and Potential → Contacted with today's contact date.
+        setLeads(ls=>ls.map(l=>sentIds.has(l.id)?{...markContacted(l),importedToClose:true}:l));
+        addToast(`✓ ${repLeads.length} lead(s) sent to Close.io & marked Contacted for ${rep}`,'success'); logH('⬆',`Close.io import: ${repLeads.length} lead(s) for ${rep} (marked Contacted)`);
       })
       .catch(e=>{ addToast(`Close.io import failed for ${rep}: ${e.message}`,'error'); logH('⬆',`Close.io import failed for ${rep}`); })
       .finally(()=>setCloseSyncing(false));
