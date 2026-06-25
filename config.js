@@ -96,7 +96,7 @@ var DEFAULT_CONFIG = {
     Chase:   [{ id: 196002, label: 'CHASE | VVV' }, { id: 195047, label: 'CHASE | ADCE' }, { id: 203942, label: 'CHASE | TERMINATED VVV' }],
     Mikka:   [{ id: 200573, label: 'MIKKA | VVV' }, { id: 195045, label: 'MIKKA | ADCE' }, { id: 203956, label: 'MIKKA | TERMINATED VVV' }],
     Rein:    [{ id: 195648, label: 'REIN | VVV' }, { id: 194054, label: 'REIN | ADCE' }, { id: 203665, label: 'REIN | MSN HIGH TICKET' }],
-    Chai:    [{ id: 198593, label: 'CHAI | VVV' }, { id: 194062, label: 'CHAI | ADCE' }, { id: 200522, label: 'CHAI | CREATORSHIELD' }, { id: 195643, label: 'CHAI | ENFINISHIELD' }, { id: 203661, label: 'CHAI | MSN HIGH TICKET' }],
+    Chai:    [{ id: 206087, label: 'Dashboard import test.' }, { id: 198593, label: 'CHAI | VVV' }, { id: 194062, label: 'CHAI | ADCE' }, { id: 200522, label: 'CHAI | CREATORSHIELD' }, { id: 195643, label: 'CHAI | ENFINISHIELD' }, { id: 203661, label: 'CHAI | MSN HIGH TICKET' }],
     Jon:     [{ id: 203163, label: 'Jonathan | VVV' }, { id: 201174, label: 'Jonathan | CREATORSHIELD' }, { id: 194006, label: 'Jonathan | BOOST' }],
     Czarina: [{ id: 195054, label: 'CZARINA | ADCE & BOOST' }, { id: 195652, label: 'CZARINA | MCN' }],
   },
