@@ -5156,10 +5156,6 @@ function SettingsDrawer({
       label: 'Close Leads Data',
       icon: '☁️'
     },
-    potential: {
-      label: 'Potential Leads',
-      icon: '⭐'
-    },
     pending: {
       label: 'Pending Qualification',
       icon: '⏳'
@@ -5926,10 +5922,6 @@ function GlobalSearch({
     id: 'close-data',
     label: 'Close Leads Data',
     icon: '☁'
-  }, {
-    id: 'potential',
-    label: 'Potential Leads',
-    icon: '★'
   }, {
     id: 'pending',
     label: 'Pending Qualification',
@@ -7171,12 +7163,6 @@ function App() {
     label: 'Close Leads Data'
   }];
   const NAV_FILTER = [{
-    id: 'potential',
-    icon: '★',
-    label: 'Potential',
-    count: counts.potential,
-    cls: 'green'
-  }, {
     id: 'pending',
     icon: '◔',
     label: 'Pending Qualification',
@@ -7269,20 +7255,6 @@ function App() {
       onBulkAssign: bulkAssign,
       addToast: addToast,
       config: config
-    });
-    if (tab === 'potential') return /*#__PURE__*/React.createElement(LeadsTable, {
-      leads: vLeads.filter(l => l.tags.includes('Potential')),
-      onEdit: saveL,
-      onDelete: delL,
-      onBulkAssign: bulkAssign,
-      showAssigned: true,
-      showCampaign: true,
-      showOrigin: true,
-      config: config,
-      feats: config.features || {},
-      campColorMap: campColorMap,
-      filename: "potential_leads",
-      printTitle: "Potential Leads"
     });
     if (tab === 'pending') return /*#__PURE__*/React.createElement(LeadsTable, {
       leads: vLeads.filter(l => l.assignedTo && (l.campaigns || []).length === 0),
@@ -7390,7 +7362,6 @@ function App() {
     'google-import': 'Google Sheets Import',
     agency: 'Agency Folders',
     'close-data': 'Close Leads Data',
-    potential: 'Potential Leads',
     pending: 'Pending Qualification',
     contacted: 'Contacted Leads',
     recycle: 'For Recycle',
