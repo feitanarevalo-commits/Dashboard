@@ -1500,6 +1500,41 @@ function saveProfileData(name,data){
   try{ localStorage.setItem('profiles',JSON.stringify(all)); }catch(e){}
 }
 
+// ── Replies / interest feed (🔔) ──────────────────────────
+// One per reply from SmartReach (prospect replied / category) or Close (inbound
+// email). Scoped to a rep so each person sees only their own.
+var REPLY_SENTIMENTS={
+  'Interested':     {cls:'rs-int'},
+  'Neutral':        {cls:'rs-neu'},
+  'Not interested': {cls:'rs-not'},
+  'Reply':          {cls:'rs-rep'},
+};
+function inferSentiment(cat){
+  if(!cat) return 'Reply';
+  const lc=String(cat).toLowerCase();
+  if(/not\s*interest|unsubscrib|opt.?out|bad\s*fit|do\s*not|negative/.test(lc)) return 'Not interested';
+  if(/interest|meeting|positive|warm|hot|qualified|book/.test(lc)) return 'Interested';
+  return 'Neutral';
+}
+function replyKey(r){ return (r.source||'')+'|'+((r.email||r.name||'')+'').toLowerCase()+'|'+(r.when||''); }
+function normalizeReply(x,i){
+  x=x||{};
+  const name=x.name||[x.first_name,x.last_name].filter(Boolean).join(' ').trim()||x.channelName||x.email||'(unknown)';
+  return {
+    id: x.id!=null?String(x.id):('r'+i+'_'+((x.email||name)+'').toLowerCase()),
+    rep: x.rep||x.owner||x.assignedTo||'',
+    source: x.source || (x.prospect_category!=null||x.owner_id!=null||x.owner_uuid!=null ? 'SmartReach' : 'Close'),
+    name, email: x.email||'',
+    sentiment: x.sentiment || inferSentiment(x.prospect_category||x.category),
+    snippet: x.snippet||x.body||x.message||'',
+    when: x.when||x.updated_at||x.last_contacted_at||x.date||'',
+    campaign: x.campaign||x.list||''
+  };
+}
+function fmtReplyWhen(w){ if(!w) return ''; const d=new Date(w); return isNaN(d.getTime())?'':d.toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
+function repliesSeenSet(name){ try{ return new Set(JSON.parse(localStorage.getItem('repliesSeen_'+name)||'[]')); }catch(e){ return new Set(); } }
+function markRepliesSeen(name,ids){ try{ const s=repliesSeenSet(name); ids.forEach(id=>s.add(id)); localStorage.setItem('repliesSeen_'+name,JSON.stringify([...s])); }catch(e){} }
+
 function RepAvatar({rep,config,size=36,online=false,bgOverride=null}) {
   const color=(config.repColors||{})[rep]||'#6366F1';
   const emoji=(config.repEmojis||{})[rep]||'';
@@ -3332,6 +3367,9 @@ function App() {
   const [agencies,setAgencies]=useState(()=>{ try{return JSON.parse(localStorage.getItem('agencies')||'[]');}catch(e){return [];} });
   const [showChangePw,setShowChangePw]=useState(false);
   const [showProfile,setShowProfile]=useState(false);
+  const [replies,setReplies]=useState(()=>(typeof SAMPLE_REPLIES!=='undefined'?SAMPLE_REPLIES:[]).map(normalizeReply));
+  const [showBell,setShowBell]=useState(false);
+  const [repliesLoading,setRepliesLoading]=useState(false);
   const [showSearch,setShowSearch]=useState(false);
   const [searchLead,setSearchLead]=useState(null);
   const [closeSyncing,setCloseSyncing]=useState(false);
@@ -3504,6 +3542,25 @@ function App() {
       });
       return next;
     });
+  }
+
+  // Pull replies/interest from the SmartReach + Close feeds (when wired) and
+  // merge into the 🔔 panel. No-op (with a hint) until the webhooks are set.
+  function loadReplies(opts){
+    opts=opts||{};
+    const urls=[config.repliesWebhook,config.closeRepliesWebhook].map(u=>(u||'').trim()).filter(u=>u && !u.includes('your-'));
+    if(!urls.length){ if(!opts.silent) addToast('No replies feed connected yet — SmartReach/Close reply webhooks aren’t wired','info'); return; }
+    setRepliesLoading(true);
+    Promise.all(urls.map(u=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.ok?r.text():'').catch(()=>'')))
+      .then(texts=>{
+        let all=[];
+        texts.forEach(t=>{ if(!t||!t.trim())return; try{ const d=JSON.parse(t); const arr=Array.isArray(d)?d:(d.replies||d.data||d.prospects||[]); all=all.concat(arr); }catch(e){} });
+        const seen={}, uniq=[];
+        all.map(normalizeReply).forEach(r=>{ const k=replyKey(r); if(!seen[k]){seen[k]=1;uniq.push(r);} });
+        setReplies(uniq);
+        if(!opts.silent) addToast(`Loaded ${uniq.length} repl${uniq.length===1?'y':'ies'}`,'success');
+      })
+      .finally(()=>setRepliesLoading(false));
   }
 
   function loadFromClose(opts){
@@ -3722,6 +3779,45 @@ function App() {
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </button>
           {(config.features||{}).webhookTrigger && <div className="topbar-badge"><span className="webhook-dot"></span> n8n Live</div>}
+          {(()=>{
+            const myReplies = isAdmin ? replies : replies.filter(r=>(r.rep||'')===currentUser.name);
+            const seen = repliesSeenSet(currentUser.name);
+            const unread = myReplies.filter(r=>!seen.has(r.id)).length;
+            return (
+              <div className="bell-wrap">
+                <button className="btn btn-outline btn-sm bell-btn" title="Replies & interest"
+                  onClick={()=>{ if(!showBell) markRepliesSeen(currentUser.name, myReplies.map(r=>r.id)); setShowBell(s=>!s); }}>
+                  🔔{unread>0 && <span className="bell-badge">{unread>9?'9+':unread}</span>}
+                </button>
+                {showBell && <>
+                  <div className="bell-backdrop" onClick={()=>setShowBell(false)}/>
+                  <div className="bell-dropdown">
+                    <div className="bell-head">
+                      <span>🔔 Replies &amp; Interest{isAdmin?' · all reps':''}</span>
+                      <button className="btn btn-ghost btn-xs" onClick={()=>loadReplies()} disabled={repliesLoading}>{repliesLoading?'…':'⟳ Check'}</button>
+                    </div>
+                    <div className="bell-list">
+                      {myReplies.length===0
+                        ? <div className="bell-empty"><div style={{fontSize:24,marginBottom:6}}>🔔</div>No replies yet.<div className="bell-empty-sub">You'll be notified here when a prospect replies or shows interest in your campaigns — across SmartReach &amp; Close.</div></div>
+                        : myReplies.slice(0,40).map(r=>(
+                          <div key={r.id} className={`bell-item${seen.has(r.id)?'':' unread'}`}>
+                            <div className="bell-item-top">
+                              <span className={`rs-chip ${(REPLY_SENTIMENTS[r.sentiment]||{}).cls||'rs-rep'}`}>{r.sentiment}</span>
+                              <span className="bell-src">{r.source==='Close'?'☁ Close':'✉ SmartReach'}</span>
+                              {isAdmin && r.rep && <span className="bell-rep">{r.rep}</span>}
+                              <span className="bell-when">{fmtReplyWhen(r.when)}</span>
+                            </div>
+                            <div className="bell-name">{r.name}{r.email?` · ${r.email}`:''}</div>
+                            {r.snippet && <div className="bell-snip">{r.snippet.slice(0,140)}</div>}
+                            {r.campaign && <div className="bell-camp">▸ {r.campaign}</div>}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </>}
+              </div>
+            );
+          })()}
           <div className="profile-pill-wrap">
             <div className="topbar-user-pill" role="button" tabIndex={0} style={{cursor:'pointer'}}
               onClick={()=>setShowProfile(true)} onKeyDown={e=>{if(e.key==='Enter')setShowProfile(true);}}>

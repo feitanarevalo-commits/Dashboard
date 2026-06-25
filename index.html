@@ -2778,6 +2778,71 @@ function saveProfileData(name, data) {
     localStorage.setItem('profiles', JSON.stringify(all));
   } catch (e) {}
 }
+
+// ── Replies / interest feed (🔔) ──────────────────────────
+// One per reply from SmartReach (prospect replied / category) or Close (inbound
+// email). Scoped to a rep so each person sees only their own.
+var REPLY_SENTIMENTS = {
+  'Interested': {
+    cls: 'rs-int'
+  },
+  'Neutral': {
+    cls: 'rs-neu'
+  },
+  'Not interested': {
+    cls: 'rs-not'
+  },
+  'Reply': {
+    cls: 'rs-rep'
+  }
+};
+function inferSentiment(cat) {
+  if (!cat) return 'Reply';
+  const lc = String(cat).toLowerCase();
+  if (/not\s*interest|unsubscrib|opt.?out|bad\s*fit|do\s*not|negative/.test(lc)) return 'Not interested';
+  if (/interest|meeting|positive|warm|hot|qualified|book/.test(lc)) return 'Interested';
+  return 'Neutral';
+}
+function replyKey(r) {
+  return (r.source || '') + '|' + ((r.email || r.name || '') + '').toLowerCase() + '|' + (r.when || '');
+}
+function normalizeReply(x, i) {
+  x = x || {};
+  const name = x.name || [x.first_name, x.last_name].filter(Boolean).join(' ').trim() || x.channelName || x.email || '(unknown)';
+  return {
+    id: x.id != null ? String(x.id) : 'r' + i + '_' + ((x.email || name) + '').toLowerCase(),
+    rep: x.rep || x.owner || x.assignedTo || '',
+    source: x.source || (x.prospect_category != null || x.owner_id != null || x.owner_uuid != null ? 'SmartReach' : 'Close'),
+    name,
+    email: x.email || '',
+    sentiment: x.sentiment || inferSentiment(x.prospect_category || x.category),
+    snippet: x.snippet || x.body || x.message || '',
+    when: x.when || x.updated_at || x.last_contacted_at || x.date || '',
+    campaign: x.campaign || x.list || ''
+  };
+}
+function fmtReplyWhen(w) {
+  if (!w) return '';
+  const d = new Date(w);
+  return isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric'
+  });
+}
+function repliesSeenSet(name) {
+  try {
+    return new Set(JSON.parse(localStorage.getItem('repliesSeen_' + name) || '[]'));
+  } catch (e) {
+    return new Set();
+  }
+}
+function markRepliesSeen(name, ids) {
+  try {
+    const s = repliesSeenSet(name);
+    ids.forEach(id => s.add(id));
+    localStorage.setItem('repliesSeen_' + name, JSON.stringify([...s]));
+  } catch (e) {}
+}
 function RepAvatar({
   rep,
   config,
@@ -7026,6 +7091,9 @@ function App() {
   });
   const [showChangePw, setShowChangePw] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [replies, setReplies] = useState(() => (typeof SAMPLE_REPLIES !== 'undefined' ? SAMPLE_REPLIES : []).map(normalizeReply));
+  const [showBell, setShowBell] = useState(false);
+  const [repliesLoading, setRepliesLoading] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchLead, setSearchLead] = useState(null);
   const [closeSyncing, setCloseSyncing] = useState(false);
@@ -7288,6 +7356,46 @@ function App() {
       });
       return next;
     });
+  }
+
+  // Pull replies/interest from the SmartReach + Close feeds (when wired) and
+  // merge into the 🔔 panel. No-op (with a hint) until the webhooks are set.
+  function loadReplies(opts) {
+    opts = opts || {};
+    const urls = [config.repliesWebhook, config.closeRepliesWebhook].map(u => (u || '').trim()).filter(u => u && !u.includes('your-'));
+    if (!urls.length) {
+      if (!opts.silent) addToast('No replies feed connected yet — SmartReach/Close reply webhooks aren’t wired', 'info');
+      return;
+    }
+    setRepliesLoading(true);
+    Promise.all(urls.map(u => fetch(u, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: '{}'
+    }).then(r => r.ok ? r.text() : '').catch(() => ''))).then(texts => {
+      let all = [];
+      texts.forEach(t => {
+        if (!t || !t.trim()) return;
+        try {
+          const d = JSON.parse(t);
+          const arr = Array.isArray(d) ? d : d.replies || d.data || d.prospects || [];
+          all = all.concat(arr);
+        } catch (e) {}
+      });
+      const seen = {},
+        uniq = [];
+      all.map(normalizeReply).forEach(r => {
+        const k = replyKey(r);
+        if (!seen[k]) {
+          seen[k] = 1;
+          uniq.push(r);
+        }
+      });
+      setReplies(uniq);
+      if (!opts.silent) addToast(`Loaded ${uniq.length} repl${uniq.length === 1 ? 'y' : 'ies'}`, 'success');
+    }).finally(() => setRepliesLoading(false));
   }
   function loadFromClose(opts) {
     opts = opts || {};
@@ -7847,7 +7955,64 @@ function App() {
     className: "topbar-badge"
   }, /*#__PURE__*/React.createElement("span", {
     className: "webhook-dot"
-  }), " n8n Live"), /*#__PURE__*/React.createElement("div", {
+  }), " n8n Live"), (() => {
+    const myReplies = isAdmin ? replies : replies.filter(r => (r.rep || '') === currentUser.name);
+    const seen = repliesSeenSet(currentUser.name);
+    const unread = myReplies.filter(r => !seen.has(r.id)).length;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "bell-wrap"
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-outline btn-sm bell-btn",
+      title: "Replies & interest",
+      onClick: () => {
+        if (!showBell) markRepliesSeen(currentUser.name, myReplies.map(r => r.id));
+        setShowBell(s => !s);
+      }
+    }, "🔔", unread > 0 && /*#__PURE__*/React.createElement("span", {
+      className: "bell-badge"
+    }, unread > 9 ? '9+' : unread)), showBell && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "bell-backdrop",
+      onClick: () => setShowBell(false)
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "bell-dropdown"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bell-head"
+    }, /*#__PURE__*/React.createElement("span", null, "🔔 Replies & Interest", isAdmin ? ' · all reps' : ''), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost btn-xs",
+      onClick: () => loadReplies(),
+      disabled: repliesLoading
+    }, repliesLoading ? '…' : '⟳ Check')), /*#__PURE__*/React.createElement("div", {
+      className: "bell-list"
+    }, myReplies.length === 0 ? /*#__PURE__*/React.createElement("div", {
+      className: "bell-empty"
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 24,
+        marginBottom: 6
+      }
+    }, "🔔"), "No replies yet.", /*#__PURE__*/React.createElement("div", {
+      className: "bell-empty-sub"
+    }, "You'll be notified here when a prospect replies or shows interest in your campaigns — across SmartReach & Close.")) : myReplies.slice(0, 40).map(r => /*#__PURE__*/React.createElement("div", {
+      key: r.id,
+      className: `bell-item${seen.has(r.id) ? '' : ' unread'}`
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bell-item-top"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: `rs-chip ${(REPLY_SENTIMENTS[r.sentiment] || {}).cls || 'rs-rep'}`
+    }, r.sentiment), /*#__PURE__*/React.createElement("span", {
+      className: "bell-src"
+    }, r.source === 'Close' ? '☁ Close' : '✉ SmartReach'), isAdmin && r.rep && /*#__PURE__*/React.createElement("span", {
+      className: "bell-rep"
+    }, r.rep), /*#__PURE__*/React.createElement("span", {
+      className: "bell-when"
+    }, fmtReplyWhen(r.when))), /*#__PURE__*/React.createElement("div", {
+      className: "bell-name"
+    }, r.name, r.email ? ` · ${r.email}` : ''), r.snippet && /*#__PURE__*/React.createElement("div", {
+      className: "bell-snip"
+    }, r.snippet.slice(0, 140)), r.campaign && /*#__PURE__*/React.createElement("div", {
+      className: "bell-camp"
+    }, "▸ ", r.campaign)))))));
+  })(), /*#__PURE__*/React.createElement("div", {
     className: "profile-pill-wrap"
   }, /*#__PURE__*/React.createElement("div", {
     className: "topbar-user-pill",

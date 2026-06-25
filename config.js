@@ -72,6 +72,12 @@ var DEFAULT_CONFIG = {
   closeLoadWebhook: 'https://hook.eu1.make.com/d35hvlju9cgea3mdwcr782ui5vldrkl5',   // LOAD leads ← Close
   scrapeWebhook:    'https://hook.eu1.make.com/amu0xr93i4q214760zi9rqa1lcxlch55', // YouTube scraper gateway
   smartreachWebhook:'https://hook.eu1.make.com/rk8bt363npu9bclbpquev0avr9na6wal', // SEND prospects → SmartReach (name+email)
+  // Replies / interest feed (🔔). Each returns an array of reply objects:
+  //   { rep, source:'SmartReach'|'Close', name, email, sentiment, snippet, when, campaign }
+  // Wired later (SmartReach reply-webhook → Make store; Close inbound email
+  // activity). Leave blank until connected — the panel shows an empty state.
+  repliesWebhook:      '', // SmartReach replies/interest
+  closeRepliesWebhook: '', // Close.io inbound email replies
 
   // Close.io lead custom-field IDs (so loaded leads map back from separate
   // columns instead of the description). Match these to your Close custom fields.
@@ -156,3 +162,8 @@ var DEFAULT_CONFIG = {
 // scrapes / imports. (Add objects here only if you want seeded demo data.)
 var SAMPLE_LEADS   = [];
 var SAMPLE_HISTORY = [];
+
+// Seed replies for the 🔔 panel (empty in production — fills from the replies
+// feeds). Shape: { id, rep, source:'SmartReach'|'Close', name, email,
+//   sentiment:'Interested'|'Neutral'|'Not interested'|'Reply', snippet, when, campaign }
+var SAMPLE_REPLIES = [];
