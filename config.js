@@ -13,7 +13,7 @@ var PLATFORM_ICON = { YouTube: '▶', TikTok: '♫', Instagram: '◈' };
 // ── STATUS TAGS ────────────────────────────────────────────
 // These are the standard lead statuses shown in dropdowns.
 // Changing order here changes dropdown order throughout the app.
-var STATUSES = ['Potential', 'Not Qualified', 'Contacted', 'Existing Leads', 'For Recycle', 'Duplicate'];
+var STATUSES = ['Potential', 'Contacted', 'For Recycle'];
 var STATUS_CLS = {
   'Potential':      'tag-potential',
   'Not Qualified':  'tag-nq',
@@ -25,7 +25,7 @@ var STATUS_CLS = {
 
 // Tags that cause a lead to leave the Scraper queue.
 // Add a tag here to make it auto-route leads out of Scraper.
-var STATUS_TAGS = ['Potential', 'Not Qualified', 'Contacted', 'Existing Leads', 'For Recycle', 'Duplicate', 'HT'];
+var STATUS_TAGS = ['Potential', 'Contacted', 'For Recycle', 'HT'];
 
 // ── TAG COLOURS ────────────────────────────────────────────
 // Controls the colour of tag badges everywhere in the app.
@@ -115,7 +115,7 @@ var DEFAULT_CONFIG = {
   ],
 
   // Tags shown in the Settings drawer "Status Tags" section
-  statusTags: ['Potential', 'Not Qualified', 'Contacted', 'Existing Leads', 'For Recycle', 'Duplicate'],
+  statusTags: ['Potential', 'Contacted', 'For Recycle'],
 };
 
 // ── SAMPLE / SEED DATA ─────────────────────────────────────
