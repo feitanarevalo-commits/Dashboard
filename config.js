@@ -113,6 +113,13 @@ var DEFAULT_CONFIG = {
   repEmojis:  { Pen: '', Rein: '', Chase: '', Mikka: '', Chai: '', Jon: '', Czarina: '' },
   repPhotos:  {},
 
+  // ── Shared profile details (team-wide) ─────────────────────
+  // Optional defaults shown for everyone (birthdays drive the Home reminders;
+  // titles show in the rep header + profile hover-card). Each person can still
+  // override their own on their device via the "Edit Profile" modal. Format:
+  //   Mikka: { title: 'Sales Rep', email: 'mikka@enfinity.co', birthday: '1996-06-25' }
+  profiles: {},
+
   // ── USERS & LOGIN ──────────────────────────────────────────
   // role: 'admin'    = full access (open Settings, delete/edit any lead, see all analytics)
   //       'employee' = sees own leads, cannot open Settings or delete leads

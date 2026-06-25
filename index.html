@@ -2368,6 +2368,19 @@ function HomeView({
     campaigns: campDefs,
     platforms: PLATFORMS
   };
+
+  // Birthday reminders (next 14 days) from each user's profile birthday.
+  const bdayNow = new Date();
+  const bdays = (config.users || []).map(u => {
+    const d = daysUntilBirthday(getProfile(u.name).birthday, bdayNow);
+    return d == null ? null : {
+      name: u.name,
+      days: d
+    };
+  }).filter(Boolean).filter(b => b.days <= 14).sort((a, b) => a.days - b.days);
+  const bdayToday = bdays.filter(b => b.days === 0),
+    bdayUpcoming = bdays.filter(b => b.days > 0);
+  const joinNames = arr => arr.length <= 1 ? arr[0] || '' : arr.length === 2 ? `${arr[0]} & ${arr[1]}` : `${arr.slice(0, -1).join(', ')} & ${arr[arr.length - 1]}`;
   return /*#__PURE__*/React.createElement("div", {
     className: "home-content",
     ref: pdfRef
@@ -2380,7 +2393,15 @@ function HomeView({
     style: {
       margin: 0
     }
-  }, "Enfinity Sales Dashboard"), /*#__PURE__*/React.createElement("p", null, "Rep KPI Report — ", pDef.label, " (", cutoff.toISOString().split('T')[0], " → today)")), /*#__PURE__*/React.createElement("div", {
+  }, "Enfinity Sales Dashboard"), /*#__PURE__*/React.createElement("p", null, "Rep KPI Report — ", pDef.label, " (", cutoff.toISOString().split('T')[0], " → today)")), bdays.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: `bday-banner no-print${bdayToday.length ? ' today' : ''}`
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "bday-cake"
+  }, "🎂"), /*#__PURE__*/React.createElement("div", null, bdayToday.length > 0 && /*#__PURE__*/React.createElement("span", {
+    className: "bday-today"
+  }, joinNames(bdayToday.map(b => b.name)), " ", bdayToday.length > 1 ? 'have' : 'has', " a birthday today! 🎉"), bdayUpcoming.length > 0 && /*#__PURE__*/React.createElement("span", {
+    className: "bday-up"
+  }, bdayToday.length > 0 ? 'Coming up: ' : 'Upcoming birthdays: ', bdayUpcoming.map(b => `${b.name} (${b.days === 1 ? 'tomorrow' : 'in ' + b.days + ' days'})`).join(' · ')))), /*#__PURE__*/React.createElement("div", {
     className: "analytics-toolbar no-print"
   }, /*#__PURE__*/React.createElement("div", {
     className: "period-toggle"
@@ -2720,8 +2741,32 @@ function loadProfiles() {
     return {};
   }
 }
+// Shared defaults (from config.js `profiles`, e.g. team birthdays/titles) are
+// merged UNDER this browser's localStorage overrides, so config is the team-wide
+// source and each person can still tweak their own on their device.
 function getProfile(name) {
-  return loadProfiles()[name] || {};
+  const shared = typeof DEFAULT_CONFIG !== 'undefined' && DEFAULT_CONFIG.profiles && DEFAULT_CONFIG.profiles[name] || {};
+  return {
+    ...shared,
+    ...(loadProfiles()[name] || {})
+  };
+}
+function fmtBirthday(b) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(b || '');
+  if (!m) return b || '';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
+}
+// Days until a 'YYYY-MM-DD' birthday's next occurrence (0 = today). null if unset/bad.
+function daysUntilBirthday(bday, now) {
+  if (!bday) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(bday);
+  if (!m) return null;
+  const today = now || new Date();
+  const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let next = new Date(today.getFullYear(), +m[2] - 1, +m[3]);
+  if (next < t) next = new Date(today.getFullYear() + 1, +m[2] - 1, +m[3]);
+  return Math.round((next - t) / 86400000);
 }
 function saveProfileData(name, data) {
   const all = loadProfiles();
@@ -2849,7 +2894,12 @@ function RepDashboard({
       fontSize: 11,
       color: 'var(--text-dim)'
     }
-  }, total, " lead", total !== 1 ? 's' : '', " · ", active, " active")), /*#__PURE__*/React.createElement("div", {
+  }, getProfile(rep).title ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 600,
+      color: 'var(--text)'
+    }
+  }, getProfile(rep).title, " · ") : null, total, " lead", total !== 1 ? 's' : '', " · ", active, " active")), /*#__PURE__*/React.createElement("div", {
     style: {
       marginLeft: 'auto',
       display: 'flex',
@@ -7798,13 +7848,14 @@ function App() {
   }, /*#__PURE__*/React.createElement("span", {
     className: "webhook-dot"
   }), " n8n Live"), /*#__PURE__*/React.createElement("div", {
+    className: "profile-pill-wrap"
+  }, /*#__PURE__*/React.createElement("div", {
     className: "topbar-user-pill",
     role: "button",
     tabIndex: 0,
     style: {
       cursor: 'pointer'
     },
-    title: `${currentUser.name} — click to edit your profile`,
     onClick: () => setShowProfile(true),
     onKeyDown: e => {
       if (e.key === 'Enter') setShowProfile(true);
@@ -7819,7 +7870,33 @@ function App() {
     className: "topbar-rep-name"
   }, currentUser.name), isAdmin && /*#__PURE__*/React.createElement("span", {
     className: "role-chip"
-  }, "ADMIN")), /*#__PURE__*/React.createElement("button", {
+  }, "ADMIN")), (() => {
+    const pr = getProfile(currentUser.name);
+    const d = daysUntilBirthday(pr.birthday);
+    return /*#__PURE__*/React.createElement("div", {
+      className: "profile-hovercard"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "phc-head"
+    }, /*#__PURE__*/React.createElement(RepAvatar, {
+      rep: currentUser.name,
+      config: config,
+      size: 44,
+      bgOverride: "var(--card)"
+    }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      className: "phc-name"
+    }, currentUser.name), /*#__PURE__*/React.createElement("div", {
+      className: "phc-role"
+    }, currentUser.role === 'admin' ? 'ADMIN' : 'SALES', pr.title ? ` · ${pr.title}` : ''))), pr.email && /*#__PURE__*/React.createElement("div", {
+      className: "phc-row"
+    }, /*#__PURE__*/React.createElement("span", null, "✉"), pr.email), pr.birthday && /*#__PURE__*/React.createElement("div", {
+      className: "phc-row"
+    }, /*#__PURE__*/React.createElement("span", null, "🎂"), fmtBirthday(pr.birthday), d === 0 ? ' · today!' : d != null && d <= 30 ? ` · in ${d}d` : ''), !pr.title && !pr.email && !pr.birthday && /*#__PURE__*/React.createElement("div", {
+      className: "phc-empty"
+    }, "No details added yet."), /*#__PURE__*/React.createElement("div", {
+      className: "phc-edit",
+      onClick: () => setShowProfile(true)
+    }, "✎ Edit profile"));
+  })()), /*#__PURE__*/React.createElement("button", {
     className: `btn btn-outline btn-sm dark-mode-btn`,
     onClick: () => setDarkMode(d => !d),
     title: "Toggle dark mode",

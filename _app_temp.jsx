@@ -1273,12 +1273,29 @@ function HomeView({leads,config}) {
   const avgFollTot=follAll.length?Math.round(follAll.reduce((a,b)=>a+b,0)/follAll.length):0;
   const kpiInfo={period:pDef.label, rangeStart:cutoff.toISOString().split('T')[0], rangeEnd:new Date().toISOString().split('T')[0], campaigns:campDefs, platforms:PLATFORMS};
 
+  // Birthday reminders (next 14 days) from each user's profile birthday.
+  const bdayNow=new Date();
+  const bdays=(config.users||[]).map(u=>{ const d=daysUntilBirthday(getProfile(u.name).birthday,bdayNow); return d==null?null:{name:u.name,days:d}; })
+    .filter(Boolean).filter(b=>b.days<=14).sort((a,b)=>a.days-b.days);
+  const bdayToday=bdays.filter(b=>b.days===0), bdayUpcoming=bdays.filter(b=>b.days>0);
+  const joinNames=arr=> arr.length<=1 ? (arr[0]||'') : (arr.length===2 ? `${arr[0]} & ${arr[1]}` : `${arr.slice(0,-1).join(', ')} & ${arr[arr.length-1]}`);
+
   return (
     <div className="home-content" ref={pdfRef}>
       <div className="print-header" style={{display:'none'}}>
         <h1 style={{margin:0}}>Enfinity Sales Dashboard</h1>
         <p>Rep KPI Report — {pDef.label} ({cutoff.toISOString().split('T')[0]} → today)</p>
       </div>
+
+      {bdays.length>0 && (
+        <div className={`bday-banner no-print${bdayToday.length?' today':''}`}>
+          <span className="bday-cake">🎂</span>
+          <div>
+            {bdayToday.length>0 && <span className="bday-today">{joinNames(bdayToday.map(b=>b.name))} {bdayToday.length>1?'have':'has'} a birthday today! 🎉</span>}
+            {bdayUpcoming.length>0 && <span className="bday-up">{bdayToday.length>0?'Coming up: ':'Upcoming birthdays: '}{bdayUpcoming.map(b=>`${b.name} (${b.days===1?'tomorrow':'in '+b.days+' days'})`).join(' · ')}</span>}
+          </div>
+        </div>
+      )}
 
       <div className="analytics-toolbar no-print">
         <div className="period-toggle">
@@ -1456,7 +1473,28 @@ function HomeView({leads,config}) {
 // Stored per-browser in localStorage (like passwords — no backend to sync).
 // profiles = { <name>: { photo, title, email, birthday } }.
 function loadProfiles(){ try{ return JSON.parse(localStorage.getItem('profiles')||'{}')||{}; }catch(e){ return {}; } }
-function getProfile(name){ return loadProfiles()[name] || {}; }
+// Shared defaults (from config.js `profiles`, e.g. team birthdays/titles) are
+// merged UNDER this browser's localStorage overrides, so config is the team-wide
+// source and each person can still tweak their own on their device.
+function getProfile(name){
+  const shared=(typeof DEFAULT_CONFIG!=='undefined' && DEFAULT_CONFIG.profiles && DEFAULT_CONFIG.profiles[name]) || {};
+  return { ...shared, ...(loadProfiles()[name]||{}) };
+}
+function fmtBirthday(b){
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(b||''); if(!m) return b||'';
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${months[+m[2]-1]} ${+m[3]}, ${m[1]}`;
+}
+// Days until a 'YYYY-MM-DD' birthday's next occurrence (0 = today). null if unset/bad.
+function daysUntilBirthday(bday, now){
+  if(!bday) return null;
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(bday); if(!m) return null;
+  const today=now||new Date();
+  const t=new Date(today.getFullYear(),today.getMonth(),today.getDate());
+  let next=new Date(today.getFullYear(),+m[2]-1,+m[3]);
+  if(next<t) next=new Date(today.getFullYear()+1,+m[2]-1,+m[3]);
+  return Math.round((next-t)/86400000);
+}
 function saveProfileData(name,data){
   const all=loadProfiles(); all[name]={...(all[name]||{}),...data};
   try{ localStorage.setItem('profiles',JSON.stringify(all)); }catch(e){}
@@ -1529,7 +1567,10 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
         <RepAvatar rep={rep} config={config} size={42} online bgOverride="var(--card)"/>
         <div>
           <div style={{fontWeight:700,fontSize:15}}>{rep}'s Dashboard</div>
-          <div style={{fontSize:11,color:'var(--text-dim)'}}>{total} lead{total!==1?'s':''} · {active} active</div>
+          <div style={{fontSize:11,color:'var(--text-dim)'}}>
+            {getProfile(rep).title ? <span style={{fontWeight:600,color:'var(--text)'}}>{getProfile(rep).title} · </span> : null}
+            {total} lead{total!==1?'s':''} · {active} active
+          </div>
         </div>
         <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
           <button className="btn btn-primary btn-sm" disabled={!fresh}
@@ -3681,12 +3722,28 @@ function App() {
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </button>
           {(config.features||{}).webhookTrigger && <div className="topbar-badge"><span className="webhook-dot"></span> n8n Live</div>}
-          <div className="topbar-user-pill" role="button" tabIndex={0} style={{cursor:'pointer'}}
-            title={`${currentUser.name} — click to edit your profile`}
-            onClick={()=>setShowProfile(true)} onKeyDown={e=>{if(e.key==='Enter')setShowProfile(true);}}>
-            <RepAvatar rep={currentUser.name} config={config} size={26} online bgOverride="var(--card)"/>
-            <div className="topbar-rep-name">{currentUser.name}</div>
-            {isAdmin && <span className="role-chip">ADMIN</span>}
+          <div className="profile-pill-wrap">
+            <div className="topbar-user-pill" role="button" tabIndex={0} style={{cursor:'pointer'}}
+              onClick={()=>setShowProfile(true)} onKeyDown={e=>{if(e.key==='Enter')setShowProfile(true);}}>
+              <RepAvatar rep={currentUser.name} config={config} size={26} online bgOverride="var(--card)"/>
+              <div className="topbar-rep-name">{currentUser.name}</div>
+              {isAdmin && <span className="role-chip">ADMIN</span>}
+            </div>
+            {(()=>{ const pr=getProfile(currentUser.name); const d=daysUntilBirthday(pr.birthday); return (
+              <div className="profile-hovercard">
+                <div className="phc-head">
+                  <RepAvatar rep={currentUser.name} config={config} size={44} bgOverride="var(--card)"/>
+                  <div>
+                    <div className="phc-name">{currentUser.name}</div>
+                    <div className="phc-role">{currentUser.role==='admin'?'ADMIN':'SALES'}{pr.title?` · ${pr.title}`:''}</div>
+                  </div>
+                </div>
+                {pr.email && <div className="phc-row"><span>✉</span>{pr.email}</div>}
+                {pr.birthday && <div className="phc-row"><span>🎂</span>{fmtBirthday(pr.birthday)}{d===0?' · today!':(d!=null&&d<=30?` · in ${d}d`:'')}</div>}
+                {!pr.title&&!pr.email&&!pr.birthday && <div className="phc-empty">No details added yet.</div>}
+                <div className="phc-edit" onClick={()=>setShowProfile(true)}>✎ Edit profile</div>
+              </div>
+            ); })()}
           </div>
           <button className={`btn btn-outline btn-sm dark-mode-btn`} onClick={()=>setDarkMode(d=>!d)} title="Toggle dark mode" style={{fontSize:16,padding:'6px 10px'}}>
             {darkMode ? '☀' : '🌙'}
