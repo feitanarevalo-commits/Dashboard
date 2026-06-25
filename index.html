@@ -4716,7 +4716,8 @@ function ScraperView({
   onBulkAssign,
   onResults,
   addToast,
-  config
+  config,
+  currentUser
 }) {
   const [platform, setPlatform] = useState('All');
   const [minF, setMinF] = useState('10K');
@@ -4771,6 +4772,9 @@ function ScraperView({
     since.setMonth(since.getMonth() - 3);
     extraQuery += '&publishedAfter=' + encodeURIComponent(since.toISOString());
     if (pageToken) extraQuery += '&pageToken=' + encodeURIComponent(pageToken);
+    // Use the logged-in rep's own YouTube API key if they have one (so each rep
+    // has their own 10k/day quota); otherwise Make falls back to the shared key.
+    const apiKey = (config.repApiKeys || {})[currentUser && currentUser.name] || '';
     const payload = {
       type: 'search',
       platform,
@@ -4781,10 +4785,11 @@ function ScraperView({
       order: 'date',
       pageToken,
       extraQuery,
+      apiKey,
       minFollowers: parseFollowers(minF),
       maxFollowers: null,
       sortBy: 'date',
-      limit: 25
+      limit: 50
     };
     setLoading(true);
     addToast('Running scraper…', 'info');
@@ -7890,7 +7895,8 @@ function App() {
       onBulkAssign: bulkAssign,
       onResults: addDiscovered,
       addToast: addToast,
-      config: config
+      config: config,
+      currentUser: currentUser
     });
     if (tab === 'history') return /*#__PURE__*/React.createElement(HistoryView, {
       history: history,

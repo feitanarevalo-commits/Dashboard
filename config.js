@@ -79,6 +79,17 @@ var DEFAULT_CONFIG = {
   repliesWebhook:      '', // SmartReach replies/interest
   closeRepliesWebhook: '', // Close.io inbound email replies
 
+  // ── Per-rep YouTube API keys ───────────────────────────────
+  // Each Google Cloud project has its own 10,000 units/day (~100 searches).
+  // Give each rep their own key so they don't share one quota bucket. The
+  // scraper uses the logged-in person's key here; blank → the shared default
+  // key baked into the Make scraper scenario. To make a key: console.cloud.google.com
+  // → new project → enable "YouTube Data API v3" → Credentials → API key.
+  repApiKeys: {
+    Robert:'', Chai:'', Rein:'', Jon:'', Jake:'', Czarina:'',
+    Pen:'', Chase:'', Mikka:'',
+  },
+
   // Close.io lead custom-field IDs (so loaded leads map back from separate
   // columns instead of the description). Match these to your Close custom fields.
   closeFields: {

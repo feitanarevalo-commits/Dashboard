@@ -2386,7 +2386,7 @@ const FOLLOWER_BRACKETS=[
   { v:'1M',   label:'1M+',           min:1000000, max:Infinity },
 ];
 
-function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,config}) {
+function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,config,currentUser}) {
   const [platform,setPlatform]=useState('All');
   const [minF,setMinF]=useState('10K');
   // Remember the chosen language across reloads so it "sticks".
@@ -2427,7 +2427,10 @@ function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,conf
     const since=new Date(); since.setMonth(since.getMonth()-3);
     extraQuery+='&publishedAfter='+encodeURIComponent(since.toISOString());
     if(pageToken) extraQuery+='&pageToken='+encodeURIComponent(pageToken);
-    const payload={ type:'search', platform, keyword:kw, interest:'', language, relevanceLanguage, order:'date', pageToken, extraQuery, minFollowers:parseFollowers(minF), maxFollowers:null, sortBy:'date', limit:25 };
+    // Use the logged-in rep's own YouTube API key if they have one (so each rep
+    // has their own 10k/day quota); otherwise Make falls back to the shared key.
+    const apiKey=(config.repApiKeys||{})[currentUser&&currentUser.name]||'';
+    const payload={ type:'search', platform, keyword:kw, interest:'', language, relevanceLanguage, order:'date', pageToken, extraQuery, apiKey, minFollowers:parseFollowers(minF), maxFollowers:null, sortBy:'date', limit:50 };
     setLoading(true);
     addToast('Running scraper…','info');
     fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
@@ -3798,7 +3801,7 @@ function App() {
     if(showRepSelect) return <RepSelectScreen leads={vLeads} config={config} activeRep={activeRep} onSelect={r=>{if(r){setActiveRep(r);setTab('rep-home');}setShowRepSelect(false);}}/>;
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
-    if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config}/>;
+    if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
     if(tab==='lead-mgmt') return <LeadMgmtView leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
