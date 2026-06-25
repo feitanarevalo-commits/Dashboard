@@ -2704,60 +2704,126 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
 }
 
 // ─── LOGIN SCREEN ─────────────────────────────────────────
+// Profile-picker login landing (design handoff). Pick your name → password
+// overlay. Auth is unchanged: effectivePassword() check → onLogin(user).
 function LoginScreen({config,onLogin}) {
   const users=config.users||[];
+  const repColors=config.repColors||{};
+  const colorFor=u=>repColors[u.name]||'#6366f1';
+  const initial=u=>(u.name||'?')[0].toUpperCase();
+
+  const [query,setQuery]=useState('');
   const [selected,setSelected]=useState(null);
   const [pw,setPw]=useState('');
   const [err,setErr]=useState('');
+  const [status,setStatus]=useState('idle');   // idle | loading | success
+  const [note,setNote]=useState('');
   const pwRef=useRef(null);
 
-  function pick(u){ setSelected(u); setPw(''); setErr(''); setTimeout(()=>pwRef.current&&pwRef.current.focus(),50); }
+  const q=query.trim().toLowerCase();
+  const match=u=>!q||(u.name||'').toLowerCase().includes(q);
+  const admins=users.filter(u=>u.role==='admin'&&match(u));
+  const members=users.filter(u=>u.role!=='admin'&&match(u));
+  const noResults=admins.length===0&&members.length===0;
+
+  function pick(u){ setSelected(u); setPw(''); setErr(''); setStatus('idle'); setTimeout(()=>pwRef.current&&pwRef.current.focus(),60); }
+  function back(){ setSelected(null); setPw(''); setErr(''); setStatus('idle'); }
   function submit(e){
     e&&e.preventDefault();
-    if(!selected) return;
-    if(pw===effectivePassword(selected)){ onLogin(selected); }
-    else { setErr('Incorrect password'); setPw(''); }
+    if(!selected||status!=='idle') return;
+    if(pw===effectivePassword(selected)){
+      // Correct → brief loading + success animation, then enter the dashboard.
+      setStatus('loading');
+      setTimeout(()=>{ setStatus('success'); setTimeout(()=>onLogin(selected),850); },450);
+    } else { setErr('Incorrect password'); setPw(''); }
   }
+  useEffect(()=>{
+    if(!selected) return;
+    const h=e=>{ if(e.key==='Escape'&&status==='idle') back(); };
+    window.addEventListener('keydown',h);
+    return ()=>window.removeEventListener('keydown',h);
+  },[selected,status]);
+
+  const Section=({label,list})=> !list.length ? null : (
+    <>
+      <div className="lg-section-head"><span className="lg-section-label">{label} · {list.length}</span><span className="lg-section-rule"/></div>
+      <div className="lg-grid">
+        {list.map(u=>(
+          <div key={u.name} className="lg-card" tabIndex={0} role="button"
+            onClick={()=>pick(u)} onKeyDown={e=>{if(e.key==='Enter')pick(u);}}>
+            <div className="lg-avatar" style={{background:colorFor(u),boxShadow:`0 6px 16px -6px ${colorFor(u)}`}}>{initial(u)}</div>
+            <div className="lg-card-name">{u.name}</div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
 
   return (
-    <div className="login-screen">
-      <div className="login-card">
-        <div className="login-brand">
-          <div className="logo" style={{width:48,height:48,fontSize:24}}>E</div>
-          <div>
-            <div className="login-title">Enfinity</div>
-            <div className="login-sub">Sales Dashboard</div>
+    <div className="lg-root">
+      <div className="lg-left">
+        <div className="lg-glow lg-glow1"/><div className="lg-glow lg-glow2"/>
+        <div className="lg-brand-top"><span className="lg-wordmark">Enfinity</span></div>
+        <div className="lg-brand-mid">
+          <span className="lg-pill"><span className="lg-pill-dot"/>Sales Dashboard</span>
+          <h1 className="lg-hero">Welcome back.</h1>
+          <p className="lg-subcopy">Pick your profile to jump straight back into your pipeline, deals, and daily numbers.</p>
+        </div>
+        <div className="lg-brand-foot">
+          <span>© 2026 Enfinity, Inc.</span>
+          <span className="lg-secured"><span className="lg-foot-dot"/>Secured workspace</span>
+        </div>
+      </div>
+
+      <div className="lg-right">
+        <div className="lg-right-inner">
+          <h2 className="lg-r-head">Select your profile</h2>
+          <p className="lg-r-sub">Tap your name to sign in to the dashboard.</p>
+          <div className="lg-search">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9c99a8" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search for your name…"/>
+          </div>
+          {noResults ? (
+            <div className="lg-empty"><div className="lg-empty-t">No profile found</div><div className="lg-empty-s">Try a different name or ask an admin to add you.</div></div>
+          ) : (
+            <>
+              <Section label="ADMINISTRATORS" list={admins}/>
+              <Section label="TEAM MEMBERS" list={members}/>
+            </>
+          )}
+          <div className="lg-foot-row">
+            <span>Not on the list?</span>
+            <button className="lg-sso" onClick={()=>setNote('SSO isn’t set up yet — pick your profile above to sign in.')}>Sign in with SSO →</button>
+          </div>
+          {note && <div className="lg-note">{note}</div>}
+        </div>
+      </div>
+
+      {selected && (
+        <div className="lg-ov" onClick={e=>{ if(e.target.classList.contains('lg-ov')&&status==='idle') back(); }}>
+          <div className="lg-modal">
+            {status==='success' ? (
+              <div className="lg-success">
+                <div className="lg-check"><svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+                <div className="lg-suc-t">You're in, {selected.name}</div>
+                <div className="lg-suc-s">Taking you to your dashboard…</div>
+              </div>
+            ) : (
+              <form onSubmit={submit}>
+                <div className="lg-m-avatar" style={{background:colorFor(selected)}}>{initial(selected)}</div>
+                <div className="lg-m-as">Signing in as</div>
+                <div className="lg-m-name">{selected.name}</div>
+                <span className={`lg-badge ${selected.role==='admin'?'admin':'sales'}`}>{selected.role==='admin'?'ADMIN':'SALES'}</span>
+                <input ref={pwRef} type="password" className="lg-pw" placeholder="Enter your password" value={pw}
+                  onChange={e=>{setPw(e.target.value);setErr('');}} disabled={status==='loading'} autoFocus/>
+                {err && <div className="lg-err">{err}</div>}
+                <button type="submit" className="lg-signin" disabled={status==='loading'}>{status==='loading' ? <span className="lg-spin"/> : 'Sign in'}</button>
+                <button type="button" className="lg-backbtn" onClick={back}>← Back to profiles</button>
+              </form>
+            )}
           </div>
         </div>
-
-        {!selected ? (
-          <>
-            <div className="login-prompt">Select your profile to sign in</div>
-            <div className="login-grid">
-              {users.map(u=>(
-                <button key={u.name} className="login-user" onClick={()=>pick(u)}>
-                  <RepAvatar rep={u.name} config={config} size={48} bgOverride="var(--card)"/>
-                  <div className="login-user-name">{u.name}</div>
-                  <div className={`login-role ${u.role}`}>{u.role==='admin'?'★ Admin':'Employee'}</div>
-                </button>
-              ))}
-            </div>
-          </>
-        ) : (
-          <form className="login-form" onSubmit={submit}>
-            <button type="button" className="btn btn-ghost btn-xs" style={{alignSelf:'flex-start'}} onClick={()=>setSelected(null)}>← Back</button>
-            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:8,margin:'8px 0'}}>
-              <RepAvatar rep={selected.name} config={config} size={64} bgOverride="var(--card)"/>
-              <div style={{fontWeight:700,fontSize:16}}>{selected.name}</div>
-              <div className={`login-role ${selected.role}`}>{selected.role==='admin'?'★ Admin':'Employee'}</div>
-            </div>
-            <input ref={pwRef} type="password" placeholder="Password" value={pw}
-              onChange={e=>{setPw(e.target.value);setErr('');}} autoFocus/>
-            {err && <div className="login-err">{err}</div>}
-            <button type="submit" className="btn btn-primary" style={{width:'100%'}}>Sign In</button>
-          </form>
-        )}
-      </div>
+      )}
     </div>
   );
 }

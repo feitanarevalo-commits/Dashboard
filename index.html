@@ -6,7 +6,7 @@
 <title>LeadFlow — YouTube &amp; Social Scraper</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <script src="config.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -5642,114 +5642,235 @@ function SettingsDrawer({
 }
 
 // ─── LOGIN SCREEN ─────────────────────────────────────────
+// Profile-picker login landing (design handoff). Pick your name → password
+// overlay. Auth is unchanged: effectivePassword() check → onLogin(user).
 function LoginScreen({
   config,
   onLogin
 }) {
   const users = config.users || [];
+  const repColors = config.repColors || {};
+  const colorFor = u => repColors[u.name] || '#6366f1';
+  const initial = u => (u.name || '?')[0].toUpperCase();
+  const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(null);
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
+  const [status, setStatus] = useState('idle'); // idle | loading | success
+  const [note, setNote] = useState('');
   const pwRef = useRef(null);
+  const q = query.trim().toLowerCase();
+  const match = u => !q || (u.name || '').toLowerCase().includes(q);
+  const admins = users.filter(u => u.role === 'admin' && match(u));
+  const members = users.filter(u => u.role !== 'admin' && match(u));
+  const noResults = admins.length === 0 && members.length === 0;
   function pick(u) {
     setSelected(u);
     setPw('');
     setErr('');
-    setTimeout(() => pwRef.current && pwRef.current.focus(), 50);
+    setStatus('idle');
+    setTimeout(() => pwRef.current && pwRef.current.focus(), 60);
+  }
+  function back() {
+    setSelected(null);
+    setPw('');
+    setErr('');
+    setStatus('idle');
   }
   function submit(e) {
     e && e.preventDefault();
-    if (!selected) return;
+    if (!selected || status !== 'idle') return;
     if (pw === effectivePassword(selected)) {
-      onLogin(selected);
+      // Correct → brief loading + success animation, then enter the dashboard.
+      setStatus('loading');
+      setTimeout(() => {
+        setStatus('success');
+        setTimeout(() => onLogin(selected), 850);
+      }, 450);
     } else {
       setErr('Incorrect password');
       setPw('');
     }
   }
-  return /*#__PURE__*/React.createElement("div", {
-    className: "login-screen"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "login-card"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "login-brand"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "logo",
-    style: {
-      width: 48,
-      height: 48,
-      fontSize: 24
-    }
-  }, "E"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "login-title"
-  }, "Enfinity"), /*#__PURE__*/React.createElement("div", {
-    className: "login-sub"
-  }, "Sales Dashboard"))), !selected ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: "login-prompt"
-  }, "Select your profile to sign in"), /*#__PURE__*/React.createElement("div", {
-    className: "login-grid"
-  }, users.map(u => /*#__PURE__*/React.createElement("button", {
+  useEffect(() => {
+    if (!selected) return;
+    const h = e => {
+      if (e.key === 'Escape' && status === 'idle') back();
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [selected, status]);
+  const Section = ({
+    label,
+    list
+  }) => !list.length ? null : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "lg-section-head"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "lg-section-label"
+  }, label, " · ", list.length), /*#__PURE__*/React.createElement("span", {
+    className: "lg-section-rule"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "lg-grid"
+  }, list.map(u => /*#__PURE__*/React.createElement("div", {
     key: u.name,
-    className: "login-user",
-    onClick: () => pick(u)
-  }, /*#__PURE__*/React.createElement(RepAvatar, {
-    rep: u.name,
-    config: config,
-    size: 48,
-    bgOverride: "var(--card)"
+    className: "lg-card",
+    tabIndex: 0,
+    role: "button",
+    onClick: () => pick(u),
+    onKeyDown: e => {
+      if (e.key === 'Enter') pick(u);
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lg-avatar",
+    style: {
+      background: colorFor(u),
+      boxShadow: `0 6px 16px -6px ${colorFor(u)}`
+    }
+  }, initial(u)), /*#__PURE__*/React.createElement("div", {
+    className: "lg-card-name"
+  }, u.name)))));
+  return /*#__PURE__*/React.createElement("div", {
+    className: "lg-root"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lg-left"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lg-glow lg-glow1"
   }), /*#__PURE__*/React.createElement("div", {
-    className: "login-user-name"
-  }, u.name), /*#__PURE__*/React.createElement("div", {
-    className: `login-role ${u.role}`
-  }, u.role === 'admin' ? '★ Admin' : 'Employee'))))) : /*#__PURE__*/React.createElement("form", {
-    className: "login-form",
+    className: "lg-glow lg-glow2"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "lg-brand-top"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "lg-wordmark"
+  }, "Enfinity")), /*#__PURE__*/React.createElement("div", {
+    className: "lg-brand-mid"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "lg-pill"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "lg-pill-dot"
+  }), "Sales Dashboard"), /*#__PURE__*/React.createElement("h1", {
+    className: "lg-hero"
+  }, "Welcome back."), /*#__PURE__*/React.createElement("p", {
+    className: "lg-subcopy"
+  }, "Pick your profile to jump straight back into your pipeline, deals, and daily numbers.")), /*#__PURE__*/React.createElement("div", {
+    className: "lg-brand-foot"
+  }, /*#__PURE__*/React.createElement("span", null, "© 2026 Enfinity, Inc."), /*#__PURE__*/React.createElement("span", {
+    className: "lg-secured"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "lg-foot-dot"
+  }), "Secured workspace"))), /*#__PURE__*/React.createElement("div", {
+    className: "lg-right"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lg-right-inner"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "lg-r-head"
+  }, "Select your profile"), /*#__PURE__*/React.createElement("p", {
+    className: "lg-r-sub"
+  }, "Tap your name to sign in to the dashboard."), /*#__PURE__*/React.createElement("div", {
+    className: "lg-search"
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "17",
+    height: "17",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "#9c99a8",
+    strokeWidth: "2.2",
+    strokeLinecap: "round"
+  }, /*#__PURE__*/React.createElement("circle", {
+    cx: "11",
+    cy: "11",
+    r: "7"
+  }), /*#__PURE__*/React.createElement("line", {
+    x1: "16.5",
+    y1: "16.5",
+    x2: "21",
+    y2: "21"
+  })), /*#__PURE__*/React.createElement("input", {
+    value: query,
+    onChange: e => setQuery(e.target.value),
+    placeholder: "Search for your name…"
+  })), noResults ? /*#__PURE__*/React.createElement("div", {
+    className: "lg-empty"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lg-empty-t"
+  }, "No profile found"), /*#__PURE__*/React.createElement("div", {
+    className: "lg-empty-s"
+  }, "Try a different name or ask an admin to add you.")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Section, {
+    label: "ADMINISTRATORS",
+    list: admins
+  }), /*#__PURE__*/React.createElement(Section, {
+    label: "TEAM MEMBERS",
+    list: members
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "lg-foot-row"
+  }, /*#__PURE__*/React.createElement("span", null, "Not on the list?"), /*#__PURE__*/React.createElement("button", {
+    className: "lg-sso",
+    onClick: () => setNote('SSO isn’t set up yet — pick your profile above to sign in.')
+  }, "Sign in with SSO →")), note && /*#__PURE__*/React.createElement("div", {
+    className: "lg-note"
+  }, note))), selected && /*#__PURE__*/React.createElement("div", {
+    className: "lg-ov",
+    onClick: e => {
+      if (e.target.classList.contains('lg-ov') && status === 'idle') back();
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lg-modal"
+  }, status === 'success' ? /*#__PURE__*/React.createElement("div", {
+    className: "lg-success"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lg-check"
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "38",
+    height: "38",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "#fff",
+    strokeWidth: "3",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("polyline", {
+    points: "20 6 9 17 4 12"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "lg-suc-t"
+  }, "You're in, ", selected.name), /*#__PURE__*/React.createElement("div", {
+    className: "lg-suc-s"
+  }, "Taking you to your dashboard…")) : /*#__PURE__*/React.createElement("form", {
     onSubmit: submit
-  }, /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "btn btn-ghost btn-xs",
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lg-m-avatar",
     style: {
-      alignSelf: 'flex-start'
-    },
-    onClick: () => setSelected(null)
-  }, "← Back"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: 8,
-      margin: '8px 0'
+      background: colorFor(selected)
     }
-  }, /*#__PURE__*/React.createElement(RepAvatar, {
-    rep: selected.name,
-    config: config,
-    size: 64,
-    bgOverride: "var(--card)"
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontWeight: 700,
-      fontSize: 16
-    }
-  }, selected.name), /*#__PURE__*/React.createElement("div", {
-    className: `login-role ${selected.role}`
-  }, selected.role === 'admin' ? '★ Admin' : 'Employee')), /*#__PURE__*/React.createElement("input", {
+  }, initial(selected)), /*#__PURE__*/React.createElement("div", {
+    className: "lg-m-as"
+  }, "Signing in as"), /*#__PURE__*/React.createElement("div", {
+    className: "lg-m-name"
+  }, selected.name), /*#__PURE__*/React.createElement("span", {
+    className: `lg-badge ${selected.role === 'admin' ? 'admin' : 'sales'}`
+  }, selected.role === 'admin' ? 'ADMIN' : 'SALES'), /*#__PURE__*/React.createElement("input", {
     ref: pwRef,
     type: "password",
-    placeholder: "Password",
+    className: "lg-pw",
+    placeholder: "Enter your password",
     value: pw,
     onChange: e => {
       setPw(e.target.value);
       setErr('');
     },
+    disabled: status === 'loading',
     autoFocus: true
   }), err && /*#__PURE__*/React.createElement("div", {
-    className: "login-err"
+    className: "lg-err"
   }, err), /*#__PURE__*/React.createElement("button", {
     type: "submit",
-    className: "btn btn-primary",
-    style: {
-      width: '100%'
-    }
-  }, "Sign In"))));
+    className: "lg-signin",
+    disabled: status === 'loading'
+  }, status === 'loading' ? /*#__PURE__*/React.createElement("span", {
+    className: "lg-spin"
+  }) : 'Sign in'), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "lg-backbtn",
+    onClick: back
+  }, "← Back to profiles")))));
 }
 
 // ─── CHANGE PASSWORD MODAL ────────────────────────────────
