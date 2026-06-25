@@ -85,6 +85,15 @@ var DEFAULT_CONFIG = {
     assigned:  'cf_mV4TQoYmUEAWJOZyqzCjblulhPPyM3NczEb5TSe9zVt',
   },
 
+  // SmartReach campaign IDs — maps a dashboard campaign (MSN/VVV) to its
+  // SmartReach campaign id, so "Send to SmartReach" drops each prospect INTO
+  // that campaign (not just the global Prospects list). Get an id from
+  // SmartReach → Campaigns. Add VVV here once that campaign exists in SmartReach.
+  smartReachCampaigns: {
+    MSN: '205998',
+    // VVV: 'PUT_VVV_SMARTREACH_CAMPAIGN_ID_HERE',
+  },
+
   // ── Campaigns ── add as many as you need
   campaigns: [
     { id: 'MSN', label: 'MSN', color: '#1366D6' },

@@ -284,7 +284,15 @@ function exportSmartReachCSV(leads, filename='smartreach.csv') {
   downloadFile(rows, filename);
 }
 // One prospect for the Make "SmartReach add" scenario — name + email only.
-function toSmartReachItem(l){ return { name:l.channelName, email:(l.emails||[])[0]||'' }; }
+// One prospect for the Make "SmartReach add" scenario. campaign_id routes the
+// prospect into a SmartReach CAMPAIGN (not just the global Prospects list):
+// the lead's first dashboard campaign (MSN/VVV) is mapped to its SmartReach
+// campaign id via config.smartReachCampaigns. Empty when the lead has no
+// mapped campaign — Make then just creates the prospect without assigning it.
+function toSmartReachItem(l, campMap){
+  const camp=(l.campaigns||[]).find(c=>campMap&&campMap[c]);
+  return { name:l.channelName, email:(l.emails||[])[0]||'', campaign_id: camp?String(campMap[camp]):'' };
+}
 
 // Comprehensive Sales KPI report (one row per rep + a totals row). Includes
 // raw counts, derived conversion rates, email coverage, average audience size,
@@ -3363,7 +3371,8 @@ function App() {
     const wh=(config.smartreachWebhook||'').trim();
     if(!wh || wh.includes('your-')){ addToast('Set the SmartReach Webhook in ⚙ Customize first','info'); return; }
     if(!repLeads || !repLeads.length){ addToast(`No emailable leads to send for ${rep}`,'info'); return; }
-    const payload={action:'smartreach.add', rep, leads:repLeads.map(toSmartReachItem)};
+    const srMap=config.smartReachCampaigns||{};
+    const payload={action:'smartreach.add', rep, leads:repLeads.map(l=>toSmartReachItem(l,srMap))};
     addToast(`Sending ${repLeads.length} prospect(s) to SmartReach for ${rep}…`,'info');
     fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
       .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
