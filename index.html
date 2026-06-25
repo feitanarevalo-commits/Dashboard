@@ -77,17 +77,22 @@ function canonTag(raw) {
   return MAP[k] || s;
 }
 
-// ─── LEAD ORIGIN: Fresh vs Imported ───────────────────────
-// Fresh   = never contacted on any campaign (a brand-new lead).
-// Imported= has been contacted / recycled / brought in from a sheet
-//           or external import (i.e. previously worked).
+// ─── LEAD ORIGIN: Fresh vs Imported (re: Close.io) ─────────
+// Fresh   = NOT yet on Close — still needs to be imported. The import queue.
+// Imported= already on Close: it was pushed via "Send to Close" (importedToClose),
+//           pulled back from Close (fromClose), or carries a Close lead id.
+// "Send to Close" only sends Fresh leads and flips them to Imported on success,
+// so the same lead is never pushed (and duplicated in Close) twice.
 function leadOrigin(lead) {
-  // Explicit flag (e.g. the sheet's IMPORTED Yes/No column) always wins.
+  // Explicit flag (e.g. a sheet's IMPORTED Yes/No column) always wins.
   if (lead.imported === true) return 'Imported';
   if (lead.imported === false) return 'Fresh';
-  const t = lead.tags || [];
-  const worked = !!lead.lastContactDate || t.includes('Contacted') || t.includes('For Recycle') || t.includes('Existing Leads') || lead.source === 'import' || lead.recycled === true;
-  return worked ? 'Imported' : 'Fresh';
+  if (lead.importedToClose || lead.fromClose || lead.closeLeadId) return 'Imported';
+  return 'Fresh';
+}
+// Convenience: a Fresh lead is one not yet on Close.
+function isFresh(lead) {
+  return leadOrigin(lead) === 'Fresh';
 }
 function isRecycled(lead) {
   return (lead.tags || []).includes('For Recycle') || lead.recycled === true;
@@ -2738,7 +2743,11 @@ function RepDashboard({
   const active = activeLeads.length;
   const potentialLeads = myLeads.filter(l => l.tags.includes('Potential')); // campaign-ready set
   const potential = potentialLeads.length;
-  const smartReachLeads = potentialLeads.filter(l => (l.emails || []).length > 0); // emailable Potential leads
+  // Only FRESH Potential leads (not yet on Close) get pushed — Imported ones are
+  // already in Close, so re-sending would duplicate them.
+  const freshPotential = potentialLeads.filter(isFresh);
+  const fresh = freshPotential.length;
+  const smartReachLeads = freshPotential.filter(l => (l.emails || []).length > 0); // emailable Fresh Potential leads
   const srCount = smartReachLeads.length;
   const contacted = myLeads.filter(l => l.tags.includes('Contacted')).length;
   const ht = myLeads.filter(l => l.tags.includes('HT')).length;
@@ -2788,21 +2797,21 @@ function RepDashboard({
     }
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary btn-sm",
-    disabled: !potential,
-    onClick: () => importToClose(rep, potentialLeads),
-    title: potential ? `Send ${rep}'s ${potential} Potential lead(s) to Close.io to run campaigns` : 'No Potential leads to send yet'
-  }, "⬆ Send ", potential, " to Close.io"), /*#__PURE__*/React.createElement("button", {
+    disabled: !fresh,
+    onClick: () => importToClose(rep, freshPotential),
+    title: fresh ? `Send ${rep}'s ${fresh} Fresh Potential lead(s) to Close.io (already-imported leads are skipped)` : potential ? 'All Potential leads are already imported to Close' : 'No Potential leads to send yet'
+  }, "⬆ Send ", fresh, " to Close.io"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary btn-sm",
     disabled: !srCount,
     onClick: () => importToSmartReach(rep, smartReachLeads),
-    title: srCount ? `Send ${rep}'s ${srCount} emailable Potential lead(s) (name + email) to SmartReach` : 'No Potential leads with an email yet'
+    title: srCount ? `Send ${rep}'s ${srCount} emailable Fresh Potential lead(s) (name + email) to SmartReach` : 'No fresh Potential leads with an email yet'
   }, "✉ Send ", srCount, " to SmartReach"), /*#__PURE__*/React.createElement("div", {
     className: "export-group"
   }, feats.exportCSV && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
-    disabled: !potential,
-    onClick: () => exportCloseCSV(potentialLeads, `${rep}_close_import.csv`),
-    title: "Download a Close.io-ready CSV of the Potential leads to import in Close"
+    disabled: !fresh,
+    onClick: () => exportCloseCSV(freshPotential, `${rep}_close_import.csv`),
+    title: "Download a Close.io-ready CSV of the Fresh Potential leads to import in Close (already-imported leads are skipped)"
   }, "⬇ Close CSV"), feats.exportCSV && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
     disabled: !srCount,
@@ -2845,6 +2854,16 @@ function RepDashboard({
   }, "Potential"), /*#__PURE__*/React.createElement("div", {
     className: "stat-value"
   }, potential)), /*#__PURE__*/React.createElement("div", {
+    className: "stat-card",
+    style: {
+      flex: 1
+    },
+    title: "Fresh Potential leads not yet on Close — the import queue"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Fresh (to import)"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, fresh)), /*#__PURE__*/React.createElement("div", {
     className: "stat-card",
     style: {
       flex: 1
@@ -2953,6 +2972,7 @@ function RepDashboard({
     onBulkAssign: onBulkAssign,
     showAssigned: true,
     showCampaign: true,
+    showOrigin: true,
     config: config,
     feats: feats,
     campColorMap: campColorMap,
@@ -6979,6 +6999,7 @@ function App() {
       rep,
       leads: repLeads.map(toCloseLeadItem)
     };
+    const sentIds = new Set(repLeads.map(l => l.id));
     setCloseSyncing(true);
     addToast(`Sending ${repLeads.length} lead(s) to Close.io for ${rep}…`, 'info');
     fetch(CLOSE_WEBHOOK, {
@@ -6991,6 +7012,12 @@ function App() {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
     }).then(() => {
+      // Flip the sent leads Fresh → Imported so they aren't pushed (and
+      // duplicated in Close) on the next click.
+      setLeads(ls => ls.map(l => sentIds.has(l.id) ? {
+        ...l,
+        importedToClose: true
+      } : l));
       addToast(`✓ ${repLeads.length} lead(s) sent to Close.io for ${rep}`, 'success');
       logH('⬆', `Close.io import: ${repLeads.length} lead(s) for ${rep}`);
     }).catch(e => {

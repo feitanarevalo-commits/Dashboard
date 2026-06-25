@@ -31,20 +31,21 @@ function canonTag(raw){
   return MAP[k] || s;
 }
 
-// ─── LEAD ORIGIN: Fresh vs Imported ───────────────────────
-// Fresh   = never contacted on any campaign (a brand-new lead).
-// Imported= has been contacted / recycled / brought in from a sheet
-//           or external import (i.e. previously worked).
+// ─── LEAD ORIGIN: Fresh vs Imported (re: Close.io) ─────────
+// Fresh   = NOT yet on Close — still needs to be imported. The import queue.
+// Imported= already on Close: it was pushed via "Send to Close" (importedToClose),
+//           pulled back from Close (fromClose), or carries a Close lead id.
+// "Send to Close" only sends Fresh leads and flips them to Imported on success,
+// so the same lead is never pushed (and duplicated in Close) twice.
 function leadOrigin(lead){
-  // Explicit flag (e.g. the sheet's IMPORTED Yes/No column) always wins.
+  // Explicit flag (e.g. a sheet's IMPORTED Yes/No column) always wins.
   if(lead.imported === true) return 'Imported';
   if(lead.imported === false) return 'Fresh';
-  const t = lead.tags || [];
-  const worked = !!lead.lastContactDate
-    || t.includes('Contacted') || t.includes('For Recycle') || t.includes('Existing Leads')
-    || lead.source === 'import' || lead.recycled === true;
-  return worked ? 'Imported' : 'Fresh';
+  if(lead.importedToClose || lead.fromClose || lead.closeLeadId) return 'Imported';
+  return 'Fresh';
 }
+// Convenience: a Fresh lead is one not yet on Close.
+function isFresh(lead){ return leadOrigin(lead)==='Fresh'; }
 function isRecycled(lead){
   return (lead.tags||[]).includes('For Recycle') || lead.recycled === true;
 }
@@ -1463,7 +1464,11 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
   const active=activeLeads.length;
   const potentialLeads=myLeads.filter(l=>l.tags.includes('Potential'));   // campaign-ready set
   const potential=potentialLeads.length;
-  const smartReachLeads=potentialLeads.filter(l=>(l.emails||[]).length>0);  // emailable Potential leads
+  // Only FRESH Potential leads (not yet on Close) get pushed — Imported ones are
+  // already in Close, so re-sending would duplicate them.
+  const freshPotential=potentialLeads.filter(isFresh);
+  const fresh=freshPotential.length;
+  const smartReachLeads=freshPotential.filter(l=>(l.emails||[]).length>0);  // emailable Fresh Potential leads
   const srCount=smartReachLeads.length;
   const contacted=myLeads.filter(l=>l.tags.includes('Contacted')).length;
   const ht=myLeads.filter(l=>l.tags.includes('HT')).length;
@@ -1489,20 +1494,20 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
           <div style={{fontSize:11,color:'var(--text-dim)'}}>{total} lead{total!==1?'s':''} · {active} active</div>
         </div>
         <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
-          <button className="btn btn-primary btn-sm" disabled={!potential}
-            onClick={()=>importToClose(rep,potentialLeads)}
-            title={potential?`Send ${rep}'s ${potential} Potential lead(s) to Close.io to run campaigns`:'No Potential leads to send yet'}>
-            ⬆ Send {potential} to Close.io
+          <button className="btn btn-primary btn-sm" disabled={!fresh}
+            onClick={()=>importToClose(rep,freshPotential)}
+            title={fresh?`Send ${rep}'s ${fresh} Fresh Potential lead(s) to Close.io (already-imported leads are skipped)`:(potential?'All Potential leads are already imported to Close':'No Potential leads to send yet')}>
+            ⬆ Send {fresh} to Close.io
           </button>
           <button className="btn btn-primary btn-sm" disabled={!srCount}
             onClick={()=>importToSmartReach(rep,smartReachLeads)}
-            title={srCount?`Send ${rep}'s ${srCount} emailable Potential lead(s) (name + email) to SmartReach`:'No Potential leads with an email yet'}>
+            title={srCount?`Send ${rep}'s ${srCount} emailable Fresh Potential lead(s) (name + email) to SmartReach`:'No fresh Potential leads with an email yet'}>
             ✉ Send {srCount} to SmartReach
           </button>
           <div className="export-group">
-            {feats.exportCSV && <button className="btn btn-outline btn-sm" disabled={!potential}
-              onClick={()=>exportCloseCSV(potentialLeads,`${rep}_close_import.csv`)}
-              title="Download a Close.io-ready CSV of the Potential leads to import in Close">⬇ Close CSV</button>}
+            {feats.exportCSV && <button className="btn btn-outline btn-sm" disabled={!fresh}
+              onClick={()=>exportCloseCSV(freshPotential,`${rep}_close_import.csv`)}
+              title="Download a Close.io-ready CSV of the Fresh Potential leads to import in Close (already-imported leads are skipped)">⬇ Close CSV</button>}
             {feats.exportCSV && <button className="btn btn-outline btn-sm" disabled={!srCount}
               onClick={()=>exportSmartReachCSV(smartReachLeads,`${rep}_smartreach.csv`)}
               title="Download a SmartReach CSV (channel name + email only) of the Potential leads">⬇ SmartReach CSV</button>}
@@ -1515,6 +1520,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
       <div style={{display:'flex',gap:12,padding:'16px 24px',flexShrink:0,borderBottom:'1px solid var(--border)',background:'var(--card)'}}>
         <div className="stat-card accent" style={{flex:1}}><div className="stat-label">Total</div><div className="stat-value">{total}</div></div>
         <div className="stat-card green" style={{flex:1}}><div className="stat-label">Potential</div><div className="stat-value">{potential}</div></div>
+        <div className="stat-card" style={{flex:1}} title="Fresh Potential leads not yet on Close — the import queue"><div className="stat-label">Fresh (to import)</div><div className="stat-value">{fresh}</div></div>
         <div className="stat-card" style={{flex:1}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
         <div className="stat-card orange" style={{flex:1}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
       </div>
@@ -1543,7 +1549,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
       </div>
       <LeadsTable
         leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkAssign={onBulkAssign}
-        showAssigned showCampaign config={config} feats={feats} campColorMap={campColorMap}
+        showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap}
         filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
       />
     </div>
@@ -3333,11 +3339,17 @@ function App() {
     // Per-lead shape the Make/n8n "close batch import" scenario iterates over;
     // leadJson round-trips the full dashboard object into Close's description.
     const payload={action:'close.create', rep, leads:repLeads.map(toCloseLeadItem)};
+    const sentIds=new Set(repLeads.map(l=>l.id));
     setCloseSyncing(true);
     addToast(`Sending ${repLeads.length} lead(s) to Close.io for ${rep}…`,'info');
     fetch(CLOSE_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
       .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
-      .then(()=>{ addToast(`✓ ${repLeads.length} lead(s) sent to Close.io for ${rep}`,'success'); logH('⬆',`Close.io import: ${repLeads.length} lead(s) for ${rep}`); })
+      .then(()=>{
+        // Flip the sent leads Fresh → Imported so they aren't pushed (and
+        // duplicated in Close) on the next click.
+        setLeads(ls=>ls.map(l=>sentIds.has(l.id)?{...l,importedToClose:true}:l));
+        addToast(`✓ ${repLeads.length} lead(s) sent to Close.io for ${rep}`,'success'); logH('⬆',`Close.io import: ${repLeads.length} lead(s) for ${rep}`);
+      })
       .catch(e=>{ addToast(`Close.io import failed for ${rep}: ${e.message}`,'error'); logH('⬆',`Close.io import failed for ${rep}`); })
       .finally(()=>setCloseSyncing(false));
   }
