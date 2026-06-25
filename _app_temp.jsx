@@ -2412,6 +2412,9 @@ function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,conf
       // No language → newest-first for freshness.
       extraQuery+='&order=date';
     }
+    // Active channels only: a matching upload within the last 3 months.
+    const since=new Date(); since.setMonth(since.getMonth()-3);
+    extraQuery+='&publishedAfter='+encodeURIComponent(since.toISOString());
     if(pageToken) extraQuery+='&pageToken='+encodeURIComponent(pageToken);
     const payload={ type:'search', platform, keyword:kw, interest:'', language, relevanceLanguage, order:'date', pageToken, extraQuery, minFollowers:parseFollowers(minF), maxFollowers:null, sortBy:'date', limit:25 };
     setLoading(true);

@@ -4728,6 +4728,10 @@ function ScraperView({
       // No language → newest-first for freshness.
       extraQuery += '&order=date';
     }
+    // Active channels only: a matching upload within the last 3 months.
+    const since = new Date();
+    since.setMonth(since.getMonth() - 3);
+    extraQuery += '&publishedAfter=' + encodeURIComponent(since.toISOString());
     if (pageToken) extraQuery += '&pageToken=' + encodeURIComponent(pageToken);
     const payload = {
       type: 'search',
