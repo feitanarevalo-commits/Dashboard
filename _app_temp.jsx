@@ -284,14 +284,11 @@ function exportSmartReachCSV(leads, filename='smartreach.csv') {
   downloadFile(rows, filename);
 }
 // One prospect for the Make "SmartReach add" scenario — name + email only.
-// One prospect for the Make "SmartReach add" scenario. campaign_id routes the
-// prospect into a SmartReach CAMPAIGN (not just the global Prospects list):
-// the lead's first dashboard campaign (MSN/VVV) is mapped to its SmartReach
-// campaign id via config.smartReachCampaigns. Empty when the lead has no
-// mapped campaign — Make then just creates the prospect without assigning it.
-function toSmartReachItem(l, campMap){
-  const camp=(l.campaigns||[]).find(c=>campMap&&campMap[c]);
-  return { name:l.channelName, email:(l.emails||[])[0]||'', campaign_id: camp?String(campMap[camp]):'' };
+// One prospect for the Make "SmartReach add" scenario. campaign_id is the
+// SmartReach campaign the rep picked in the bulk send — Make creates the
+// prospect then assigns it to that campaign (not just the global Prospects list).
+function toSmartReachItem(l, campaignId){
+  return { name:l.channelName, email:(l.emails||[])[0]||'', campaign_id: campaignId?String(campaignId):'' };
 }
 
 // Comprehensive Sales KPI report (one row per rep + a totals row). Includes
@@ -853,7 +850,7 @@ function InlineEmail({emails, onSave}) {
 }
 
 // ─── LEADS TABLE ──────────────────────────────────────────
-function LeadsTable({leads,onEdit,onDelete,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
+function LeadsTable({leads,onEdit,onDelete,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
   const [sel,setSel] = useState([]);
   const [searchState,setSearchState] = useState('');
   // When the parent provides search control (e.g. Scraper uses it as the
@@ -872,6 +869,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkAssign,showAssigned=false,showC
   const [page,setPage] = useState(1);
   const [colFilter,setColFilter] = useState({});
   const [openFilterCol,setOpenFilterCol] = useState(null);
+  const [srCampaign,setSrCampaign] = useState('');  // selected SmartReach campaign id (rep dashboard)
   const PAGE_SIZE=25;
 
   const cols = config.columns||{};
@@ -929,6 +927,8 @@ function LeadsTable({leads,onEdit,onDelete,onBulkAssign,showAssigned=false,showC
   const paginated=filtered.slice((page-1)*PAGE_SIZE,page*PAGE_SIZE);
 
   const allSel=filtered.length>0&&filtered.every(l=>sel.includes(l.id));
+  // Selected leads that actually have an email (the SmartReach-sendable subset).
+  const selEmailable=filtered.filter(l=>sel.includes(l.id)&&(l.emails||[]).length>0);
   function toggleAll(){setSel(allSel?[]:filtered.map(l=>l.id));}
   function toggleOne(id){setSel(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);}
   const lastIdx=useRef(null);
@@ -1063,7 +1063,24 @@ function LeadsTable({leads,onEdit,onDelete,onBulkAssign,showAssigned=false,showC
             Save Changes
           </button>
           <button className="btn btn-outline btn-sm" onClick={openSelected} title="Open each selected lead's URL in a new tab">🔗 Open {sel.length}</button>
-          <button className="btn btn-ghost btn-sm" onClick={()=>{setSel([]);setBulkRep('');setBulkTags([]);setBulkCamps([]);}}>✕ Clear</button>
+          {smartReachSend&&(<>
+            <div className="toolbar-sep"/>
+            <span className="bulk-panel-label">SmartReach</span>
+            <select value={srCampaign} onChange={e=>setSrCampaign(e.target.value)} style={{fontSize:12,padding:'5px 10px'}}>
+              <option value="">{(smartReachSend.campaigns||[]).length?'— campaign —':'no campaigns synced'}</option>
+              {(smartReachSend.campaigns||[]).map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+            <button className="btn btn-primary btn-sm" disabled={!srCampaign||selEmailable.length===0}
+              onClick={()=>{
+                const camp=(smartReachSend.campaigns||[]).find(c=>String(c.id)===String(srCampaign));
+                smartReachSend.onSend(selEmailable, srCampaign, camp?camp.label:'');
+                setSel([]); setSrCampaign('');
+              }}
+              title={selEmailable.length?`Send the ${selEmailable.length} selected lead(s) with an email to the chosen SmartReach campaign`:'Select leads that have an email first'}>
+              ✉ Send {selEmailable.length} to SmartReach
+            </button>
+          </>)}
+          <button className="btn btn-ghost btn-sm" onClick={()=>{setSel([]);setBulkRep('');setBulkTags([]);setBulkCamps([]);setSrCampaign('');}}>✕ Clear</button>
         </div>
       )}
 
@@ -1509,11 +1526,6 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
             title={fresh?`Send ${rep}'s ${fresh} Fresh Potential lead(s) to Close.io (already-imported leads are skipped)`:(potential?'All Potential leads are already imported to Close':'No Potential leads to send yet')}>
             ⬆ Send {fresh} to Close.io
           </button>
-          <button className="btn btn-primary btn-sm" disabled={!srCount}
-            onClick={()=>importToSmartReach(rep,smartReachLeads)}
-            title={srCount?`Send all ${srCount} of ${rep}'s emailable lead(s) (name + email) to SmartReach`:'No leads with an email yet'}>
-            ✉ Send {srCount} to SmartReach
-          </button>
           <div className="export-group">
             {feats.exportCSV && <button className="btn btn-outline btn-sm" disabled={!fresh}
               onClick={()=>exportCloseCSV(freshPotential,`${rep}_close_import.csv`)}
@@ -1560,6 +1572,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
       <LeadsTable
         leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap}
+        smartReachSend={{ campaigns:(config.smartReachCampaigns&&config.smartReachCampaigns[rep])||[], onSend:(leads,campId,campLabel)=>importToSmartReach(rep,leads,campId,campLabel) }}
         filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
       />
     </div>
@@ -3366,17 +3379,22 @@ function App() {
       .finally(()=>setCloseSyncing(false));
   }
 
-  // Send a rep's emailable Potential leads to SmartReach — name + email only.
-  function importToSmartReach(rep,repLeads){
+  // Send the rep's SELECTED leads (name + email) to a SmartReach CAMPAIGN she
+  // picked. Make creates each prospect then assigns it to that campaign.
+  function importToSmartReach(rep,repLeads,campaignId,campaignLabel){
     const wh=(config.smartreachWebhook||'').trim();
     if(!wh || wh.includes('your-')){ addToast('Set the SmartReach Webhook in ⚙ Customize first','info'); return; }
-    if(!repLeads || !repLeads.length){ addToast(`No emailable leads to send for ${rep}`,'info'); return; }
-    const srMap=config.smartReachCampaigns||{};
-    const payload={action:'smartreach.add', rep, leads:repLeads.map(l=>toSmartReachItem(l,srMap))};
-    addToast(`Sending ${repLeads.length} prospect(s) to SmartReach for ${rep}…`,'info');
+    const emailable=(repLeads||[]).filter(l=>(l.emails||[]).length>0);
+    if(!emailable.length){ addToast(`No selected leads have an email to send for ${rep}`,'info'); return; }
+    if(!campaignId){ addToast('Pick a SmartReach campaign first','info'); return; }
+    // Placeholder ids are negative until real SmartReach campaign ids are synced.
+    if(Number(campaignId)<=0){ addToast('SmartReach campaigns aren’t synced yet — admin needs to connect SmartReach (pending API key)','info'); return; }
+    const dest=campaignLabel||('campaign '+campaignId);
+    const payload={action:'smartreach.add', rep, campaign_id:String(campaignId), leads:emailable.map(l=>toSmartReachItem(l,campaignId))};
+    addToast(`Sending ${emailable.length} prospect(s) to SmartReach → ${dest}…`,'info');
     fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
       .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
-      .then(()=>{ addToast(`✓ ${repLeads.length} prospect(s) sent to SmartReach for ${rep}`,'success'); logH('✉',`SmartReach: ${repLeads.length} prospect(s) for ${rep}`); })
+      .then(()=>{ addToast(`✓ ${emailable.length} prospect(s) sent to SmartReach → ${dest}`,'success'); logH('✉',`SmartReach: ${emailable.length} → ${dest} (${rep})`); })
       .catch(e=>{ addToast(`SmartReach send failed for ${rep}: ${e.message}`,'error'); logH('✉',`SmartReach send failed for ${rep}`); });
   }
 

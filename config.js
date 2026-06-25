@@ -85,13 +85,19 @@ var DEFAULT_CONFIG = {
     assigned:  'cf_mV4TQoYmUEAWJOZyqzCjblulhPPyM3NczEb5TSe9zVt',
   },
 
-  // SmartReach campaign IDs — maps a dashboard campaign (MSN/VVV) to its
-  // SmartReach campaign id, so "Send to SmartReach" drops each prospect INTO
-  // that campaign (not just the global Prospects list). Get an id from
-  // SmartReach → Campaigns. Add VVV here once that campaign exists in SmartReach.
+  // SmartReach campaigns per rep — [{id,label}] shown in the rep's bulk
+  // "Send to SmartReach" campaign picker (only that rep's campaigns appear under
+  // her). Grouped from the "REP | CAMPAIGN" naming in the ENFINITY LIMITED team.
+  // ⚠ IDs below are PLACEHOLDERS (negative) until the SmartReach API key is
+  //   provided and the real campaign ids are pulled in — sending is blocked
+  //   (and Make re-pointed at the ENFINITY LIMITED team) until then.
+  //   Re-pull when reps add/rename campaigns.
   smartReachCampaigns: {
-    MSN: '205998',
-    // VVV: 'PUT_VVV_SMARTREACH_CAMPAIGN_ID_HERE',
+    Pen:   [{ id: -1, label: 'PENN | VVV' }, { id: -2, label: 'PENN New | Boost' }],
+    Chase: [{ id: -1, label: 'CHASE | VVV' }, { id: -2, label: 'CHASE | ADCE' }],
+    Mikka: [{ id: -1, label: 'MIKKA | VVV' }, { id: -2, label: 'MIKKA | ADCE' }],
+    Rein:  [{ id: -1, label: 'REIN | ADCE' }],
+    Chai:  [{ id: -1, label: 'CHAI | CREATORSHIELD' }, { id: -2, label: 'CHAI | ENFINISHIELD' }, { id: -3, label: 'CHAI | ADCE' }],
   },
 
   // ── Campaigns ── add as many as you need
