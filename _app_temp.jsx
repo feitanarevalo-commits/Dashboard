@@ -1468,7 +1468,10 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
   // already in Close, so re-sending would duplicate them.
   const freshPotential=potentialLeads.filter(isFresh);
   const fresh=freshPotential.length;
-  const smartReachLeads=freshPotential.filter(l=>(l.emails||[]).length>0);  // emailable Fresh Potential leads
+  // SmartReach gets EVERY emailable lead under the rep (any status, fresh or
+  // imported) — unlike Close, which only takes Fresh leads. SmartReach dedupes
+  // prospects by email on its side, so re-sends don't duplicate.
+  const smartReachLeads=myLeads.filter(l=>(l.emails||[]).length>0);  // all emailable leads for this rep
   const srCount=smartReachLeads.length;
   const contacted=myLeads.filter(l=>l.tags.includes('Contacted')).length;
   const ht=myLeads.filter(l=>l.tags.includes('HT')).length;
@@ -1501,7 +1504,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
           </button>
           <button className="btn btn-primary btn-sm" disabled={!srCount}
             onClick={()=>importToSmartReach(rep,smartReachLeads)}
-            title={srCount?`Send ${rep}'s ${srCount} emailable Fresh Potential lead(s) (name + email) to SmartReach`:'No fresh Potential leads with an email yet'}>
+            title={srCount?`Send all ${srCount} of ${rep}'s emailable lead(s) (name + email) to SmartReach`:'No leads with an email yet'}>
             ✉ Send {srCount} to SmartReach
           </button>
           <div className="export-group">
@@ -1510,7 +1513,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
               title="Download a Close.io-ready CSV of the Fresh Potential leads to import in Close (already-imported leads are skipped)">⬇ Close CSV</button>}
             {feats.exportCSV && <button className="btn btn-outline btn-sm" disabled={!srCount}
               onClick={()=>exportSmartReachCSV(smartReachLeads,`${rep}_smartreach.csv`)}
-              title="Download a SmartReach CSV (channel name + email only) of the Potential leads">⬇ SmartReach CSV</button>}
+              title="Download a SmartReach CSV (channel name + email only) of all this rep's emailable leads">⬇ SmartReach CSV</button>}
             {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(myLeads,`${rep}_leads.csv`)}>⬇ Export CSV</button>}
             {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={()=>exportPDF(rep)}>🖨 Export PDF</button>}
           </div>
