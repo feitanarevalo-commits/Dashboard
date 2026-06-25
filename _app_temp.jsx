@@ -2374,6 +2374,17 @@ const LANG_CODES={ All:'', English:'en', Spanish:'es', French:'fr', German:'de',
 // alone is only a soft bias, so adding the region makes results stay in-language.
 // Tunable: e.g. Spanish→MX (largest Spanish YT), Portuguese→BR, English→US.
 const REGION_CODES={ All:'', English:'US', Spanish:'MX', French:'FR', German:'DE', Portuguese:'BR', Other:'' };
+// Follower BRACKETS (a range, not a minimum) — picking "1K – 10K" keeps only
+// channels inside that band, so a selection stays on its tier.
+const FOLLOWER_BRACKETS=[
+  { v:'',     label:'Any followers', min:0,       max:Infinity },
+  { v:'1K',   label:'1K – 10K',      min:1000,    max:10000 },
+  { v:'10K',  label:'10K – 50K',     min:10000,   max:50000 },
+  { v:'50K',  label:'50K – 100K',    min:50000,   max:100000 },
+  { v:'100K', label:'100K – 500K',   min:100000,  max:500000 },
+  { v:'500K', label:'500K – 1M',     min:500000,  max:1000000 },
+  { v:'1M',   label:'1M+',           min:1000000, max:Infinity },
+];
 
 function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,config}) {
   const [platform,setPlatform]=useState('All');
@@ -2442,15 +2453,15 @@ function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,conf
         try{ if(tok) localStorage.setItem(pageKey,tok); else localStorage.removeItem(pageKey); }catch(e){}
         try{ console.log('[Enfinity scraper] received',items.length,'items. First item:',items[0]); }catch(e){}
         const mapped=items.map((it,i)=>mapDiscoveryResult(it,platform==='All'?null:platform,i));
-        // Reject channels below the Min Followers threshold (only when the
-        // follower count is known — unknown counts pass through).
-        const minN=parseFollowers(minF);
-        const kept = minN>0 ? mapped.filter(l=>{ const f=parseFollowers(l.followers); return !f || f>=minN; }) : mapped;
+        // Keep only channels INSIDE the selected follower bracket (a band, not
+        // just a minimum). Unknown counts pass through (can't be bracketed).
+        const br=FOLLOWER_BRACKETS.find(b=>b.v===minF)||FOLLOWER_BRACKETS[0];
+        const kept = mapped.filter(l=>{ const f=parseFollowers(l.followers); return !f || (f>=br.min && f<br.max); });
         const skipped = mapped.length - kept.length;
         if(onResults) onResults(kept);
         addToast(kept.length
-          ? `✓ ${kept.length} lead(s) scraped`+(skipped?` · ${skipped} under ${minF} skipped`:'')
-          : (skipped?`All ${skipped} result(s) were under ${minF}`:'Scraper ran but returned 0 profiles'),'success');
+          ? `✓ ${kept.length} lead(s) scraped`+(skipped?` · ${skipped} outside ${br.label}`:'')
+          : (skipped?`All ${skipped} result(s) were outside ${br.label}`:'Scraper ran but returned 0 profiles'),'success');
       })
       .catch(e=>{
         const cors=(e&&e.message||'').toLowerCase().includes('failed to fetch');
@@ -2472,8 +2483,8 @@ function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,conf
         <option value="All">All Platforms</option>
         {PLATFORMS.map(p=><option key={p}>{p}</option>)}
       </select>
-      <select value={minF} onChange={e=>setMinF(e.target.value)} title="Minimum followers">
-        {['1K','10K','50K','100K','500K','1M'].map(v=><option key={v} value={v}>{v}+ followers</option>)}
+      <select value={minF} onChange={e=>setMinF(e.target.value)} title="Follower bracket">
+        {FOLLOWER_BRACKETS.map(b=><option key={b.v||'any'} value={b.v}>{b.label}</option>)}
       </select>
       <select value={language} onChange={e=>setLanguage(e.target.value)} title="Language">
         {SCRAPER_LANGUAGES.map(l=><option key={l} value={l}>{l==='All'?'All Languages':l}</option>)}
