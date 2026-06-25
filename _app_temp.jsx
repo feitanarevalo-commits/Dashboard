@@ -274,10 +274,12 @@ function toCloseLeadItem(l){
 // name + email (one prospect per lead's primary email; leads without an email
 // are skipped since they can't be emailed).
 function exportSmartReachCSV(leads, filename='smartreach.csv') {
-  const cols = ['Channel Name','Email'];
+  // SmartReach's CSV importer expects lowercase headers `email,first_name`
+  // (email first). first_name carries the channel/contact name as shown.
+  const cols = ['email','first_name'];
   const rows = [csvRow(cols), ...leads
     .filter(l=>(l.emails||[]).length>0)
-    .map(l => csvRow([l.channelName, (l.emails||[])[0]||'']))
+    .map(l => csvRow([(l.emails||[])[0]||'', l.channelName]))
   ].join('\n');
   downloadFile(rows, filename);
 }
