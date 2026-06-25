@@ -384,8 +384,7 @@ function exportKpiCSV(repRows, info, filename = 'enfinity_sales_kpis.csv') {
   const camps = info.campaigns || []; // [{id,label}]
   const plats = info.platforms || []; // ['YouTube',...]
   const fmtRow = r => {
-    const qualified = r.total - r.nq;
-    return csvRow([r.rep, r.total, r.fresh, r.recycled, r.potential, r.contacted, r.ht, r.nq, pct(r.contacted, r.total), pct(r.potential, r.total), pct(qualified, r.total), r.withEmail, pct(r.withEmail, r.total), r.avgFoll || 0, ...camps.map(c => r.byCampaign && r.byCampaign[c.id] || 0), ...plats.map(p => r.byPlatform && r.byPlatform[p] || 0)]);
+    return csvRow([r.rep, r.total, r.fresh, r.recycled, r.potential, r.contacted, r.ht, pct(r.contacted, r.total), pct(r.potential, r.total), r.withEmail, pct(r.withEmail, r.total), r.avgFoll || 0, ...camps.map(c => r.byCampaign && r.byCampaign[c.id] || 0), ...plats.map(p => r.byPlatform && r.byPlatform[p] || 0)]);
   };
   // Totals row: sum counts, recompute rates/averages on the aggregate.
   const sum = k => repRows.reduce((s, r) => s + (r[k] || 0), 0);
@@ -399,13 +398,12 @@ function exportKpiCSV(repRows, info, filename = 'enfinity_sales_kpis.csv') {
     potential: sum('potential'),
     contacted: sum('contacted'),
     ht: sum('ht'),
-    nq: sum('nq'),
     withEmail: sum('withEmail'),
     avgFoll: tFollKnown ? Math.round(tFoll / tFollKnown) : 0,
     byCampaign: Object.fromEntries(camps.map(c => [c.id, repRows.reduce((s, r) => s + (r.byCampaign && r.byCampaign[c.id] || 0), 0)])),
     byPlatform: Object.fromEntries(plats.map(p => [p, repRows.reduce((s, r) => s + (r.byPlatform && r.byPlatform[p] || 0), 0)]))
   };
-  const cols = ['Sales Rep', 'Total Assigned', 'Fresh', 'Recycled', 'Potential', 'Contacted', 'High Ticket', 'Not Qualified', 'Contact Rate %', 'Potential Rate %', 'Qualified Rate %', 'With Email', 'Email Coverage %', 'Avg Followers', ...camps.map(c => `Campaign: ${c.label}`), ...plats.map(p => `Platform: ${p}`)];
+  const cols = ['Sales Rep', 'Total Assigned', 'Fresh', 'Recycled', 'Potential', 'Contacted', 'High Ticket', 'Contact Rate %', 'Potential Rate %', 'With Email', 'Email Coverage %', 'Avg Followers', ...camps.map(c => `Campaign: ${c.label}`), ...plats.map(p => `Platform: ${p}`)];
   // Per-rep × campaign section: one row per (rep, campaign) + All Reps totals.
   const campRow = (repLabel, c, s) => csvRow([repLabel, c.label, s.total, s.potential, pct(s.potential, s.total), s.contacted, pct(s.contacted, s.total), s.ht]);
   const campSection = [];
@@ -2324,7 +2322,6 @@ function HomeView({
   const contactedTot = periodLeads.filter(l => l.tags.includes('Contacted')).length;
   const withEmailTot = periodLeads.filter(l => (l.emails || []).length > 0).length;
   const htTot = periodLeads.filter(l => l.tags.includes('HT')).length;
-  const nqTot = periodLeads.filter(l => l.tags.includes('Not Qualified')).length;
   const follAll = periodLeads.map(l => parseFollowers(l.followers)).filter(n => n > 0);
   const avgFollTot = follAll.length ? Math.round(follAll.reduce((a, b) => a + b, 0) / follAll.length) : 0;
   const kpiInfo = {
@@ -2428,7 +2425,7 @@ function HomeView({
     className: "stat-value"
   }, fmtFollowers(avgFollTot)), /*#__PURE__*/React.createElement("div", {
     className: "stat-sub"
-  }, nqTot, " not qualified"))), /*#__PURE__*/React.createElement("div", {
+  }, "per assigned lead"))), /*#__PURE__*/React.createElement("div", {
     className: "card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-header"
@@ -2488,7 +2485,7 @@ function HomeView({
     }
   }, /*#__PURE__*/React.createElement("table", {
     className: "kpi-table"
-  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Sales Rep"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Fresh"), /*#__PURE__*/React.createElement("th", null, "Recycled"), /*#__PURE__*/React.createElement("th", null, "Potential"), /*#__PURE__*/React.createElement("th", null, "Contacted"), /*#__PURE__*/React.createElement("th", null, "High Ticket"), /*#__PURE__*/React.createElement("th", null, "NQ"), /*#__PURE__*/React.createElement("th", {
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Sales Rep"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Fresh"), /*#__PURE__*/React.createElement("th", null, "Recycled"), /*#__PURE__*/React.createElement("th", null, "Potential"), /*#__PURE__*/React.createElement("th", null, "Contacted"), /*#__PURE__*/React.createElement("th", null, "High Ticket"), /*#__PURE__*/React.createElement("th", {
     title: "Contacted ÷ Total"
   }, "Contact %"), /*#__PURE__*/React.createElement("th", {
     title: "Potential ÷ Total"
@@ -2512,7 +2509,7 @@ function HomeView({
       color: 'var(--warn)',
       fontWeight: 600
     }
-  }, r.recycled), /*#__PURE__*/React.createElement("td", null, r.potential), /*#__PURE__*/React.createElement("td", null, r.contacted), /*#__PURE__*/React.createElement("td", null, r.ht), /*#__PURE__*/React.createElement("td", null, r.nq), /*#__PURE__*/React.createElement("td", null, pct(r.contacted, r.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(r.potential, r.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(r.withEmail, r.total), "%"), /*#__PURE__*/React.createElement("td", null, fmtFollowers(r.avgFoll || 0)), /*#__PURE__*/React.createElement("td", {
+  }, r.recycled), /*#__PURE__*/React.createElement("td", null, r.potential), /*#__PURE__*/React.createElement("td", null, r.contacted), /*#__PURE__*/React.createElement("td", null, r.ht), /*#__PURE__*/React.createElement("td", null, pct(r.contacted, r.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(r.potential, r.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(r.withEmail, r.total), "%"), /*#__PURE__*/React.createElement("td", null, fmtFollowers(r.avgFoll || 0)), /*#__PURE__*/React.createElement("td", {
     className: "no-print"
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost btn-xs",
@@ -2531,7 +2528,7 @@ function HomeView({
     style: {
       color: 'var(--warn)'
     }
-  }, repTot.recycled), /*#__PURE__*/React.createElement("td", null, repTot.potential), /*#__PURE__*/React.createElement("td", null, repTot.contacted), /*#__PURE__*/React.createElement("td", null, repTot.ht), /*#__PURE__*/React.createElement("td", null, repTot.nq), /*#__PURE__*/React.createElement("td", null, pct(repTot.contacted, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(repTot.potential, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(repTot.withEmail, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, fmtFollowers(repTot.avgFoll || 0)), /*#__PURE__*/React.createElement("td", {
+  }, repTot.recycled), /*#__PURE__*/React.createElement("td", null, repTot.potential), /*#__PURE__*/React.createElement("td", null, repTot.contacted), /*#__PURE__*/React.createElement("td", null, repTot.ht), /*#__PURE__*/React.createElement("td", null, pct(repTot.contacted, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(repTot.potential, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(repTot.withEmail, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, fmtFollowers(repTot.avgFoll || 0)), /*#__PURE__*/React.createElement("td", {
     className: "no-print"
   })))))), campDefs.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "card"

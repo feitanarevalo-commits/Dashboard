@@ -292,10 +292,9 @@ function exportKpiCSV(repRows, info, filename='enfinity_sales_kpis.csv') {
   const camps = info.campaigns || [];          // [{id,label}]
   const plats = info.platforms || [];           // ['YouTube',...]
   const fmtRow = r => {
-    const qualified = r.total - r.nq;
     return csvRow([
-      r.rep, r.total, r.fresh, r.recycled, r.potential, r.contacted, r.ht, r.nq,
-      pct(r.contacted,r.total), pct(r.potential,r.total), pct(qualified,r.total),
+      r.rep, r.total, r.fresh, r.recycled, r.potential, r.contacted, r.ht,
+      pct(r.contacted,r.total), pct(r.potential,r.total),
       r.withEmail, pct(r.withEmail,r.total), r.avgFoll||0,
       ...camps.map(c=>(r.byCampaign&&r.byCampaign[c.id])||0),
       ...plats.map(p=>(r.byPlatform&&r.byPlatform[p])||0),
@@ -307,13 +306,13 @@ function exportKpiCSV(repRows, info, filename='enfinity_sales_kpis.csv') {
   const tFollKnown = sum('follKnown');
   const totals = {
     rep:'All Reps', total:sum('total'), fresh:sum('fresh'), recycled:sum('recycled'),
-    potential:sum('potential'), contacted:sum('contacted'), ht:sum('ht'), nq:sum('nq'),
+    potential:sum('potential'), contacted:sum('contacted'), ht:sum('ht'),
     withEmail:sum('withEmail'), avgFoll: tFollKnown?Math.round(tFoll/tFollKnown):0,
     byCampaign:Object.fromEntries(camps.map(c=>[c.id,repRows.reduce((s,r)=>s+((r.byCampaign&&r.byCampaign[c.id])||0),0)])),
     byPlatform:Object.fromEntries(plats.map(p=>[p,repRows.reduce((s,r)=>s+((r.byPlatform&&r.byPlatform[p])||0),0)])),
   };
-  const cols = ['Sales Rep','Total Assigned','Fresh','Recycled','Potential','Contacted','High Ticket','Not Qualified',
-    'Contact Rate %','Potential Rate %','Qualified Rate %','With Email','Email Coverage %','Avg Followers',
+  const cols = ['Sales Rep','Total Assigned','Fresh','Recycled','Potential','Contacted','High Ticket',
+    'Contact Rate %','Potential Rate %','With Email','Email Coverage %','Avg Followers',
     ...camps.map(c=>`Campaign: ${c.label}`), ...plats.map(p=>`Platform: ${p}`)];
   // Per-rep × campaign section: one row per (rep, campaign) + All Reps totals.
   const campRow = (repLabel,c,s)=>csvRow([repLabel, c.label, s.total, s.potential,
@@ -1243,7 +1242,6 @@ function HomeView({leads,config}) {
   const contactedTot=periodLeads.filter(l=>l.tags.includes('Contacted')).length;
   const withEmailTot=periodLeads.filter(l=>(l.emails||[]).length>0).length;
   const htTot=periodLeads.filter(l=>l.tags.includes('HT')).length;
-  const nqTot=periodLeads.filter(l=>l.tags.includes('Not Qualified')).length;
   const follAll=periodLeads.map(l=>parseFollowers(l.followers)).filter(n=>n>0);
   const avgFollTot=follAll.length?Math.round(follAll.reduce((a,b)=>a+b,0)/follAll.length):0;
   const kpiInfo={period:pDef.label, rangeStart:cutoff.toISOString().split('T')[0], rangeEnd:new Date().toISOString().split('T')[0], campaigns:campDefs, platforms:PLATFORMS};
@@ -1274,7 +1272,7 @@ function HomeView({leads,config}) {
         <div className="stat-card"><div className="stat-label">Contacted</div><div className="stat-value">{contactedTot}</div><div className="stat-sub">{pct(contactedTot,total)}% contact rate</div></div>
         <div className="stat-card green"><div className="stat-label">Potential</div><div className="stat-value">{potentialTot}</div><div className="stat-sub">{pct(potentialTot,total)}% · {htTot} high ticket</div></div>
         <div className="stat-card"><div className="stat-label">With Email</div><div className="stat-value">{withEmailTot}</div><div className="stat-sub">{pct(withEmailTot,total)}% coverage</div></div>
-        <div className="stat-card accent"><div className="stat-label">Avg Followers</div><div className="stat-value">{fmtFollowers(avgFollTot)}</div><div className="stat-sub">{nqTot} not qualified</div></div>
+        <div className="stat-card accent"><div className="stat-label">Avg Followers</div><div className="stat-value">{fmtFollowers(avgFollTot)}</div><div className="stat-sub">per assigned lead</div></div>
       </div>
 
       <div className="card">
@@ -1306,7 +1304,7 @@ function HomeView({leads,config}) {
           <table className="kpi-table">
             <thead><tr>
               <th>Sales Rep</th><th>Total</th><th>Fresh</th><th>Recycled</th>
-              <th>Potential</th><th>Contacted</th><th>High Ticket</th><th>NQ</th>
+              <th>Potential</th><th>Contacted</th><th>High Ticket</th>
               <th title="Contacted ÷ Total">Contact %</th><th title="Potential ÷ Total">Pot %</th>
               <th title="Leads with at least one email ÷ Total">Email %</th><th>Avg Followers</th>
               <th className="no-print">Report</th>
@@ -1318,7 +1316,7 @@ function HomeView({leads,config}) {
                   <td>{r.total}</td>
                   <td style={{color:'var(--accent)',fontWeight:600}}>{r.fresh}</td>
                   <td style={{color:'var(--warn)',fontWeight:600}}>{r.recycled}</td>
-                  <td>{r.potential}</td><td>{r.contacted}</td><td>{r.ht}</td><td>{r.nq}</td>
+                  <td>{r.potential}</td><td>{r.contacted}</td><td>{r.ht}</td>
                   <td>{pct(r.contacted,r.total)}%</td>
                   <td>{pct(r.potential,r.total)}%</td>
                   <td>{pct(r.withEmail,r.total)}%</td>
@@ -1337,7 +1335,6 @@ function HomeView({leads,config}) {
                 <td>{repTot.potential}</td>
                 <td>{repTot.contacted}</td>
                 <td>{repTot.ht}</td>
-                <td>{repTot.nq}</td>
                 <td>{pct(repTot.contacted,repTot.total)}%</td>
                 <td>{pct(repTot.potential,repTot.total)}%</td>
                 <td>{pct(repTot.withEmail,repTot.total)}%</td>
