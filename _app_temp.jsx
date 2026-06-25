@@ -71,6 +71,15 @@ function pseudoStat(seed, lo, hi){
   return (lo + (h%1000)/1000*(hi-lo));
 }
 
+// Pull email addresses out of free text (a YouTube channel's description /
+// "for business inquiries: x@gmail.com"). The Data API doesn't expose the gated
+// business email, so this catches the ones creators list publicly.
+function extractEmails(text){
+  if(!text) return [];
+  const m=String(text).match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g)||[];
+  return [...new Set(m.map(e=>e.replace(/[.,;:>)\]]+$/,'').toLowerCase()))]
+    .filter(e=>!/\.(png|jpg|jpeg|gif|webp)$/.test(e));
+}
 // Map a raw result from the Make/Apify scraper into a dashboard lead.
 // Tolerant of field-name variations across Apify actors/platforms.
 function mapDiscoveryResult(item, fallbackPlatform, i){
@@ -94,7 +103,11 @@ function mapDiscoveryResult(item, fallbackPlatform, i){
   const followers = followersRaw==='' ? '' :
     ((typeof followersRaw==='number' || /^\d+$/.test(String(followersRaw))) ? fmtFollowers(Number(followersRaw)) : String(followersRaw));
   const niche=get('niche','category','businessCategoryName','categoryName');
-  const email=get('email','publicEmail','businessEmail');
+  // Email: explicit field first, then scraped from the channel description.
+  const explicitEmail=get('email','publicEmail','businessEmail');
+  const descText=[sn.description, item.description,
+    (item.brandingSettings&&item.brandingSettings.channel&&item.brandingSettings.channel.description)].filter(Boolean).join('  ');
+  const emails=[...new Set([...(explicitEmail?[String(explicitEmail).toLowerCase()]:[]), ...extractEmails(descText)])];
   const thumb=get('thumbnail','thumbnailUrl','avatar','profilePic','profilePicUrl','profilePicUrlHD','displayUrl','image','picture','imageUrl') || ytThumb;
   const channelId=get('channel_id','channelId','channelID','ownerId','authorId','userId','user_id') || ytChannelId;
   // Determine platform: explicit field → infer from URL → searched tab → fallback.
@@ -113,7 +126,7 @@ function mapDiscoveryResult(item, fallbackPlatform, i){
     platform: platform,
     niche: String(niche||''),
     followers: followers,
-    emails: email ? [String(email)] : [],
+    emails: emails,
     thumbnail: thumb ? String(thumb) : '',
     channelId: channelId ? String(channelId) : '',
     addedAt: new Date().toISOString(),
@@ -2355,6 +2368,8 @@ function DiscoveryView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,co
 // (config.scrapeWebhook) and ingests results; falls back to a notice if
 // no webhook is configured. The richer DiscoveryView above is kept dormant.
 const SCRAPER_LANGUAGES=['All','English','Spanish','French','German','Portuguese','Other'];
+// Dashboard language name → YouTube `relevanceLanguage` code ('' = no preference).
+const LANG_CODES={ All:'', English:'en', Spanish:'es', French:'fr', German:'de', Portuguese:'pt', Other:'' };
 
 function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,config}) {
   const [platform,setPlatform]=useState('All');
@@ -2372,12 +2387,23 @@ function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,conf
       addToast('No scraper webhook set — add it in ⚙ Customize → Scraper Webhook','info');
       return;
     }
-    const payload={ type:'search', platform, keyword:keyword.trim(), interest:'', language, minFollowers:parseFollowers(minF), maxFollowers:null, sortBy:'relevance', limit:25 };
+    const kw=keyword.trim();
+    const relevanceLanguage=LANG_CODES[language]||'';
+    // Pagination memory: continue from where this keyword+language left off so
+    // each run returns fresh channels (stored per browser).
+    const pageKey='srPage_'+kw.toLowerCase()+'|'+relevanceLanguage;
+    let pageToken=''; try{ pageToken=localStorage.getItem(pageKey)||''; }catch(e){}
+    // Pre-build the optional query fragment so Make just appends it (no fragile
+    // conditional logic in the scenario). Empty when first page / all languages.
+    let extraQuery='';
+    if(relevanceLanguage) extraQuery+='&relevanceLanguage='+relevanceLanguage;
+    if(pageToken) extraQuery+='&pageToken='+encodeURIComponent(pageToken);
+    const payload={ type:'search', platform, keyword:kw, interest:'', language, relevanceLanguage, order:'date', pageToken, extraQuery, minFollowers:parseFollowers(minF), maxFollowers:null, sortBy:'date', limit:25 };
     setLoading(true);
     addToast('Running scraper…','info');
     fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-      .then(r=>r.text().then(t=>{ if(!r.ok) throw new Error('HTTP '+r.status+(t&&t.trim()?' — '+t.replace(/\s+/g,' ').slice(0,140):'')); return t; }))
-      .then(text=>{
+      .then(r=>r.text().then(t=>{ if(!r.ok) throw new Error('HTTP '+r.status+(t&&t.trim()?' — '+t.replace(/\s+/g,' ').slice(0,140):'')); return {t, nextToken:(r.headers.get('X-Next-Page-Token')||'')}; }))
+      .then(({t:text, nextToken})=>{
         if(!text || !text.trim()){
           addToast('Scraper returned an empty response — in n8n set Respond to Webhook → "Respond With: All Incoming Items" and connect it after Get dataset items','error');
           return;
@@ -2393,6 +2419,9 @@ function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,conf
           return;
         }
         const items=Array.isArray(data)?data:(data.results||data.items||data.data||[]);
+        // Advance / reset the pagination cursor (from the X-Next-Page-Token header).
+        const tok=nextToken||((data&&!Array.isArray(data)&&data.nextPageToken)||'');
+        try{ if(tok) localStorage.setItem(pageKey,tok); else localStorage.removeItem(pageKey); }catch(e){}
         try{ console.log('[Enfinity scraper] received',items.length,'items. First item:',items[0]); }catch(e){}
         const mapped=items.map((it,i)=>mapDiscoveryResult(it,platform==='All'?null:platform,i));
         // Reject channels below the Min Followers threshold (only when the
