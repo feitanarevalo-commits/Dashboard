@@ -87,17 +87,16 @@ var DEFAULT_CONFIG = {
 
   // SmartReach campaigns per rep — [{id,label}] shown in the rep's bulk
   // "Send to SmartReach" campaign picker (only that rep's campaigns appear under
-  // her). Grouped from the "REP | CAMPAIGN" naming in the ENFINITY LIMITED team.
-  // ⚠ IDs below are PLACEHOLDERS (negative) until the SmartReach API key is
-  //   provided and the real campaign ids are pulled in — sending is blocked
-  //   (and Make re-pointed at the ENFINITY LIMITED team) until then.
-  //   Re-pull when reps add/rename campaigns.
+  // her). Real ids pulled from the ENFINITY LIMITED team (tid 28076) on
+  // 2026-06-25, grouped from the "REP | CAMPAIGN" naming. "TERMINATED" campaigns
+  // and the test campaign are intentionally left out. Re-pull when reps add or
+  // rename campaigns (Make RPC smartreach-io:getCampaignList on connection 8529390).
   smartReachCampaigns: {
-    Pen:   [{ id: -1, label: 'PENN | VVV' }, { id: -2, label: 'PENN New | Boost' }],
-    Chase: [{ id: -1, label: 'CHASE | VVV' }, { id: -2, label: 'CHASE | ADCE' }],
-    Mikka: [{ id: -1, label: 'MIKKA | VVV' }, { id: -2, label: 'MIKKA | ADCE' }],
-    Rein:  [{ id: -1, label: 'REIN | ADCE' }],
-    Chai:  [{ id: -1, label: 'CHAI | CREATORSHIELD' }, { id: -2, label: 'CHAI | ENFINISHIELD' }, { id: -3, label: 'CHAI | ADCE' }],
+    Pen:   [{ id: 195653, label: 'PENN | VVV' }, { id: 201846, label: 'Penn New | Boost' }],
+    Chase: [{ id: 196002, label: 'CHASE | VVV' }, { id: 195047, label: 'CHASE | ADCE' }],
+    Mikka: [{ id: 200573, label: 'MIKKA | VVV' }, { id: 195045, label: 'MIKKA | ADCE' }],
+    Rein:  [{ id: 195648, label: 'REIN | VVV' }, { id: 194054, label: 'REIN | ADCE' }, { id: 203665, label: 'REIN | MSN HIGH TICKET' }],
+    Chai:  [{ id: 198593, label: 'CHAI | VVV' }, { id: 194062, label: 'CHAI | ADCE' }, { id: 200522, label: 'CHAI | CREATORSHIELD' }, { id: 195643, label: 'CHAI | ENFINISHIELD' }, { id: 203661, label: 'CHAI | MSN HIGH TICKET' }],
   },
 
   // ── Campaigns ── add as many as you need
