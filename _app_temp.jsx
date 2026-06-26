@@ -1547,6 +1547,28 @@ function saveProfileData(name,data){
   }
 }
 
+// ── Leads persistence (Supabase) ───────────────────────────
+// The whole lead object round-trips as JSONB. Upserts are safe (idempotent);
+// deletes are explicit (only from delL) to avoid any accidental mass-delete.
+function leadToRow(l){
+  return { id:String(l.id), lead_key:leadKey(l), assigned_to:l.assignedTo||null, data:l, updated_at:new Date().toISOString() };
+}
+function loadLeadsFromSupabase(){
+  if(!SB) return Promise.resolve(null);
+  return SB.from('leads').select('id,data').then(({data,error})=>{
+    if(error||!data) return null;
+    return data.map(r=>r.data).filter(Boolean);
+  }).catch(()=>null);
+}
+function upsertLeadsToSupabase(arr){
+  if(!SB||!arr||!arr.length) return;
+  try{ SB.from('leads').upsert(arr.map(leadToRow),{onConflict:'id'}).then(({error})=>{ if(error) console.warn('[leads] upsert failed',error.message); }); }catch(e){}
+}
+function deleteLeadFromSupabase(id){
+  if(!SB||id==null) return;
+  try{ SB.from('leads').delete().eq('id',String(id)).then(()=>{}); }catch(e){}
+}
+
 // ── Replies / interest feed (🔔) ──────────────────────────
 // One per reply from SmartReach (prospect replied / category) or Close (inbound
 // email). Scoped to a rep so each person sees only their own.
@@ -3449,6 +3471,9 @@ function AgencyFolder({folder,leads,config,isAdmin,canEdit,onUpdate,onDelete,add
 function App() {
   const [tab,setTab]=useState('home');
   const [leads,setLeads]=useState(SAMPLE_LEADS);
+  const [leadsReady,setLeadsReady]=useState(false);   // Supabase leads loaded
+  const supabaseHadLeadsRef=useRef(false);
+  const leadsSyncRef=useRef({});                       // {id: JSON} last synced
   const [history,setHistory]=useState(SAMPLE_HISTORY);
   const [toasts,setToasts]=useState([]);
   const [config,setConfig]=useState(DEFAULT_CONFIG);
@@ -3514,7 +3539,7 @@ function App() {
   }
   function delL(id){
     if(!isAdmin){ addToast('Only admins can delete leads','error'); return; }
-    const l=leads.find(x=>x.id===id);setLeads(ls=>ls.filter(x=>x.id!==id));logH('🗑',`Lead "${l?.channelName}" deleted`);addToast(`"${l?.channelName}" deleted`,'error');
+    const l=leads.find(x=>x.id===id);setLeads(ls=>ls.filter(x=>x.id!==id));deleteLeadFromSupabase(id);logH('🗑',`Lead "${l?.channelName}" deleted`);addToast(`"${l?.channelName}" deleted`,'error');
   }
   function logH(icon,text){setHistory(h=>[{id:Date.now(),icon,text,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:true},...h]);}
   function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
@@ -3706,13 +3731,40 @@ function App() {
       .finally(()=>setCloseSyncing(false));
   }
 
-  // Auto-load from Close once after login, if a load webhook is configured.
+  // Load shared LEADS from Supabase once on start (the team source of truth).
   useEffect(()=>{
-    if(currentUser && !closeLoadedRef.current){
+    loadLeadsFromSupabase().then(loaded=>{
+      if(loaded && loaded.length){
+        supabaseHadLeadsRef.current=true;
+        const snap={}; loaded.forEach(l=>snap[String(l.id)]=JSON.stringify(l));
+        leadsSyncRef.current=snap;
+        setLeads(loaded);
+      }
+      setLeadsReady(true);
+    });
+  },[]);
+
+  // Persist lead changes to Supabase (debounced, upsert-only — deletes go through
+  // delL). Diffs against the last-synced snapshot so only changed leads are sent.
+  useEffect(()=>{
+    if(!SB || !leadsReady) return;
+    const h=setTimeout(()=>{
+      const prev=leadsSyncRef.current, snap={}, changed=[];
+      leads.forEach(l=>{ const k=String(l.id), j=JSON.stringify(l); snap[k]=j; if(prev[k]!==j) changed.push(l); });
+      if(changed.length) upsertLeadsToSupabase(changed);
+      leadsSyncRef.current=snap;
+    }, 1000);
+    return ()=>clearTimeout(h);
+  },[leads,leadsReady]);
+
+  // Auto-load from Close after login ONLY if Supabase had no leads yet (first-time
+  // setup); otherwise Supabase is the source and we don't overwrite it.
+  useEffect(()=>{
+    if(currentUser && leadsReady && !supabaseHadLeadsRef.current && !closeLoadedRef.current){
       const wh=(config.closeLoadWebhook||'').trim();
       if(wh && !wh.includes('your-')){ closeLoadedRef.current=true; loadFromClose({silent:true}); }
     }
-  },[currentUser]);
+  },[currentUser,leadsReady]);
 
   // Load shared profiles from Supabase once on start, then re-render so avatars
   // / titles / birthdays reflect the team-wide data.
