@@ -3080,13 +3080,9 @@ function LoginScreen({config,onLogin}) {
             ) : forgot ? (
               <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}>
                 <div className="lg-m-avatar" style={{background:colorFor(selected)}}>{initial(selected)}</div>
-                <div className="lg-m-name">Reset password</div>
-                <div className="lg-m-as" style={{marginBottom:16}}>Enter your email and we'll send a reset link.</div>
-                <input type="email" className="lg-pw" placeholder="you@enfinity.co" value={fEmail}
-                  onChange={e=>{setFEmail(e.target.value);setFMsg('');}} disabled={fSending} autoFocus/>
-                {fMsg && <div className="lg-note" style={{textAlign:'center'}}>{fMsg}</div>}
-                <button type="button" className="lg-signin" disabled={fSending} onClick={sendReset}>{fSending ? <span className="lg-spin"/> : 'Send reset link'}</button>
-                <button type="button" className="lg-backbtn" onClick={()=>{setForgot(false);setFMsg('');}}>← Back to sign in</button>
+                <div className="lg-m-name">Forgot password?</div>
+                <div className="lg-m-as" style={{marginBottom:18,lineHeight:1.55,maxWidth:300}}>Ask any admin to reset it for you — it's instant from <b>Settings → 🛠 Reset Teammate's Password</b>. They'll give you a new password you can change afterwards.</div>
+                <button type="button" className="lg-signin" onClick={()=>{setForgot(false);setFMsg('');}}>Got it</button>
               </div>
             ) : (
               <form onSubmit={submit}>

@@ -6403,42 +6403,21 @@ function LoginScreen({
     }
   }, initial(selected)), /*#__PURE__*/React.createElement("div", {
     className: "lg-m-name"
-  }, "Reset password"), /*#__PURE__*/React.createElement("div", {
+  }, "Forgot password?"), /*#__PURE__*/React.createElement("div", {
     className: "lg-m-as",
     style: {
-      marginBottom: 16
+      marginBottom: 18,
+      lineHeight: 1.55,
+      maxWidth: 300
     }
-  }, "Enter your email and we'll send a reset link."), /*#__PURE__*/React.createElement("input", {
-    type: "email",
-    className: "lg-pw",
-    placeholder: "you@enfinity.co",
-    value: fEmail,
-    onChange: e => {
-      setFEmail(e.target.value);
-      setFMsg('');
-    },
-    disabled: fSending,
-    autoFocus: true
-  }), fMsg && /*#__PURE__*/React.createElement("div", {
-    className: "lg-note",
-    style: {
-      textAlign: 'center'
-    }
-  }, fMsg), /*#__PURE__*/React.createElement("button", {
+  }, "Ask any admin to reset it for you — it's instant from ", /*#__PURE__*/React.createElement("b", null, "Settings → 🛠 Reset Teammate's Password"), ". They'll give you a new password you can change afterwards."), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "lg-signin",
-    disabled: fSending,
-    onClick: sendReset
-  }, fSending ? /*#__PURE__*/React.createElement("span", {
-    className: "lg-spin"
-  }) : 'Send reset link'), /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "lg-backbtn",
     onClick: () => {
       setForgot(false);
       setFMsg('');
     }
-  }, "← Back to sign in")) : /*#__PURE__*/React.createElement("form", {
+  }, "Got it")) : /*#__PURE__*/React.createElement("form", {
     onSubmit: submit
   }, /*#__PURE__*/React.createElement("div", {
     className: "lg-m-avatar",
