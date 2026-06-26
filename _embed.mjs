@@ -15,6 +15,7 @@ const html = `<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <script src="config.js"><\/script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>
 </head>

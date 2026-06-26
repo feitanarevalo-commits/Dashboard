@@ -67,6 +67,12 @@ var DEFAULT_CONFIG = {
     historyRestore: true, emailValidation: false,
   },
 
+  // ── Supabase (backend) ── shared, persistent data store.
+  // The publishable key is meant to be public (browser-safe); access is gated by
+  // Row-Level Security on the tables. Stage 1: shared profiles.
+  supabaseUrl: 'https://wokrdfqzwrausazzoedi.supabase.co',
+  supabaseKey: 'sb_publishable_-BsDhuAgQ8mIQfh84Jrjyg_61b_2rcK',
+
   // ── Webhook URLs ── live Make.com scenarios (eu1)
   closeWebhook:     'https://hook.eu1.make.com/s46mezye3pzk5vyxshdegdn1ze4ojiry', // SAVE leads → Close (batch import)
   closeLoadWebhook: 'https://hook.eu1.make.com/d35hvlju9cgea3mdwcr782ui5vldrkl5',   // LOAD leads ← Close

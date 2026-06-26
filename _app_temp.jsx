@@ -1485,13 +1485,35 @@ function HomeView({leads,config}) {
 // ── User profiles (photo + title/email/birthday) ───────────
 // Stored per-browser in localStorage (like passwords — no backend to sync).
 // profiles = { <name>: { photo, title, email, birthday } }.
+// ── Supabase client (shared backend) ───────────────────────
+// Publishable key is browser-safe (gated by RLS). null if the CDN/config is
+// missing — everything then falls back to localStorage so the app still works.
+var SB=(function(){
+  try{
+    if(typeof window!=='undefined' && window.supabase && typeof DEFAULT_CONFIG!=='undefined' && DEFAULT_CONFIG.supabaseUrl && DEFAULT_CONFIG.supabaseKey){
+      return window.supabase.createClient(DEFAULT_CONFIG.supabaseUrl, DEFAULT_CONFIG.supabaseKey);
+    }
+  }catch(e){}
+  return null;
+})();
+
 function loadProfiles(){ try{ return JSON.parse(localStorage.getItem('profiles')||'{}')||{}; }catch(e){ return {}; } }
-// Shared defaults (from config.js `profiles`, e.g. team birthdays/titles) are
-// merged UNDER this browser's localStorage overrides, so config is the team-wide
-// source and each person can still tweak their own on their device.
+// Profiles loaded from Supabase (shared across the team), filled on app start.
+var PROFILE_CACHE={};
+function loadProfilesFromSupabase(){
+  if(!SB) return Promise.resolve();
+  return SB.from('profiles').select('*').then(({data,error})=>{
+    if(error||!data) return;
+    const map={};
+    data.forEach(r=>{ map[r.name]={ role:r.role, title:r.title||'', email:r.email||'', birthday:r.birthday||'', photo:r.photo_url||'', color:r.color||'' }; });
+    PROFILE_CACHE=map;
+  }).catch(()=>{});
+}
+// Merge: config.js shared defaults < this browser's localStorage < Supabase
+// (the team-wide source of truth, once loaded).
 function getProfile(name){
   const shared=(typeof DEFAULT_CONFIG!=='undefined' && DEFAULT_CONFIG.profiles && DEFAULT_CONFIG.profiles[name]) || {};
-  return { ...shared, ...(loadProfiles()[name]||{}) };
+  return { ...shared, ...(loadProfiles()[name]||{}), ...(PROFILE_CACHE[name]||{}) };
 }
 function fmtBirthday(b){
   const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(b||''); if(!m) return b||'';
@@ -1509,8 +1531,20 @@ function daysUntilBirthday(bday, now){
   return Math.round((next-t)/86400000);
 }
 function saveProfileData(name,data){
+  // 1) localStorage (offline cache), 2) in-memory cache, 3) Supabase (shared).
   const all=loadProfiles(); all[name]={...(all[name]||{}),...data};
   try{ localStorage.setItem('profiles',JSON.stringify(all)); }catch(e){}
+  PROFILE_CACHE[name]={...(PROFILE_CACHE[name]||{}),...data};
+  if(SB){
+    const row={ name, updated_at:new Date().toISOString() };
+    if('title' in data) row.title=data.title;
+    if('email' in data) row.email=data.email;
+    if('birthday' in data) row.birthday=data.birthday||null;
+    if('photo' in data) row.photo_url=data.photo;
+    if('color' in data) row.color=data.color;
+    if('role' in data) row.role=data.role;
+    try{ SB.from('profiles').upsert(row,{onConflict:'name'}).then(({error})=>{ if(error) console.warn('[profiles] save failed',error.message); }); }catch(e){}
+  }
 }
 
 // ── Replies / interest feed (🔔) ──────────────────────────
@@ -3428,6 +3462,7 @@ function App() {
   const [agencies,setAgencies]=useState(()=>{ try{return JSON.parse(localStorage.getItem('agencies')||'[]');}catch(e){return [];} });
   const [showChangePw,setShowChangePw]=useState(false);
   const [showProfile,setShowProfile]=useState(false);
+  const [profileTick,setProfileTick]=useState(0);  // bumped once Supabase profiles load
   const [replies,setReplies]=useState(()=>(typeof SAMPLE_REPLIES!=='undefined'?SAMPLE_REPLIES:[]).map(normalizeReply));
   const [showBell,setShowBell]=useState(false);
   const [repliesLoading,setRepliesLoading]=useState(false);
@@ -3678,6 +3713,10 @@ function App() {
       if(wh && !wh.includes('your-')){ closeLoadedRef.current=true; loadFromClose({silent:true}); }
     }
   },[currentUser]);
+
+  // Load shared profiles from Supabase once on start, then re-render so avatars
+  // / titles / birthdays reflect the team-wide data.
+  useEffect(()=>{ loadProfilesFromSupabase().then(()=>setProfileTick(t=>t+1)); },[]);
 
   function importToClose(rep,repLeads){
     const CLOSE_WEBHOOK=(config.closeWebhook||'').trim();
