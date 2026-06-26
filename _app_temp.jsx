@@ -2517,10 +2517,23 @@ function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,conf
         const br=FOLLOWER_BRACKETS.find(b=>b.v===minF)||FOLLOWER_BRACKETS[0];
         const kept = mapped.filter(l=>{ const f=parseFollowers(l.followers); return !f || (f>=br.min && f<br.max); });
         const skipped = mapped.length - kept.length;
-        if(onResults) onResults(kept);
-        addToast(kept.length
-          ? `✓ ${kept.length} lead(s) scraped`+(skipped?` · ${skipped} outside ${br.label}`:'')
-          : (skipped?`All ${skipped} result(s) were outside ${br.label}`:'Scraper ran but returned 0 profiles'),'success');
+        // Drop channels already in the Close CRM (the ~628k org) so we only ever
+        // surface FRESH leads. Dedup by YouTube channel id / email via close-check.
+        // If the check is unavailable/fails, don't block — show everything.
+        const checkWh=(config.closeCheckWebhook||'').trim();
+        const finish=(fresh,onClose)=>{
+          if(onResults) onResults(fresh);
+          const extra=(skipped?` · ${skipped} outside ${br.label}`:'')+(onClose?` · ${onClose} already on Close`:'');
+          addToast(fresh.length
+            ? `✓ ${fresh.length} fresh lead(s) scraped`+extra
+            : (onClose?`All scraped channels are already on Close (${onClose})`:(skipped?`All ${skipped} result(s) were outside ${br.label}`:'Scraper ran but returned 0 profiles')),'success');
+        };
+        if(checkWh && kept.length){
+          fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads:kept.map((l,i)=>({key:i,channelId:l.channelId,url:l.url,emails:l.emails}))})})
+            .then(r=>r.json())
+            .then(resp=>{ const ex=new Set((resp&&resp.existing)||[]); const fresh=kept.filter((l,i)=>!ex.has(i)); finish(fresh,kept.length-fresh.length); })
+            .catch(()=>finish(kept,0));
+        } else { finish(kept,0); }
       })
       .catch(e=>{
         const cors=(e&&e.message||'').toLowerCase().includes('failed to fetch');

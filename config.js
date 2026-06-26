@@ -76,6 +76,7 @@ var DEFAULT_CONFIG = {
   // ── Webhook URLs ── live Make.com scenarios (eu1)
   closeWebhook:     'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-push-v2', // SAVE leads → real Enfinity Close org (Edge Function; Assigned To = importing rep)
   closeLoadWebhook: '', // PUSH-ONLY: the real Enfinity org has ~628k leads — the dashboard's store is Supabase, not Close. (close-load fn still exists for the old test org if ever needed.)
+  closeCheckWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-check', // dedup: which scraped channels already exist in Close (by channel id / email)
   scrapeWebhook:    'https://hook.eu1.make.com/amu0xr93i4q214760zi9rqa1lcxlch55', // YouTube scraper gateway
   smartreachWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/smartreach-add', // SEND prospects → SmartReach (Supabase Edge Function; was Make)
   // Replies / interest feed (🔔). Each returns an array of reply objects:
