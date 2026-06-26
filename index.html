@@ -2996,6 +2996,189 @@ function RepAvatar({
 }
 
 // ─── REP DASHBOARD VIEW ───────────────────────────────────
+// ─── MY CLOSE LEADS ───────────────────────────────────────
+// Scoped view of the real Close org: leads Assigned To this rep, paginated.
+// We never bulk-load the ~628k-lead org — only this rep's slice, on demand.
+function MyCloseLeads({
+  rep,
+  config,
+  onClose
+}) {
+  const [leads, setLeads] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [skip, setSkip] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const wh = (config.closeMineWebhook || '').trim();
+  function load(nextSkip) {
+    if (!wh) {
+      setErr('Close view isn’t configured (closeMineWebhook).');
+      setLoaded(true);
+      return;
+    }
+    setLoading(true);
+    setErr('');
+    fetch(wh, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        rep,
+        skip: nextSkip || 0
+      })
+    }).then(r => r.json()).then(resp => {
+      if (resp && resp.ok === false) throw new Error(resp.error || 'request failed');
+      setTotal(resp.total || 0);
+      setSkip(nextSkip || 0);
+      setLeads(prev => nextSkip ? prev.concat(resp.leads || []) : resp.leads || []);
+    }).catch(e => setErr(String(e.message || e))).finally(() => {
+      setLoading(false);
+      setLoaded(true);
+    });
+  }
+  useEffect(() => {
+    load(0);
+  }, []);
+  const hasMore = leads.length < total;
+  const th = {
+    textAlign: 'left',
+    padding: '8px 10px',
+    borderBottom: '2px solid var(--border)',
+    fontWeight: 600,
+    position: 'sticky',
+    top: 0,
+    background: 'var(--card)',
+    fontSize: 12
+  };
+  const td = {
+    padding: '7px 10px',
+    borderBottom: '1px solid var(--border)',
+    verticalAlign: 'top'
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-overlay",
+    onClick: e => e.target === e.currentTarget && onClose()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal",
+    style: {
+      maxWidth: 940,
+      width: '94%',
+      maxHeight: '86vh',
+      display: 'flex',
+      flexDirection: 'column'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-header"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", null, rep, "'s Close Leads"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: 'var(--text-dim)',
+      fontSize: 13,
+      marginTop: 3
+    }
+  }, "Leads in Close assigned to ", rep, total ? ` · ${total} total` : '')), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: onClose,
+    style: {
+      fontSize: 16,
+      padding: '4px 8px'
+    }
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflow: 'auto',
+      flex: 1,
+      margin: '4px 0'
+    }
+  }, err && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: 16,
+      color: '#DE350B',
+      fontSize: 13
+    }
+  }, "⚠ ", err), !err && loaded && !leads.length && !loading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '32px 24px',
+      textAlign: 'center',
+      color: 'var(--text-dim)',
+      fontSize: 13,
+      lineHeight: 1.6
+    }
+  }, "No Close leads assigned to ", rep, " yet.", /*#__PURE__*/React.createElement("br", null), "Leads ", rep, " imports to Close from the dashboard show up here."), leads.length > 0 && /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      borderCollapse: 'collapse',
+      fontSize: 13
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: th
+  }, "Channel"), /*#__PURE__*/React.createElement("th", {
+    style: th
+  }, "Followers"), /*#__PURE__*/React.createElement("th", {
+    style: th
+  }, "Niche"), /*#__PURE__*/React.createElement("th", {
+    style: th
+  }, "Status"), /*#__PURE__*/React.createElement("th", {
+    style: th
+  }, "Assigned"), /*#__PURE__*/React.createElement("th", {
+    style: th
+  }))), /*#__PURE__*/React.createElement("tbody", null, leads.map(l => /*#__PURE__*/React.createElement("tr", {
+    key: l.id
+  }, /*#__PURE__*/React.createElement("td", {
+    style: td
+  }, l.channelName || l.name || '—', l.url ? /*#__PURE__*/React.createElement("a", {
+    href: l.url,
+    target: "_blank",
+    rel: "noreferrer",
+    title: l.url,
+    style: {
+      marginLeft: 6,
+      fontSize: 11,
+      textDecoration: 'none'
+    }
+  }, "↗") : null), /*#__PURE__*/React.createElement("td", {
+    style: td
+  }, l.followers || '—'), /*#__PURE__*/React.createElement("td", {
+    style: td
+  }, l.niche || '—'), /*#__PURE__*/React.createElement("td", {
+    style: td
+  }, l.status || '—'), /*#__PURE__*/React.createElement("td", {
+    style: td
+  }, l.assignedOn || '—'), /*#__PURE__*/React.createElement("td", {
+    style: td
+  }, l.closeUrl ? /*#__PURE__*/React.createElement("a", {
+    href: l.closeUrl,
+    target: "_blank",
+    rel: "noreferrer",
+    className: "btn btn-ghost btn-sm",
+    style: {
+      fontSize: 11
+    }
+  }, "Open ↗") : null))))), loading && !leads.length && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: 24,
+      textAlign: 'center',
+      color: 'var(--text-dim)'
+    }
+  }, "Loading…")), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-dim)'
+    }
+  }, leads.length, " of ", total, " loaded"), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer-right"
+  }, hasMore && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    disabled: loading,
+    onClick: () => load(skip + 50)
+  }, loading ? 'Loading…' : 'Load more'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    disabled: loading,
+    onClick: () => load(0)
+  }, "↻ Refresh")))));
+}
 function RepDashboard({
   rep,
   leads,
@@ -3043,6 +3226,7 @@ function RepDashboard({
   // out of these counts — so the day's potentials clear as she works them.
   const todayStr = ymdLocal(new Date());
   const [quotaDay, setQuotaDay] = useState(todayStr);
+  const [showClose, setShowClose] = useState(false);
   const dayLeads = myLeads.filter(l => leadDayStr(l) === quotaDay);
   const campPotential = campId => dayLeads.filter(l => l.tags.includes('Potential') && !l.tags.includes('Contacted') && (l.campaigns || []).includes(campId)).length;
   const dayContacted = dayLeads.filter(l => l.tags.includes('Contacted')).length;
@@ -3089,7 +3273,11 @@ function RepDashboard({
     disabled: !fresh,
     onClick: () => importToClose(rep, freshPotential),
     title: fresh ? `Send ${rep}'s ${fresh} Fresh Potential lead(s) to Close.io (already-imported leads are skipped)` : potential ? 'All Potential leads are already imported to Close' : 'No Potential leads to send yet'
-  }, "⬆ Send ", fresh, " to Close.io"), /*#__PURE__*/React.createElement("div", {
+  }, "⬆ Send ", fresh, " to Close.io"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: () => setShowClose(true),
+    title: `View ${rep}'s leads in Close.io (assigned to them)`
+  }, "📁 Close Leads"), /*#__PURE__*/React.createElement("div", {
     className: "export-group"
   }, feats.exportCSV && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
@@ -3266,6 +3454,10 @@ function RepDashboard({
     },
     filename: `${rep}_leads`,
     printTitle: `${rep}'s Lead Report`
+  }), showClose && /*#__PURE__*/React.createElement(MyCloseLeads, {
+    rep: rep,
+    config: config,
+    onClose: () => setShowClose(false)
   }));
 }
 

@@ -1623,6 +1623,80 @@ function RepAvatar({rep,config,size=36,online=false,bgOverride=null}) {
 }
 
 // ─── REP DASHBOARD VIEW ───────────────────────────────────
+// ─── MY CLOSE LEADS ───────────────────────────────────────
+// Scoped view of the real Close org: leads Assigned To this rep, paginated.
+// We never bulk-load the ~628k-lead org — only this rep's slice, on demand.
+function MyCloseLeads({rep,config,onClose}){
+  const [leads,setLeads]=useState([]);
+  const [total,setTotal]=useState(0);
+  const [skip,setSkip]=useState(0);
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState('');
+  const [loaded,setLoaded]=useState(false);
+  const wh=(config.closeMineWebhook||'').trim();
+  function load(nextSkip){
+    if(!wh){ setErr('Close view isn’t configured (closeMineWebhook).'); setLoaded(true); return; }
+    setLoading(true); setErr('');
+    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rep,skip:nextSkip||0})})
+      .then(r=>r.json())
+      .then(resp=>{ if(resp&&resp.ok===false) throw new Error(resp.error||'request failed');
+        setTotal(resp.total||0); setSkip(nextSkip||0);
+        setLeads(prev=> nextSkip ? prev.concat(resp.leads||[]) : (resp.leads||[])); })
+      .catch(e=>setErr(String(e.message||e)))
+      .finally(()=>{ setLoading(false); setLoaded(true); });
+  }
+  useEffect(()=>{ load(0); },[]);
+  const hasMore=leads.length<total;
+  const th={textAlign:'left',padding:'8px 10px',borderBottom:'2px solid var(--border)',fontWeight:600,position:'sticky',top:0,background:'var(--card)',fontSize:12};
+  const td={padding:'7px 10px',borderBottom:'1px solid var(--border)',verticalAlign:'top'};
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:940,width:'94%',maxHeight:'86vh',display:'flex',flexDirection:'column'}}>
+        <div className="modal-header">
+          <div>
+            <h2>{rep}'s Close Leads</h2>
+            <p style={{color:'var(--text-dim)',fontSize:13,marginTop:3}}>Leads in Close assigned to {rep}{total?` · ${total} total`:''}</p>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
+        </div>
+        <div style={{overflow:'auto',flex:1,margin:'4px 0'}}>
+          {err && <div style={{padding:16,color:'#DE350B',fontSize:13}}>⚠ {err}</div>}
+          {!err && loaded && !leads.length && !loading && (
+            <div style={{padding:'32px 24px',textAlign:'center',color:'var(--text-dim)',fontSize:13,lineHeight:1.6}}>
+              No Close leads assigned to {rep} yet.<br/>Leads {rep} imports to Close from the dashboard show up here.
+            </div>
+          )}
+          {leads.length>0 && (
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+              <thead><tr><th style={th}>Channel</th><th style={th}>Followers</th><th style={th}>Niche</th><th style={th}>Status</th><th style={th}>Assigned</th><th style={th}></th></tr></thead>
+              <tbody>
+                {leads.map(l=>(
+                  <tr key={l.id}>
+                    <td style={td}>{l.channelName||l.name||'—'}{l.url?<a href={l.url} target="_blank" rel="noreferrer" title={l.url} style={{marginLeft:6,fontSize:11,textDecoration:'none'}}>↗</a>:null}</td>
+                    <td style={td}>{l.followers||'—'}</td>
+                    <td style={td}>{l.niche||'—'}</td>
+                    <td style={td}>{l.status||'—'}</td>
+                    <td style={td}>{l.assignedOn||'—'}</td>
+                    <td style={td}>{l.closeUrl?<a href={l.closeUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{fontSize:11}}>Open ↗</a>:null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {loading && !leads.length && <div style={{padding:24,textAlign:'center',color:'var(--text-dim)'}}>Loading…</div>}
+        </div>
+        <div className="modal-footer">
+          <span style={{fontSize:11,color:'var(--text-dim)'}}>{leads.length} of {total} loaded</span>
+          <div className="modal-footer-right">
+            {hasMore && <button className="btn btn-outline btn-sm" disabled={loading} onClick={()=>load(skip+50)}>{loading?'Loading…':'Load more'}</button>}
+            <button className="btn btn-primary btn-sm" disabled={loading} onClick={()=>load(0)}>↻ Refresh</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onImportClose,onImportSmartReach}) {
   function importToClose(r,ls){
     if(onImportClose) onImportClose(r,ls);
@@ -1660,6 +1734,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
   // out of these counts — so the day's potentials clear as she works them.
   const todayStr=ymdLocal(new Date());
   const [quotaDay,setQuotaDay]=useState(todayStr);
+  const [showClose,setShowClose]=useState(false);
   const dayLeads=myLeads.filter(l=>leadDayStr(l)===quotaDay);
   const campPotential=(campId)=>dayLeads.filter(l=>l.tags.includes('Potential')&&!l.tags.includes('Contacted')&&(l.campaigns||[]).includes(campId)).length;
   const dayContacted=dayLeads.filter(l=>l.tags.includes('Contacted')).length;
@@ -1682,6 +1757,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
             title={fresh?`Send ${rep}'s ${fresh} Fresh Potential lead(s) to Close.io (already-imported leads are skipped)`:(potential?'All Potential leads are already imported to Close':'No Potential leads to send yet')}>
             ⬆ Send {fresh} to Close.io
           </button>
+          <button className="btn btn-outline btn-sm" onClick={()=>setShowClose(true)}
+            title={`View ${rep}'s leads in Close.io (assigned to them)`}>📁 Close Leads</button>
           <div className="export-group">
             {feats.exportCSV && <button className="btn btn-outline btn-sm" disabled={!fresh}
               onClick={()=>exportCloseCSV(freshPotential,`${rep}_close_import.csv`)}
@@ -1731,6 +1808,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
         smartReachSend={{ campaigns:(config.smartReachCampaigns&&config.smartReachCampaigns[rep])||[], onSend:(leads,campId,campLabel)=>importToSmartReach(rep,leads,campId,campLabel) }}
         filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
       />
+      {showClose && <MyCloseLeads rep={rep} config={config} onClose={()=>setShowClose(false)}/>}
     </div>
   );
 }
