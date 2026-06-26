@@ -3956,14 +3956,20 @@ function App() {
     const emailable=(repLeads||[]).filter(l=>(l.emails||[]).length>0);
     if(!emailable.length){ addToast(`No selected leads have an email to send for ${rep}`,'info'); return; }
     if(!campaignId){ addToast('Pick a SmartReach campaign first','info'); return; }
-    // Placeholder ids are negative until real SmartReach campaign ids are synced.
-    if(Number(campaignId)<=0){ addToast('SmartReach campaigns aren’t synced yet — admin needs to connect SmartReach (pending API key)','info'); return; }
     const dest=campaignLabel||('campaign '+campaignId);
-    const payload={action:'smartreach.add', rep, campaign_id:String(campaignId), leads:emailable.map(l=>toSmartReachItem(l,campaignId))};
+    // The smartreach-add Edge Function takes {rep, campaign_id (cmp_…), leads},
+    // creates/updates the prospects, and assigns them to the campaign. It returns
+    // {ok, created, assigned, errors}. SmartReach dedupes by email so re-sends
+    // don't duplicate.
+    const payload={ rep, campaign_id:String(campaignId), leads:emailable.map(l=>toSmartReachItem(l,campaignId)) };
     addToast(`Sending ${emailable.length} prospect(s) to SmartReach → ${dest}…`,'info');
     fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-      .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
-      .then(()=>{ addToast(`✓ ${emailable.length} prospect(s) sent to SmartReach → ${dest}`,'success'); logH('✉',`SmartReach: ${emailable.length} → ${dest} (${rep})`); })
+      .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(resp=>{
+        if(resp && resp.ok===false) throw new Error(resp.error||'SmartReach error');
+        const n=(resp&&typeof resp.assigned==='number'&&resp.assigned)?resp.assigned:emailable.length;
+        addToast(`✓ ${n} prospect(s) added to SmartReach → ${dest}`,'success'); logH('✉',`SmartReach: ${n} → ${dest} (${rep})`);
+      })
       .catch(e=>{ addToast(`SmartReach send failed for ${rep}: ${e.message}`,'error'); logH('✉',`SmartReach send failed for ${rep}`); });
   }
 

@@ -77,7 +77,7 @@ var DEFAULT_CONFIG = {
   closeWebhook:     'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-push', // SAVE leads → Close (Supabase Edge Function; was Make)
   closeLoadWebhook: 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-load', // LOAD leads ← Close (Supabase Edge Function; was Make)
   scrapeWebhook:    'https://hook.eu1.make.com/amu0xr93i4q214760zi9rqa1lcxlch55', // YouTube scraper gateway
-  smartreachWebhook:'https://hook.eu1.make.com/rk8bt363npu9bclbpquev0avr9na6wal', // SEND prospects → SmartReach (name+email)
+  smartreachWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/smartreach-add', // SEND prospects → SmartReach (Supabase Edge Function; was Make)
   // Replies / interest feed (🔔). Each returns an array of reply objects:
   //   { rep, source:'SmartReach'|'Close', name, email, sentiment, snippet, when, campaign }
   // Wired later (SmartReach reply-webhook → Make store; Close inbound email
@@ -110,18 +110,19 @@ var DEFAULT_CONFIG = {
 
   // SmartReach campaigns per rep — [{id,label}] shown in the rep's bulk
   // "Send to SmartReach" campaign picker (only that rep's campaigns appear under
-  // her). Real ids pulled from the ENFINITY LIMITED team (tid 28076) on
-  // 2026-06-25, grouped from the "REP | CAMPAIGN" naming. "TERMINATED" campaigns
-  // and the test campaign are intentionally left out. Re-pull when reps add or
-  // rename campaigns (Make RPC smartreach-io:getCampaignList on connection 8529390).
+  // her). The `id` is the SmartReach v3 campaign id (cmp_aa_…) used by the
+  // smartreach-add Edge Function to assign prospects. Pulled from the ENFINITY
+  // LIMITED team (team_37v05DkjQRguhG7BkFGRwnja9ns) on 2026-06-26, grouped from
+  // the "REP | CAMPAIGN" naming. Re-pull when reps add/rename campaigns:
+  //   GET https://api.smartreach.io/api/v3/campaigns?team_id=<team>&limit=100  (X-API-KEY).
   smartReachCampaigns: {
-    Pen:     [{ id: 195653, label: 'PENN | VVV' }, { id: 201846, label: 'Penn New | Boost' }, { id: 203950, label: 'PENN | TERMINATED VVV' }],
-    Chase:   [{ id: 196002, label: 'CHASE | VVV' }, { id: 195047, label: 'CHASE | ADCE' }, { id: 203942, label: 'CHASE | TERMINATED VVV' }],
-    Mikka:   [{ id: 200573, label: 'MIKKA | VVV' }, { id: 195045, label: 'MIKKA | ADCE' }, { id: 203956, label: 'MIKKA | TERMINATED VVV' }],
-    Rein:    [{ id: 195648, label: 'REIN | VVV' }, { id: 194054, label: 'REIN | ADCE' }, { id: 203665, label: 'REIN | MSN HIGH TICKET' }],
-    Chai:    [{ id: 206087, label: 'Dashboard import test.' }, { id: 198593, label: 'CHAI | VVV' }, { id: 194062, label: 'CHAI | ADCE' }, { id: 200522, label: 'CHAI | CREATORSHIELD' }, { id: 195643, label: 'CHAI | ENFINISHIELD' }, { id: 203661, label: 'CHAI | MSN HIGH TICKET' }],
-    Jon:     [{ id: 203163, label: 'Jonathan | VVV' }, { id: 201174, label: 'Jonathan | CREATORSHIELD' }, { id: 194006, label: 'Jonathan | BOOST' }],
-    Czarina: [{ id: 195054, label: 'CZARINA | ADCE & BOOST' }, { id: 195652, label: 'CZARINA | MCN' }],
+    Pen:     [{ id: 'cmp_aa_38pcXApBGt6RpScykd1URRLLPuN', label: 'PENN | VVV' }, { id: 'cmp_aa_3COTLhBrkcbrkbCUwLsNZSyb9UM', label: 'Penn New | Boost' }, { id: 'cmp_aa_3DwWREXL5Syq2gPenMZu5rkVpcX', label: 'PENN | TERMINATED VVV' }],
+    Chase:   [{ id: 'cmp_aa_38y1MsGQ3hPdMQk5Kg6WHFRMHGO', label: 'CHASE | VVV' }, { id: 'cmp_aa_38SsXvJEXKMoLpuRTHZwn4g4GMj', label: 'CHASE | ADCE' }, { id: 'cmp_aa_3DwINVBLTf3Y5RsarY8NXyHguGl', label: 'CHASE | TERMINATED VVV' }],
+    Mikka:   [{ id: 'cmp_aa_3BW3Tr9X01h61ZQ2Ml6Tsaoh1nC', label: 'MIKKA | VVV' }, { id: 'cmp_aa_38SsXY2YqK196NOwRpanImKVFhc', label: 'MIKKA | ADCE' }, { id: 'cmp_aa_3DwfqEhsiLOVUxvDkRwmZzMYUMC', label: 'MIKKA | TERMINATED VVV' }],
+    Rein:    [{ id: 'cmp_aa_38pUJRCEuKB38r96SqAktudh8Qy', label: 'REIN | VVV' }, { id: 'cmp_aa_37vkk7UPDs324ppe3ohgG84zei5', label: 'REIN | ADCE' }, { id: 'cmp_aa_3Di54T9wsV5oMGOEVb45Ag9fspB', label: 'REIN | MSN HIGH TICKET' }],
+    Chai:    [{ id: 'cmp_aa_3FceCoPDrdE9ITT0Eijw8zkfYHV', label: 'Dashboard import test.' }, { id: 'cmp_aa_3APhyOjFpS1rDDPnjSP3eSsIa0h', label: 'CHAI | VVV' }, { id: 'cmp_aa_37vquAjmOiZfHEOYdkNp30AQZKy', label: 'CHAI | ADCE' }, { id: 'cmp_aa_3BU24L84bG2cV1fKAOMMpnpJfD9', label: 'CHAI | CREATORSHIELD' }, { id: 'cmp_aa_38pDWhNO16kBlSYk5Lg7HAr9IP2', label: 'CHAI | ENFINISHIELD' }, { id: 'cmp_aa_3Dhzbwp2SKVnz4ePyKWgpB2Z0F1', label: 'CHAI | MSN HIGH TICKET' }],
+    Jon:     [{ id: 'cmp_aa_3DP0AtM9fwhNDr71nvOrmrtGSD6', label: 'Jonathan | VVV' }, { id: 'cmp_aa_3BzuXEkMCzYZR0FPR2LlC0G9kAM', label: 'Jonathan | CREATORSHIELD' }, { id: 'cmp_aa_37v3CSEVgg3z8Pj0pEgVr57blNx', label: 'Jonathan | BOOST' }],
+    Czarina: [{ id: 'cmp_aa_38StlKFWU0lRSttNQ9lHOCbI3UA', label: 'CZARINA | ADCE & BOOST' }, { id: 'cmp_aa_38pbJbu4Zosf7CFRz1FflL73UDK', label: 'CZARINA | MCN' }],
   },
 
   // ── Campaigns ── add as many as you need
