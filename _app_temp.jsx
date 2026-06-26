@@ -863,7 +863,7 @@ function InlineEmail({emails, onSave}) {
 }
 
 // ─── LEADS TABLE ──────────────────────────────────────────
-function LeadsTable({leads,onEdit,onDelete,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
+function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
   const [sel,setSel] = useState([]);
   const [searchState,setSearchState] = useState('');
   // When the parent provides search control (e.g. Scraper uses it as the
@@ -1092,6 +1092,12 @@ function LeadsTable({leads,onEdit,onDelete,onBulkAssign,showAssigned=false,showC
               title={selEmailable.length?`Send the ${selEmailable.length} selected lead(s) with an email to the chosen SmartReach campaign`:'Select leads that have an email first'}>
               ✉ Send {selEmailable.length} to SmartReach
             </button>
+          </>)}
+          {(onBulkDelete||onDelete)&&(<>
+            <div className="toolbar-sep"/>
+            <button className="btn btn-sm" style={{background:'#DE350B',color:'#fff',borderColor:'#DE350B'}}
+              onClick={()=>{ if(window.confirm(`Delete ${sel.length} selected lead(s)?\n\nThis removes them from the dashboard and the shared database. This cannot be undone.`)){ (onBulkDelete||((ids)=>ids.forEach(onDelete)))(sel); setSel([]); } }}
+              title="Permanently delete the selected leads">🗑 Delete {sel.length}</button>
           </>)}
           <button className="btn btn-ghost btn-sm" onClick={()=>{setSel([]);setBulkRep('');setBulkTags([]);setBulkCamps([]);setSrCampaign('');}}>✕ Clear</button>
         </div>
@@ -1568,6 +1574,14 @@ function deleteLeadFromSupabase(id){
   if(!SB||id==null) return;
   try{ SB.from('leads').delete().eq('id',String(id)).then(()=>{}); }catch(e){}
 }
+function deleteLeadsFromSupabase(ids){
+  if(!SB||!ids||!ids.length) return;
+  try{ SB.from('leads').delete().in('id',ids.map(String)).then(()=>{}); }catch(e){}
+}
+function clearAllLeadsFromSupabase(){
+  if(!SB) return Promise.resolve();
+  try{ return SB.from('leads').delete().neq('id','__never__').then(()=>{}); }catch(e){ return Promise.resolve(); }
+}
 
 // ── Replies / interest feed (🔔) ──────────────────────────
 // One per reply from SmartReach (prospect replied / category) or Close (inbound
@@ -1697,7 +1711,7 @@ function MyCloseLeads({rep,config,onClose}){
   );
 }
 
-function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onImportClose,onImportSmartReach}) {
+function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssign,onBack,onImportClose,onImportSmartReach}) {
   function importToClose(r,ls){
     if(onImportClose) onImportClose(r,ls);
   }
@@ -1803,7 +1817,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkAssign,onBack,onIm
         </div>
       </div>
       <LeadsTable
-        leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkAssign={onBulkAssign}
+        leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap}
         smartReachSend={{ campaigns:(config.smartReachCampaigns&&config.smartReachCampaigns[rep])||[], onSend:(leads,campId,campLabel)=>importToSmartReach(rep,leads,campId,campLabel) }}
         filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
@@ -1844,7 +1858,7 @@ function RepSelectScreen({leads,config,activeRep,onSelect}) {
 }
 
 // ─── CONTACTED VIEW ──────────────────────────────────────
-function ContactedView({leads,onSave,onDelete,onBulkAssign,config,campColorMap}) {
+function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,campColorMap}) {
   const contacted=leads.filter(l=>l.tags.includes('Contacted'));
   const today=new Date();
   function recycleInfo(l){
@@ -2327,7 +2341,7 @@ const DISCOVERY_PLACEHOLDERS={
 };
 const INTEREST_OPTIONS=['Activewear','Art & Design','Beauty & Cosmetics','Business & Careers','Camera & Photography','Cars & Motorbikes','Finance','Fitness','Food & Drink','Gaming','Healthcare','Music','Travel'];
 
-function DiscoveryView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,config}) {
+function DiscoveryView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,addToast,config}) {
   const feats=config.features||{};
   const campColorMap={}; (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
   const PLAT_TABS=['All',...PLATFORMS,'Amazon'];
@@ -2487,7 +2501,7 @@ function DiscoveryView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,co
       </div>
 
       <div className="disc-results-label">{pool.length} profile{pool.length!==1?'s':''}</div>
-      <LeadsTable leads={pool} onEdit={onSave} onDelete={onDelete} onBulkAssign={onBulkAssign}
+      <LeadsTable leads={pool} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin onRowOpen={setProfileLead} embedded
         config={config} feats={feats} campColorMap={campColorMap} filename="discovery" printTitle="Influencer Discovery"/>
 
@@ -2520,7 +2534,7 @@ const FOLLOWER_BRACKETS=[
   { v:'1M',   label:'1M+',           min:1000000, max:Infinity },
 ];
 
-function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,config,currentUser}) {
+function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,addToast,config,currentUser}) {
   const [platform,setPlatform]=useState('All');
   const [minF,setMinF]=useState('10K');
   // Remember the chosen language across reloads so it "sticks".
@@ -2643,7 +2657,7 @@ function ScraperView({leads,onSave,onDelete,onBulkAssign,onResults,addToast,conf
   );
 
   return (
-    <LeadsTable leads={leads.filter(l=>!hasStatusTag(l) && leadOrigin(l)!=='Imported')} onEdit={onSave} onDelete={onDelete} onBulkAssign={onBulkAssign}
+    <LeadsTable leads={leads.filter(l=>!hasStatusTag(l) && leadOrigin(l)!=='Imported')} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
       showAssigned showCampaign showOrigin toolbarStart={runBtn} toolbarAfterSearch={scraperFilters}
       searchValue={keyword} onSearchChange={setKeyword} searchFilters={false} searchPlaceholder="Search query (sent to scraper)…"
       config={config} feats={feats} campColorMap={campColorMap} filename="scraper_queue" printTitle="Scraper Queue"/>
@@ -2777,7 +2791,7 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
 }
 
 // ─── LEAD MGMT VIEW ───────────────────────────────────────
-function LeadMgmtView({leads,onSave,onBulkAssign,addToast,config}) {
+function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onClearAll,addToast,config}) {
   const [repView,setRepView]=useState('');
   const feats=config.features||{};
   const campColorMap={};
@@ -2799,8 +2813,11 @@ function LeadMgmtView({leads,onSave,onBulkAssign,addToast,config}) {
         <button className={`btn btn-sm ${repView==='unassigned'?'btn-danger':'btn-outline'}`} onClick={()=>setRepView(v=>v==='unassigned'?'':' unassigned')} style={repView==='unassigned'?{}:{borderColor:'var(--warn)',color:'var(--warn)'}}>
           Unassigned ({unassigned.length})
         </button>
+        {onClearAll && leads.length>0 && <button className="btn btn-sm" style={{marginLeft:'auto',background:'#DE350B',color:'#fff',borderColor:'#DE350B'}}
+          onClick={()=>{ if(window.confirm(`Delete ALL ${leads.length} lead(s) from the dashboard and the shared database?\n\nThis cannot be undone.`)) onClearAll(); }}
+          title="Permanently delete every lead">🗑 Clear ALL leads</button>}
       </div>
-      <LeadsTable leads={display} onEdit={onSave} onBulkAssign={onBulkAssign} showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap} filename="lead_management" printTitle="Lead Management Report"/>
+      <LeadsTable leads={display} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign} showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap} filename="lead_management" printTitle="Lead Management Report"/>
     </div>
   );
 }
@@ -3774,6 +3791,8 @@ function App() {
   }
   function logH(icon,text){setHistory(h=>[{id:Date.now(),icon,text,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:true},...h]);}
   function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
+  function bulkDelete(ids){ if(!ids||!ids.length) return; const set=new Set(ids); setLeads(ls=>ls.filter(l=>!set.has(l.id))); deleteLeadsFromSupabase(ids); logH('🗑',`Bulk: ${ids.length} lead(s) deleted`); addToast(`${ids.length} lead(s) deleted`,'error'); }
+  function clearAllLeads(){ const n=leads.length; setLeads([]); leadsSyncRef.current={}; clearAllLeadsFromSupabase(); logH('🗑',`Cleared ALL leads (${n})`); addToast(`Cleared all ${n} lead(s)`,'error'); }
   function applyConfig(cfg){setConfig(cfg);if(!cfg.tabs[tab])setTab('home');}
   function importLeads(newLeads){
     setLeads(existing=>{
@@ -4152,20 +4171,20 @@ function App() {
 
   function renderMain(){
     if(showRepSelect) return <RepSelectScreen leads={vLeads} config={config} activeRep={activeRep} onSelect={r=>{if(r){setActiveRep(r);setTab('rep-home');}setShowRepSelect(false);}}/>;
-    if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach}/>;
+    if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
-    if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
+    if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;
-    if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
-    if(tab==='lead-mgmt') return <LeadMgmtView leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
-    if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&(l.campaigns||[]).length===0)} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
-    if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap}/>;
-    if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;
-    if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
+    if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
+    if(tab==='lead-mgmt') return <LeadMgmtView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} addToast={addToast} config={config}/>;
+    if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&(l.campaigns||[]).length===0)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
+    if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap}/>;
+    if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;
+    if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
     if(tab==='duplicates') return <DuplicatesView groups={dupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
     if(tab==='google-import') return <GoogleImportView onImport={importLeads} addToast={addToast}/>;
     if(tab==='agency') return <AgencyView agencies={agencies} setAgencies={setAgencies} leads={vLeads} config={config} currentUser={currentUser} isAdmin={isAdmin} addToast={addToast} onImportSheet={importAgencyLeads}/>;
-    if(tab==='close-data') return <LeadsTable leads={vLeads.filter(l=>l.fromClose)} onEdit={saveL} onDelete={delL} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="close_leads_data" printTitle="Close Leads Data"/>;
+    if(tab==='close-data') return <LeadsTable leads={vLeads.filter(l=>l.fromClose)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="close_leads_data" printTitle="Close Leads Data"/>;
     const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);
     if(camp) return <CampaignView campaign={camp} campColor={camp.color} leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
     return null;
