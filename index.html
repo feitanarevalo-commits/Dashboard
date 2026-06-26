@@ -6051,16 +6051,37 @@ function LoginScreen({
   function submit(e) {
     e && e.preventDefault();
     if (!selected || status !== 'idle') return;
-    if (pw === effectivePassword(selected)) {
-      // Correct → brief loading + success animation, then enter the dashboard.
-      setStatus('loading');
-      setTimeout(() => {
-        setStatus('success');
-        setTimeout(() => onLogin(selected), 850);
-      }, 450);
-    } else {
+    setStatus('loading');
+    const ok = role => {
+      setStatus('success');
+      setTimeout(() => onLogin({
+        name: selected.name,
+        role: role || selected.role
+      }), 850);
+    };
+    const bad = () => {
+      setStatus('idle');
       setErr('Incorrect password');
       setPw('');
+    };
+    // Fallback to the config/localStorage password (transition safety, e.g. if
+    // Supabase is unreachable or a credential hasn't been migrated yet).
+    const fallback = () => {
+      if (pw === effectivePassword(selected)) ok(selected.role);else bad();
+    };
+    if (SB) {
+      // Primary: server-side hashed verification (verify_login RPC).
+      SB.rpc('verify_login', {
+        p_name: selected.name,
+        p_password: pw
+      }).then(({
+        data,
+        error
+      }) => {
+        if (!error && data && data.length) ok(data[0].role);else fallback();
+      }).catch(fallback);
+    } else {
+      fallback();
     }
   }
   useEffect(() => {
@@ -6269,10 +6290,6 @@ function ChangePasswordModal({
   })();
   function submit(e) {
     e && e.preventDefault();
-    if (cur !== effectivePassword(user)) {
-      setErr('Current password is incorrect');
-      return;
-    }
     if (next.length < 4) {
       setErr('New password must be at least 4 characters');
       return;
@@ -6281,14 +6298,42 @@ function ChangePasswordModal({
       setErr('New passwords do not match');
       return;
     }
-    try {
-      localStorage.setItem(pwKey(user.name), next);
-    } catch (e) {
-      setErr('Could not save password');
+    // Local fallback (per-device) if Supabase is unavailable.
+    const localSave = () => {
+      if (cur !== effectivePassword(user)) {
+        setErr('Current password is incorrect');
+        return;
+      }
+      try {
+        localStorage.setItem(pwKey(user.name), next);
+      } catch (e) {
+        setErr('Could not save password');
+        return;
+      }
+      addToast('Password updated on this device', 'success');
+      onClose();
+    };
+    if (SB) {
+      SB.rpc('set_password', {
+        p_name: user.name,
+        p_old: cur,
+        p_new: next
+      }).then(({
+        data,
+        error
+      }) => {
+        if (!error && data === true) {
+          addToast('Password updated', 'success');
+          onClose();
+        } else if (!error && data === false) {
+          setErr('Current password is incorrect');
+        } else {
+          localSave();
+        }
+      }).catch(localSave);
       return;
     }
-    addToast('Password updated on this device', 'success');
-    onClose();
+    localSave();
   }
   function resetToDefault() {
     try {
