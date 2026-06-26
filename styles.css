@@ -835,3 +835,5 @@ html[data-dark] textarea::placeholder { color: var(--text-light); }
 .bell-name{font-size:13px;font-weight:600;color:var(--text);word-break:break-word;}
 .bell-snip{font-size:12px;color:var(--text-dim);margin-top:2px;line-height:1.45;}
 .bell-camp{font-size:11px;color:var(--text-light);margin-top:3px;}
+.lg-forgot-link{margin-top:12px;background:none;border:none;font-size:13px;font-weight:600;color:#5b5bd6;cursor:pointer;font-family:inherit;}
+.lg-forgot-link:hover{text-decoration:underline;}

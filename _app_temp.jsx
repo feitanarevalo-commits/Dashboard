@@ -2910,6 +2910,50 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
 // ─── LOGIN SCREEN ─────────────────────────────────────────
 // Profile-picker login landing (design handoff). Pick your name → password
 // overlay. Auth is unchanged: effectivePassword() check → onLogin(user).
+// Shown when the app is opened via an emailed reset link (?reset=<token>).
+function ResetPasswordScreen({token,onDone}) {
+  const [pw,setPw]=useState(''); const [confirm,setConfirm]=useState('');
+  const [status,setStatus]=useState('idle'); const [err,setErr]=useState('');
+  function submit(e){
+    e&&e.preventDefault();
+    if(pw.length<4){ setErr('Password must be at least 4 characters.'); return; }
+    if(pw!==confirm){ setErr('Passwords do not match.'); return; }
+    if(!SB){ setErr('Reset isn’t available right now.'); return; }
+    setStatus('loading'); setErr('');
+    SB.rpc('reset_password_with_token',{p_token:token,p_new:pw})
+      .then(({data,error})=>{ if(!error && data===true) setStatus('done'); else { setStatus('idle'); setErr('This reset link is invalid or has expired.'); } })
+      .catch(()=>{ setStatus('idle'); setErr('Something went wrong — please try again.'); });
+  }
+  return (
+    <div className="lg-root">
+      <div className="lg-right" style={{flex:1}}>
+        <div className="lg-right-inner" style={{maxWidth:400,margin:'auto'}}>
+          <div className="lg-modal" style={{boxShadow:'0 18px 44px -18px rgba(20,18,40,.25)'}}>
+            {status==='done' ? (
+              <div className="lg-success">
+                <div className="lg-check"><svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+                <div className="lg-suc-t">Password updated</div>
+                <div className="lg-suc-s">You can now sign in with your new password.</div>
+                <button className="lg-signin" style={{marginTop:18}} onClick={onDone}>Go to sign in</button>
+              </div>
+            ) : (
+              <form onSubmit={submit}>
+                <div className="lg-m-name">Set a new password</div>
+                <div className="lg-m-as" style={{marginBottom:16}}>Choose a new password for your account.</div>
+                <input type="password" className="lg-pw" placeholder="New password" value={pw} onChange={e=>{setPw(e.target.value);setErr('');}} disabled={status==='loading'} autoFocus/>
+                <input type="password" className="lg-pw" style={{marginTop:10}} placeholder="Confirm new password" value={confirm} onChange={e=>{setConfirm(e.target.value);setErr('');}} disabled={status==='loading'}/>
+                {err && <div className="lg-err">{err}</div>}
+                <button type="submit" className="lg-signin" disabled={status==='loading'}>{status==='loading' ? <span className="lg-spin"/> : 'Update password'}</button>
+                <button type="button" className="lg-backbtn" onClick={onDone}>← Back to sign in</button>
+              </form>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LoginScreen({config,onLogin}) {
   const users=config.users||[];
   const repColors=config.repColors||{};
@@ -2922,7 +2966,19 @@ function LoginScreen({config,onLogin}) {
   const [err,setErr]=useState('');
   const [status,setStatus]=useState('idle');   // idle | loading | success
   const [note,setNote]=useState('');
+  const [forgot,setForgot]=useState(false);     // forgot-password mode in the overlay
+  const [fEmail,setFEmail]=useState('');
+  const [fSending,setFSending]=useState(false);
+  const [fMsg,setFMsg]=useState('');
   const pwRef=useRef(null);
+  function sendReset(){
+    const email=(fEmail||'').trim();
+    if(!email){ setFMsg('Enter your email address.'); return; }
+    setFSending(true); setFMsg('');
+    const done=()=>{ setFSending(false); setFMsg('If that email is on file, a reset link is on its way — check your inbox.'); };
+    if(SB){ SB.functions.invoke('request-password-reset',{body:{email}}).then(done).catch(done); }
+    else { setFSending(false); setFMsg('Password reset isn’t available right now — ask an admin.'); }
+  }
 
   const q=query.trim().toLowerCase();
   const match=u=>!q||(u.name||'').toLowerCase().includes(q);
@@ -2930,8 +2986,8 @@ function LoginScreen({config,onLogin}) {
   const members=users.filter(u=>u.role!=='admin'&&match(u));
   const noResults=admins.length===0&&members.length===0;
 
-  function pick(u){ setSelected(u); setPw(''); setErr(''); setStatus('idle'); setTimeout(()=>pwRef.current&&pwRef.current.focus(),60); }
-  function back(){ setSelected(null); setPw(''); setErr(''); setStatus('idle'); }
+  function pick(u){ setSelected(u); setPw(''); setErr(''); setStatus('idle'); setForgot(false); setFMsg(''); setTimeout(()=>pwRef.current&&pwRef.current.focus(),60); }
+  function back(){ setSelected(null); setPw(''); setErr(''); setStatus('idle'); setForgot(false); setFMsg(''); }
   function submit(e){
     e&&e.preventDefault();
     if(!selected||status!=='idle') return;
@@ -3021,6 +3077,17 @@ function LoginScreen({config,onLogin}) {
                 <div className="lg-suc-t">You're in, {selected.name}</div>
                 <div className="lg-suc-s">Taking you to your dashboard…</div>
               </div>
+            ) : forgot ? (
+              <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}>
+                <div className="lg-m-avatar" style={{background:colorFor(selected)}}>{initial(selected)}</div>
+                <div className="lg-m-name">Reset password</div>
+                <div className="lg-m-as" style={{marginBottom:16}}>Enter your email and we'll send a reset link.</div>
+                <input type="email" className="lg-pw" placeholder="you@enfinity.co" value={fEmail}
+                  onChange={e=>{setFEmail(e.target.value);setFMsg('');}} disabled={fSending} autoFocus/>
+                {fMsg && <div className="lg-note" style={{textAlign:'center'}}>{fMsg}</div>}
+                <button type="button" className="lg-signin" disabled={fSending} onClick={sendReset}>{fSending ? <span className="lg-spin"/> : 'Send reset link'}</button>
+                <button type="button" className="lg-backbtn" onClick={()=>{setForgot(false);setFMsg('');}}>← Back to sign in</button>
+              </div>
             ) : (
               <form onSubmit={submit}>
                 <div className="lg-m-avatar" style={{background:getProfile(selected.name).photo?'transparent':colorFor(selected)}}>
@@ -3033,6 +3100,7 @@ function LoginScreen({config,onLogin}) {
                   onChange={e=>{setPw(e.target.value);setErr('');}} disabled={status==='loading'} autoFocus/>
                 {err && <div className="lg-err">{err}</div>}
                 <button type="submit" className="lg-signin" disabled={status==='loading'}>{status==='loading' ? <span className="lg-spin"/> : 'Sign in'}</button>
+                <button type="button" className="lg-forgot-link" onClick={()=>{ setForgot(true); setFEmail(getProfile(selected.name).email||''); setFMsg(''); setErr(''); }}>Forgot password?</button>
                 <button type="button" className="lg-backbtn" onClick={back}>← Back to profiles</button>
               </form>
             )}
@@ -3930,6 +3998,8 @@ function App() {
   const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // Gate the entire app behind login.
+  const resetToken=(()=>{ try{ return new URLSearchParams(window.location.search).get('reset'); }catch(e){ return null; } })();
+  if(resetToken) return <ResetPasswordScreen token={resetToken} onDone={()=>{ try{ window.history.replaceState({},'',window.location.pathname); }catch(e){}; window.location.reload(); }}/>;
   if(!currentUser) return <LoginScreen config={config} onLogin={login}/>;
 
   return (
