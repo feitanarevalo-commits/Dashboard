@@ -74,8 +74,8 @@ var DEFAULT_CONFIG = {
   supabaseKey: 'sb_publishable_-BsDhuAgQ8mIQfh84Jrjyg_61b_2rcK',
 
   // ── Webhook URLs ── live Make.com scenarios (eu1)
-  closeWebhook:     'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-push', // SAVE leads → Close (Supabase Edge Function; was Make)
-  closeLoadWebhook: 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-load', // LOAD leads ← Close (Supabase Edge Function; was Make)
+  closeWebhook:     'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-push-v2', // SAVE leads → real Enfinity Close org (Edge Function; Assigned To = importing rep)
+  closeLoadWebhook: '', // PUSH-ONLY: the real Enfinity org has ~628k leads — the dashboard's store is Supabase, not Close. (close-load fn still exists for the old test org if ever needed.)
   scrapeWebhook:    'https://hook.eu1.make.com/amu0xr93i4q214760zi9rqa1lcxlch55', // YouTube scraper gateway
   smartreachWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/smartreach-add', // SEND prospects → SmartReach (Supabase Edge Function; was Make)
   // Replies / interest feed (🔔). Each returns an array of reply objects:
@@ -98,14 +98,19 @@ var DEFAULT_CONFIG = {
 
   // Close.io lead custom-field IDs (so loaded leads map back from separate
   // columns instead of the description). Match these to your Close custom fields.
+  // Real Enfinity Close org custom-field ids (push handled server-side by the
+  // close-push-v2 Edge Function; these are kept for reference / any future load).
+  // The org has no single platform/campaign field, so those are blank.
   closeFields: {
-    platform:  'cf_3I6WswyUcem4aIkbPuH3K0oJOMeBALyl4PDcKfqoN0i',
-    niche:     'cf_NGmsaHgyJvjOncLROmO47XO4KWKyItrKtyb2wvsnIqW',
-    followers: 'cf_YcckM323CSeoUI3AsfjTCnhaNfZxOL6f1oQNKBhGii1',
-    status:    'cf_jCpSD0TPP9wZ7EvfHkYPploR6owqOmw5bN5qBbrNAFb',
-    campaign:  'cf_eXC6A7sn7297LyoHaThBTc6sjLcgqQFFpEJGTxVQMDd',
-    rep:       'cf_1oxAKioArRCXyqidp6OsbEEzWdBD8EU82EtzmOM5ZdH',
-    assigned:  'cf_mV4TQoYmUEAWJOZyqzCjblulhPPyM3NczEb5TSe9zVt',
+    platform:  '',
+    niche:     'cf_NKq9FaRQGXiXvXkqoAE37yIzzlIM97bYdx44PePYhFS',  // GENRE/CONTENT KEYWORDS
+    followers: 'cf_nza46TI9wN8XHYBO4UsgMn1OZDz35YGsbMznhme2sX8',  // FOLLOWERS
+    status:    '',
+    campaign:  '',
+    rep:       'lcf_jAlVnfW7GaOPZG2Pmaap74YBK8nITbnlAQgl6r6UU4K', // Assigned To
+    assigned:  'lcf_OpXbKy0c1Ai9SuQ7Wh8egmK6RmeeyTmmZPMoT4zrrAm', // Assigned On
+    channelName:'lcf_pRE5ACR0tjTiNd0OaURhOAYMxO7LLoMx5J6qiFtHPd4', // Channel Name
+    channelUrl: 'lcf_yHH8kQ9ToHsQwnHANWPQ49BtTVTe6h7MgNxdqILoVNv', // Channel URL
   },
 
   // SmartReach campaigns per rep — [{id,label}] shown in the rep's bulk
