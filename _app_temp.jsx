@@ -3112,6 +3112,63 @@ function LoginScreen({config,onLogin}) {
 }
 
 // ─── CHANGE PASSWORD MODAL ────────────────────────────────
+// Admin tool: reset a locked-out teammate's password. Authorized by the admin
+// re-entering their OWN password (verified server-side in admin_set_password).
+function AdminResetModal({admin,config,onClose,addToast}) {
+  const users=config.users||[];
+  const [target,setTarget]=useState('');
+  const [newPw,setNewPw]=useState('');
+  const [adminPw,setAdminPw]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState('');
+  function gen(){ const s='abcdefghjkmnpqrstuvwxyz23456789'; let p=''; for(let i=0;i<10;i++) p+=s[Math.floor(Math.random()*s.length)]; setNewPw(p); setErr(''); }
+  function submit(e){
+    e&&e.preventDefault();
+    if(!target){ setErr('Pick a teammate.'); return; }
+    if(newPw.length<4){ setErr('New password must be at least 4 characters.'); return; }
+    if(!adminPw){ setErr('Enter your admin password to confirm.'); return; }
+    if(!SB){ setErr('Reset isn’t available right now.'); return; }
+    setBusy(true); setErr('');
+    SB.rpc('admin_set_password',{p_admin:admin.name,p_admin_pw:adminPw,p_target:target,p_new:newPw}).then(({data,error})=>{
+      setBusy(false);
+      if(!error && data===true){ addToast(`Password reset for ${target}`,'success'); onClose(); }
+      else { setErr('Reset failed — check your admin password.'); }
+    }).catch(()=>{ setBusy(false); setErr('Something went wrong — try again.'); });
+  }
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:440}}>
+        <div className="modal-header">
+          <div><h2>Reset a teammate's password</h2><p style={{color:'var(--text-dim)',fontSize:13,marginTop:3}}>For someone who's locked out — no email needed.</p></div>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
+        </div>
+        <form onSubmit={submit} style={{display:'flex',flexDirection:'column',gap:12}}>
+          <div className="form-group"><label className="form-label">Teammate</label>
+            <select value={target} onChange={e=>{setTarget(e.target.value);setErr('');}}>
+              <option value="">— select —</option>
+              {users.filter(u=>u.name!==admin.name).map(u=><option key={u.name} value={u.name}>{u.name} ({u.role})</option>)}
+            </select></div>
+          <div className="form-group"><label className="form-label">New password</label>
+            <div style={{display:'flex',gap:6}}>
+              <input value={newPw} onChange={e=>{setNewPw(e.target.value);setErr('');}} placeholder="new password" style={{flex:1}}/>
+              <button type="button" className="btn btn-outline btn-sm" onClick={gen}>🎲 Generate</button>
+            </div></div>
+          <div className="form-group"><label className="form-label">Your admin password</label>
+            <input type="password" value={adminPw} onChange={e=>{setAdminPw(e.target.value);setErr('');}} placeholder="confirm it's you"/></div>
+          {err && <div className="login-err" style={{textAlign:'left'}}>{err}</div>}
+          <div style={{fontSize:11,color:'var(--text-light)',lineHeight:1.5,background:'var(--bg)',padding:'8px 10px',borderRadius:'var(--radius)'}}>
+            ⓘ Share the new password with {target||'them'} privately. They can change it themselves later via 🔑 Change Password.
+          </div>
+          <div className="modal-footer"><div/><div className="modal-footer-right">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={busy}>{busy?'Resetting…':'Reset password'}</button>
+          </div></div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function ChangePasswordModal({user,onClose,addToast}) {
   const [cur,setCur]=useState('');
   const [next,setNext]=useState('');
@@ -3573,6 +3630,7 @@ function App() {
   const [agencies,setAgencies]=useState(()=>{ try{return JSON.parse(localStorage.getItem('agencies')||'[]');}catch(e){return [];} });
   const [showChangePw,setShowChangePw]=useState(false);
   const [showProfile,setShowProfile]=useState(false);
+  const [showAdminReset,setShowAdminReset]=useState(false);
   const [profileTick,setProfileTick]=useState(0);  // bumped once Supabase profiles load
   const [replies,setReplies]=useState(()=>(typeof SAMPLE_REPLIES!=='undefined'?SAMPLE_REPLIES:[]).map(normalizeReply));
   const [showBell,setShowBell]=useState(false);
@@ -4150,6 +4208,9 @@ function App() {
             <div className="nav-item settings" onClick={()=>setShowChangePw(true)}>
               <span className="nav-icon">🔑</span>Change Password
             </div>
+            {isAdmin && <div className="nav-item settings" onClick={()=>setShowAdminReset(true)}>
+              <span className="nav-icon">🛠</span>Reset Teammate's Password
+            </div>}
             <div className="nav-item settings" onClick={logout}>
               <span className="nav-icon">⎋</span>Logout ({currentUser.name})
             </div>
@@ -4175,6 +4236,7 @@ function App() {
       <Toast toasts={toasts}/>
       {showSettings && <SettingsDrawer config={config} onConfig={applyConfig} onClose={()=>setShowSettings(false)} addToast={addToast}/>}
       {showChangePw && <ChangePasswordModal user={currentUser} onClose={()=>setShowChangePw(false)} addToast={addToast}/>}
+      {showAdminReset && isAdmin && <AdminResetModal admin={currentUser} config={config} onClose={()=>setShowAdminReset(false)} addToast={addToast}/>}
       {showProfile && <ProfileModal user={currentUser} config={config} onClose={()=>setShowProfile(false)} addToast={addToast}/>}
       {showSearch && <GlobalSearch leads={leads} config={config} isAdmin={isAdmin}
         onClose={()=>setShowSearch(false)}

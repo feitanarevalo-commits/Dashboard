@@ -6491,6 +6491,176 @@ function LoginScreen({
 }
 
 // ─── CHANGE PASSWORD MODAL ────────────────────────────────
+// Admin tool: reset a locked-out teammate's password. Authorized by the admin
+// re-entering their OWN password (verified server-side in admin_set_password).
+function AdminResetModal({
+  admin,
+  config,
+  onClose,
+  addToast
+}) {
+  const users = config.users || [];
+  const [target, setTarget] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [adminPw, setAdminPw] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  function gen() {
+    const s = 'abcdefghjkmnpqrstuvwxyz23456789';
+    let p = '';
+    for (let i = 0; i < 10; i++) p += s[Math.floor(Math.random() * s.length)];
+    setNewPw(p);
+    setErr('');
+  }
+  function submit(e) {
+    e && e.preventDefault();
+    if (!target) {
+      setErr('Pick a teammate.');
+      return;
+    }
+    if (newPw.length < 4) {
+      setErr('New password must be at least 4 characters.');
+      return;
+    }
+    if (!adminPw) {
+      setErr('Enter your admin password to confirm.');
+      return;
+    }
+    if (!SB) {
+      setErr('Reset isn’t available right now.');
+      return;
+    }
+    setBusy(true);
+    setErr('');
+    SB.rpc('admin_set_password', {
+      p_admin: admin.name,
+      p_admin_pw: adminPw,
+      p_target: target,
+      p_new: newPw
+    }).then(({
+      data,
+      error
+    }) => {
+      setBusy(false);
+      if (!error && data === true) {
+        addToast(`Password reset for ${target}`, 'success');
+        onClose();
+      } else {
+        setErr('Reset failed — check your admin password.');
+      }
+    }).catch(() => {
+      setBusy(false);
+      setErr('Something went wrong — try again.');
+    });
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-overlay",
+    onClick: e => e.target === e.currentTarget && onClose()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal",
+    style: {
+      maxWidth: 440
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-header"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", null, "Reset a teammate's password"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: 'var(--text-dim)',
+      fontSize: 13,
+      marginTop: 3
+    }
+  }, "For someone who's locked out — no email needed.")), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: onClose,
+    style: {
+      fontSize: 16,
+      padding: '4px 8px'
+    }
+  }, "✕")), /*#__PURE__*/React.createElement("form", {
+    onSubmit: submit,
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Teammate"), /*#__PURE__*/React.createElement("select", {
+    value: target,
+    onChange: e => {
+      setTarget(e.target.value);
+      setErr('');
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "— select —"), users.filter(u => u.name !== admin.name).map(u => /*#__PURE__*/React.createElement("option", {
+    key: u.name,
+    value: u.name
+  }, u.name, " (", u.role, ")")))), /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "New password"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: newPw,
+    onChange: e => {
+      setNewPw(e.target.value);
+      setErr('');
+    },
+    placeholder: "new password",
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn-outline btn-sm",
+    onClick: gen
+  }, "🎲 Generate"))), /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Your admin password"), /*#__PURE__*/React.createElement("input", {
+    type: "password",
+    value: adminPw,
+    onChange: e => {
+      setAdminPw(e.target.value);
+      setErr('');
+    },
+    placeholder: "confirm it's you"
+  })), err && /*#__PURE__*/React.createElement("div", {
+    className: "login-err",
+    style: {
+      textAlign: 'left'
+    }
+  }, err), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-light)',
+      lineHeight: 1.5,
+      background: 'var(--bg)',
+      padding: '8px 10px',
+      borderRadius: 'var(--radius)'
+    }
+  }, "ⓘ Share the new password with ", target || 'them', " privately. They can change it themselves later via 🔑 Change Password."), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer"
+  }, /*#__PURE__*/React.createElement("div", null), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer-right"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn-ghost",
+    onClick: onClose
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    className: "btn btn-primary",
+    disabled: busy
+  }, busy ? 'Resetting…' : 'Reset password'))))));
+}
 function ChangePasswordModal({
   user,
   onClose,
@@ -7590,6 +7760,7 @@ function App() {
   });
   const [showChangePw, setShowChangePw] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showAdminReset, setShowAdminReset] = useState(false);
   const [profileTick, setProfileTick] = useState(0); // bumped once Supabase profiles load
   const [replies, setReplies] = useState(() => (typeof SAMPLE_REPLIES !== 'undefined' ? SAMPLE_REPLIES : []).map(normalizeReply));
   const [showBell, setShowBell] = useState(false);
@@ -8747,7 +8918,12 @@ function App() {
     onClick: () => setShowChangePw(true)
   }, /*#__PURE__*/React.createElement("span", {
     className: "nav-icon"
-  }, "🔑"), "Change Password"), /*#__PURE__*/React.createElement("div", {
+  }, "🔑"), "Change Password"), isAdmin && /*#__PURE__*/React.createElement("div", {
+    className: "nav-item settings",
+    onClick: () => setShowAdminReset(true)
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "nav-icon"
+  }, "🛠"), "Reset Teammate's Password"), /*#__PURE__*/React.createElement("div", {
     className: "nav-item settings",
     onClick: logout
   }, /*#__PURE__*/React.createElement("span", {
@@ -8771,6 +8947,11 @@ function App() {
   }), showChangePw && /*#__PURE__*/React.createElement(ChangePasswordModal, {
     user: currentUser,
     onClose: () => setShowChangePw(false),
+    addToast: addToast
+  }), showAdminReset && isAdmin && /*#__PURE__*/React.createElement(AdminResetModal, {
+    admin: currentUser,
+    config: config,
+    onClose: () => setShowAdminReset(false),
     addToast: addToast
   }), showProfile && /*#__PURE__*/React.createElement(ProfileModal, {
     user: currentUser,
