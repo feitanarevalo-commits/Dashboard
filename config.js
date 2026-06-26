@@ -84,8 +84,11 @@ var DEFAULT_CONFIG = {
   //   { rep, source:'SmartReach'|'Close', name, email, sentiment, snippet, when, campaign }
   // Wired later (SmartReach reply-webhook → Make store; Close inbound email
   // activity). Leave blank until connected — the panel shows an empty state.
-  repliesWebhook:      '', // SmartReach replies/interest
-  closeRepliesWebhook: '', // Close.io inbound email replies
+  // 🔔 Replies/interest feed — one Edge Function merges Close incoming emails
+  // (scoped by the rep's Close user_id) + SmartReach replies (stored by the
+  // sr-reply-ingest webhook). The dashboard POSTs {rep} (or 'all' for admins).
+  repliesWebhook:      'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/replies',
+  closeRepliesWebhook: '', // (unified into `replies` above)
 
   // ── Per-rep YouTube API keys ───────────────────────────────
   // Each Google Cloud project has its own 10,000 units/day (~100 searches).

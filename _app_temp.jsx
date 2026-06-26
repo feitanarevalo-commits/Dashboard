@@ -3898,22 +3898,33 @@ function App() {
 
   // Pull replies/interest from the SmartReach + Close feeds (when wired) and
   // merge into the 🔔 panel. No-op (with a hint) until the webhooks are set.
+  // Pull the rep's replies (Close incoming emails + SmartReach) from the single
+  // `replies` Edge Function. Employees get their own feed; admins get everyone's.
   function loadReplies(opts){
     opts=opts||{};
-    const urls=[config.repliesWebhook,config.closeRepliesWebhook].map(u=>(u||'').trim()).filter(u=>u && !u.includes('your-'));
-    if(!urls.length){ if(!opts.silent) addToast('No replies feed connected yet — SmartReach/Close reply webhooks aren’t wired','info'); return; }
+    const wh=(config.repliesWebhook||'').trim();
+    if(!wh || wh.includes('your-')){ if(!opts.silent) addToast('Replies feed isn’t connected yet','info'); return; }
     setRepliesLoading(true);
-    Promise.all(urls.map(u=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.ok?r.text():'').catch(()=>'')))
-      .then(texts=>{
-        let all=[];
-        texts.forEach(t=>{ if(!t||!t.trim())return; try{ const d=JSON.parse(t); const arr=Array.isArray(d)?d:(d.replies||d.data||d.prospects||[]); all=all.concat(arr); }catch(e){} });
+    const who=isAdmin?'all':((currentUser&&currentUser.name)||'');
+    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rep:who})})
+      .then(r=>r.ok?r.json():null)
+      .then(d=>{
+        const arr=d?(Array.isArray(d)?d:(d.replies||d.data||[])):[];
         const seen={}, uniq=[];
-        all.map(normalizeReply).forEach(r=>{ const k=replyKey(r); if(!seen[k]){seen[k]=1;uniq.push(r);} });
+        arr.map(normalizeReply).forEach(r=>{ const k=replyKey(r); if(!seen[k]){seen[k]=1;uniq.push(r);} });
         setReplies(uniq);
         if(!opts.silent) addToast(`Loaded ${uniq.length} repl${uniq.length===1?'y':'ies'}`,'success');
       })
+      .catch(()=>{ if(!opts.silent) addToast('Couldn’t load replies','error'); })
       .finally(()=>setRepliesLoading(false));
   }
+  // Auto-load on login + refresh every 2 min so reps are notified without clicking.
+  useEffect(()=>{
+    if(!currentUser || !(config.repliesWebhook||'').trim()) return;
+    loadReplies({silent:true});
+    const t=setInterval(()=>loadReplies({silent:true}), 120000);
+    return ()=>clearInterval(t);
+  },[currentUser && currentUser.name]);
 
   function loadFromClose(opts){
     opts=opts||{};
