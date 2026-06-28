@@ -4979,15 +4979,32 @@ function DiscoveryView({
 // Simple scraper queue. "Run Scraper" POSTs to the Make/Apify webhook
 // (config.scrapeWebhook) and ingests results; falls back to a notice if
 // no webhook is configured. The richer DiscoveryView above is kept dormant.
-const SCRAPER_LANGUAGES = ['All', 'English', 'Spanish', 'French', 'German', 'Portuguese', 'Other'];
+const SCRAPER_LANGUAGES = ['All', 'English', 'Spanish', 'Portuguese', 'French', 'German', 'Italian', 'Dutch', 'Russian', 'Polish', 'Turkish', 'Arabic', 'Hindi', 'Indonesian', 'Japanese', 'Korean', 'Chinese', 'Thai', 'Vietnamese', 'Filipino', 'Ukrainian', 'Romanian', 'Swedish', 'Other'];
 // Dashboard language name → YouTube `relevanceLanguage` code ('' = no preference).
 const LANG_CODES = {
   All: '',
   English: 'en',
   Spanish: 'es',
+  Portuguese: 'pt',
   French: 'fr',
   German: 'de',
-  Portuguese: 'pt',
+  Italian: 'it',
+  Dutch: 'nl',
+  Russian: 'ru',
+  Polish: 'pl',
+  Turkish: 'tr',
+  Arabic: 'ar',
+  Hindi: 'hi',
+  Indonesian: 'id',
+  Japanese: 'ja',
+  Korean: 'ko',
+  Chinese: 'zh',
+  Thai: 'th',
+  Vietnamese: 'vi',
+  Filipino: 'tl',
+  Ukrainian: 'uk',
+  Romanian: 'ro',
+  Swedish: 'sv',
   Other: ''
 };
 // Pair each language with a representative `regionCode` (market) — relevanceLanguage
@@ -4997,9 +5014,26 @@ const REGION_CODES = {
   All: '',
   English: 'US',
   Spanish: 'MX',
+  Portuguese: 'BR',
   French: 'FR',
   German: 'DE',
-  Portuguese: 'BR',
+  Italian: 'IT',
+  Dutch: 'NL',
+  Russian: 'RU',
+  Polish: 'PL',
+  Turkish: 'TR',
+  Arabic: 'SA',
+  Hindi: 'IN',
+  Indonesian: 'ID',
+  Japanese: 'JP',
+  Korean: 'KR',
+  Chinese: 'TW',
+  Thai: 'TH',
+  Vietnamese: 'VN',
+  Filipino: 'PH',
+  Ukrainian: 'UA',
+  Romanian: 'RO',
+  Swedish: 'SE',
   Other: ''
 };
 // Follower BRACKETS (a range, not a minimum) — picking "1K – 10K" keeps only
@@ -8021,6 +8055,7 @@ function App() {
   const [replies, setReplies] = useState(() => (typeof SAMPLE_REPLIES !== 'undefined' ? SAMPLE_REPLIES : []).map(normalizeReply));
   const [showBell, setShowBell] = useState(false);
   const [repliesLoading, setRepliesLoading] = useState(false);
+  const [bellScope, setBellScope] = useState('mine'); // admins can flip to 'all' to see everyone's
   const [showSearch, setShowSearch] = useState(false);
   const [searchLead, setSearchLead] = useState(null);
   const [closeSyncing, setCloseSyncing] = useState(false);
@@ -8314,7 +8349,7 @@ function App() {
       return;
     }
     setRepliesLoading(true);
-    const who = currentUser && currentUser.name || ''; // each person sees only THEIR own Close/SmartReach messages
+    const who = isAdmin && bellScope === 'all' ? 'all' : currentUser && currentUser.name || ''; // own account, unless an admin opts into 'all'
     fetch(wh, {
       method: 'POST',
       headers: {
@@ -8350,7 +8385,7 @@ function App() {
       silent: true
     }), 120000);
     return () => clearInterval(t);
-  }, [currentUser && currentUser.name]);
+  }, [currentUser && currentUser.name, bellScope]);
   function loadFromClose(opts) {
     opts = opts || {};
     const wh = (config.closeLoadWebhook || '').trim();
@@ -8998,7 +9033,8 @@ function App() {
   }, /*#__PURE__*/React.createElement("span", {
     className: "webhook-dot"
   }), " n8n Live"), (() => {
-    const myReplies = replies.filter(r => (r.rep || '') === currentUser.name); // own account only
+    const allMode = isAdmin && bellScope === 'all';
+    const myReplies = allMode ? replies : replies.filter(r => (r.rep || '') === currentUser.name);
     const seen = repliesSeenSet(currentUser.name);
     const unread = myReplies.filter(r => !seen.has(r.id)).length;
     return /*#__PURE__*/React.createElement("div", {
@@ -9019,11 +9055,21 @@ function App() {
       className: "bell-dropdown"
     }, /*#__PURE__*/React.createElement("div", {
       className: "bell-head"
-    }, /*#__PURE__*/React.createElement("span", null, "🔔 Replies & Interest · ", currentUser.name), /*#__PURE__*/React.createElement("button", {
+    }, /*#__PURE__*/React.createElement("span", null, "🔔 Replies & Interest · ", allMode ? 'all reps' : currentUser.name), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center'
+      }
+    }, isAdmin && /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost btn-xs",
+      onClick: () => setBellScope(s => s === 'all' ? 'mine' : 'all'),
+      title: "Switch between your messages and everyone's"
+    }, allMode ? '👤 Mine' : '👥 All reps'), /*#__PURE__*/React.createElement("button", {
       className: "btn btn-ghost btn-xs",
       onClick: () => loadReplies(),
       disabled: repliesLoading
-    }, repliesLoading ? '…' : '⟳ Check')), /*#__PURE__*/React.createElement("div", {
+    }, repliesLoading ? '…' : '⟳ Check'))), /*#__PURE__*/React.createElement("div", {
       className: "bell-list"
     }, myReplies.length === 0 ? /*#__PURE__*/React.createElement("div", {
       className: "bell-empty"
@@ -9043,7 +9089,9 @@ function App() {
       className: `rs-chip ${(REPLY_SENTIMENTS[r.sentiment] || {}).cls || 'rs-rep'}`
     }, r.sentiment), /*#__PURE__*/React.createElement("span", {
       className: "bell-src"
-    }, r.source === 'Close' ? '☁ Close' : '✉ SmartReach'), /*#__PURE__*/React.createElement("span", {
+    }, r.source === 'Close' ? '☁ Close' : '✉ SmartReach'), allMode && r.rep && /*#__PURE__*/React.createElement("span", {
+      className: "bell-rep"
+    }, r.rep), /*#__PURE__*/React.createElement("span", {
       className: "bell-when"
     }, fmtReplyWhen(r.when))), /*#__PURE__*/React.createElement("div", {
       className: "bell-name"
