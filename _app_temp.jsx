@@ -863,7 +863,7 @@ function InlineEmail({emails, onSave}) {
 }
 
 // ─── LEADS TABLE ──────────────────────────────────────────
-function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
+function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
   const [sel,setSel] = useState([]);
   const [searchState,setSearchState] = useState('');
   // When the parent provides search control (e.g. Scraper uses it as the
@@ -1076,6 +1076,12 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
             Save Changes
           </button>
           <button className="btn btn-outline btn-sm" onClick={openSelected} title="Open each selected lead's URL in a new tab">🔗 Open {sel.length}</button>
+          {closeSend&&(<>
+            <div className="toolbar-sep"/>
+            <button className="btn btn-primary btn-sm" disabled={!sel.length}
+              onClick={()=>{ closeSend.onSend(leads.filter(l=>sel.includes(l.id))); setSel([]); }}
+              title="Send the selected leads to Close.io (assigned to their rep)">⬆ Send {sel.length} to Close</button>
+          </>)}
           {smartReachSend&&(<>
             <div className="toolbar-sep"/>
             <span className="bulk-panel-label">SmartReach</span>
@@ -1821,6 +1827,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
         leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap}
         smartReachSend={{ campaigns:(config.smartReachCampaigns&&config.smartReachCampaigns[rep])||[], onSend:(leads,campId,campLabel)=>importToSmartReach(rep,leads,campId,campLabel) }}
+        closeSend={{ onSend:(ls)=>importToClose(rep,ls) }}
         filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
       />
       {showClose && <MyCloseLeads rep={rep} config={config} onClose={()=>setShowClose(false)}/>}

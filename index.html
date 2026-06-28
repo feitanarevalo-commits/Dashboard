@@ -1610,6 +1610,7 @@ function LeadsTable({
   searchFilters = true,
   searchPlaceholder = 'Search channels, niches, platforms...',
   smartReachSend = null,
+  closeSend = null,
   config,
   feats,
   campColorMap,
@@ -1958,7 +1959,17 @@ function LeadsTable({
     className: "btn btn-outline btn-sm",
     onClick: openSelected,
     title: "Open each selected lead's URL in a new tab"
-  }, "🔗 Open ", sel.length), smartReachSend && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "🔗 Open ", sel.length), closeSend && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "toolbar-sep"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    disabled: !sel.length,
+    onClick: () => {
+      closeSend.onSend(leads.filter(l => sel.includes(l.id)));
+      setSel([]);
+    },
+    title: "Send the selected leads to Close.io (assigned to their rep)"
+  }, "⬆ Send ", sel.length, " to Close")), smartReachSend && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "toolbar-sep"
   }), /*#__PURE__*/React.createElement("span", {
     className: "bulk-panel-label"
@@ -3485,6 +3496,9 @@ function RepDashboard({
     smartReachSend: {
       campaigns: config.smartReachCampaigns && config.smartReachCampaigns[rep] || [],
       onSend: (leads, campId, campLabel) => importToSmartReach(rep, leads, campId, campLabel)
+    },
+    closeSend: {
+      onSend: ls => importToClose(rep, ls)
     },
     filename: `${rep}_leads`,
     printTitle: `${rep}'s Lead Report`
