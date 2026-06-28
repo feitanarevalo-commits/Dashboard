@@ -86,7 +86,7 @@ var DEFAULT_CONFIG = {
   // Web app → "Anyone") or a Make/Zapier "Webhook → Google Sheets" scenario.
   // Each POST body: { event:'filed'|'decision', name, type, start_date, end_date,
   //   days, reason, status, decided_by, decided_at }. Leave blank to skip the sheet.
-  leavesWebhook: '',
+  leavesWebhook: 'https://script.google.com/macros/s/AKfycbxdtfllSCiV2KittPTAWQGcVRsTbNrZtM_lr2YZSHtLJhaHPNE-ulzPK-jPZX5SQn_Ktw/exec',
   scrapeWebhook:    'https://hook.eu1.make.com/amu0xr93i4q214760zi9rqa1lcxlch55', // YouTube scraper gateway
   smartreachWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/smartreach-add', // SEND prospects → SmartReach (Supabase Edge Function; was Make)
   // Replies / interest feed (🔔). Each returns an array of reply objects:
