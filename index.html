@@ -2526,6 +2526,96 @@ function LeavesView({
     }
   }, l.decided_by || '—', l.decided_by && l.decided_at ? ` · ${String(l.decided_at).slice(0, 10)}` : ''))))))));
 }
+
+// ─── ATTENDANCE VIEW (admin-only) ─────────────────────────
+// Clock in/out log. Everyone can clock via the topbar; only admins see this log.
+function AttendanceView({
+  attendance,
+  config
+}) {
+  const [rep, setRep] = useState('');
+  const reps = config.salesReps || [];
+  const rows = attendance.filter(a => !rep || a.name === rep);
+  const fmt = ts => {
+    try {
+      return new Date(ts).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      });
+    } catch (e) {
+      return ts;
+    }
+  };
+  const names = [...new Set([...reps, ...attendance.map(a => a.name)])];
+  return /*#__PURE__*/React.createElement("div", {
+    className: "home-content"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header",
+    style: {
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title"
+  }, "⏱ Attendance Log ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 400,
+      color: 'var(--text-dim)',
+      fontSize: 12
+    }
+  }, "· ", rows.length, " record", rows.length !== 1 ? 's' : '')), /*#__PURE__*/React.createElement("select", {
+    value: rep,
+    onChange: e => setRep(e.target.value),
+    style: {
+      marginLeft: 'auto',
+      padding: '6px 10px',
+      border: `1px solid ${rep ? 'var(--accent)' : 'var(--border)'}`,
+      borderRadius: 8,
+      fontSize: 13,
+      background: 'var(--bg)',
+      color: 'var(--text)'
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "All people"), names.map(r => /*#__PURE__*/React.createElement("option", {
+    key: r,
+    value: r
+  }, r)))), /*#__PURE__*/React.createElement("div", {
+    className: "card-body",
+    style: {
+      padding: 0,
+      overflowX: 'auto'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "kpi-table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", null, "Action"), /*#__PURE__*/React.createElement("th", null, "Date & Time"))), /*#__PURE__*/React.createElement("tbody", null, rows.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: 3,
+    style: {
+      padding: 16,
+      color: 'var(--text-dim)'
+    }
+  }, "No clock in/out records yet.")), rows.map(a => /*#__PURE__*/React.createElement("tr", {
+    key: a.id
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 600
+    }
+  }, a.name), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      background: a.type === 'in' ? '#E3FCF2' : '#FFEBE6',
+      color: a.type === 'in' ? '#00875A' : '#DE350B',
+      fontWeight: 700,
+      fontSize: 11,
+      padding: '2px 9px',
+      borderRadius: 8
+    }
+  }, a.type === 'in' ? 'Clock In' : 'Clock Out')), /*#__PURE__*/React.createElement("td", null, fmt(a.ts)))))))));
+}
 function HomeView({
   leads,
   config
@@ -3240,6 +3330,15 @@ function loadLeavesFromSupabase() {
   return SB.from('leaves').select('*').order('created_at', {
     ascending: false
   }).then(({
+    data,
+    error
+  }) => error || !data ? [] : data).catch(() => []);
+}
+function loadAttendanceFromSupabase() {
+  if (!SB) return Promise.resolve([]);
+  return SB.from('attendance').select('*').order('ts', {
+    ascending: false
+  }).limit(1000).then(({
     data,
     error
   }) => error || !data ? [] : data).catch(() => []);
@@ -8474,6 +8573,10 @@ function App() {
   useEffect(() => {
     if (SB) loadLeavesFromSupabase().then(setLeaves);
   }, []);
+  const [attendance, setAttendance] = useState([]);
+  useEffect(() => {
+    if (SB) loadAttendanceFromSupabase().then(setAttendance);
+  }, []);
   const [showSearch, setShowSearch] = useState(false);
   const [searchLead, setSearchLead] = useState(null);
   const [closeSyncing, setCloseSyncing] = useState(false);
@@ -8636,6 +8739,35 @@ function App() {
       postLeaveSheet({
         event: 'filed',
         ...saved
+      });
+    });
+  }
+  function clockEvent(type) {
+    if (!SB) {
+      addToast('Backend unavailable', 'error');
+      return;
+    }
+    const row = {
+      name: currentUser.name,
+      type,
+      ts: new Date().toISOString()
+    };
+    SB.from('attendance').insert(row).select().then(({
+      data,
+      error
+    }) => {
+      if (error) {
+        addToast('Clock failed: ' + error.message, 'error');
+        return;
+      }
+      const saved = data && data[0] || row;
+      setAttendance(a => [saved, ...a]);
+      addToast(type === 'in' ? '⏱ Clocked in' : '⏱ Clocked out', type === 'in' ? 'success' : 'info');
+      postLeaveSheet({
+        kind: 'attendance',
+        name: row.name,
+        type,
+        timestamp: row.ts
       });
     });
   }
@@ -9253,6 +9385,10 @@ function App() {
     id: 'leaves',
     icon: '🌴',
     label: 'Leaves'
+  }, {
+    id: 'attendance',
+    icon: '⏱',
+    label: 'Attendance'
   }];
   const NAV_FILTER = [{
     id: 'pending',
@@ -9320,6 +9456,13 @@ function App() {
       isAdmin: isAdmin,
       onFile: fileLeave,
       onDecide: decideLeave
+    });
+    if (tab === 'attendance') return isAdmin ? /*#__PURE__*/React.createElement(AttendanceView, {
+      attendance: attendance,
+      config: config
+    }) : /*#__PURE__*/React.createElement(HomeView, {
+      leads: vLeads,
+      config: config
     });
     if (tab === 'scraper') return /*#__PURE__*/React.createElement(ScraperView, {
       leads: vLeads,
@@ -9543,6 +9686,20 @@ function App() {
   }), /*#__PURE__*/React.createElement("path", {
     d: "m21 21-4.35-4.35"
   }))), (() => {
+    const myLast = attendance.find(a => a.name === (currentUser && currentUser.name));
+    const inNow = myLast && myLast.type === 'in';
+    return /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-sm",
+      style: {
+        background: inNow ? '#DE350B' : '#00875A',
+        color: '#fff',
+        borderColor: 'transparent',
+        fontWeight: 600
+      },
+      onClick: () => clockEvent(inNow ? 'out' : 'in'),
+      title: inNow ? 'You are clocked in — click to clock out' : 'Click to clock in'
+    }, inNow ? '⏱ Clock Out' : '⏱ Clock In');
+  })(), (() => {
     const allMode = isAdmin && bellScope === 'all';
     const myReplies = allMode ? replies : replies.filter(r => (r.rep || '') === currentUser.name);
     const seen = repliesSeenSet(currentUser.name);
@@ -9709,7 +9866,7 @@ function App() {
     className: "sct-label"
   }, "Collapse")), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
-  }, "Main"), NAV_MAIN.filter(n => n.id === 'leaves' ? config.tabs.leaves !== false : config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
+  }, "Main"), NAV_MAIN.filter(n => n.id === 'attendance' ? isAdmin : n.id === 'leaves' ? config.tabs.leaves !== false : config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
     key: n.id,
     title: n.label,
     className: `nav-item ${tab === n.id && !showRepSelect ? 'active' : ''}`,

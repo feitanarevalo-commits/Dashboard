@@ -1301,6 +1301,44 @@ function LeavesView({leaves,currentUser,isAdmin,onFile,onDecide}) {
   );
 }
 
+// ─── ATTENDANCE VIEW (admin-only) ─────────────────────────
+// Clock in/out log. Everyone can clock via the topbar; only admins see this log.
+function AttendanceView({attendance,config}) {
+  const [rep,setRep]=useState('');
+  const reps=config.salesReps||[];
+  const rows=attendance.filter(a=>!rep||a.name===rep);
+  const fmt=ts=>{ try{ return new Date(ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch(e){ return ts; } };
+  const names=[...new Set([...reps,...attendance.map(a=>a.name)])];
+  return (
+    <div className="home-content">
+      <div className="card">
+        <div className="card-header" style={{display:'flex',gap:10,alignItems:'center'}}>
+          <div className="card-title">⏱ Attendance Log <span style={{fontWeight:400,color:'var(--text-dim)',fontSize:12}}>· {rows.length} record{rows.length!==1?'s':''}</span></div>
+          <select value={rep} onChange={e=>setRep(e.target.value)} style={{marginLeft:'auto',padding:'6px 10px',border:`1px solid ${rep?'var(--accent)':'var(--border)'}`,borderRadius:8,fontSize:13,background:'var(--bg)',color:'var(--text)'}}>
+            <option value="">All people</option>
+            {names.map(r=><option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        <div className="card-body" style={{padding:0,overflowX:'auto'}}>
+          <table className="kpi-table">
+            <thead><tr><th>Name</th><th>Action</th><th>Date &amp; Time</th></tr></thead>
+            <tbody>
+              {rows.length===0 && <tr><td colSpan={3} style={{padding:16,color:'var(--text-dim)'}}>No clock in/out records yet.</td></tr>}
+              {rows.map(a=>(
+                <tr key={a.id}>
+                  <td style={{fontWeight:600}}>{a.name}</td>
+                  <td><span style={{background:a.type==='in'?'#E3FCF2':'#FFEBE6',color:a.type==='in'?'#00875A':'#DE350B',fontWeight:700,fontSize:11,padding:'2px 9px',borderRadius:8}}>{a.type==='in'?'Clock In':'Clock Out'}</span></td>
+                  <td>{fmt(a.ts)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HomeView({leads,config}) {
   const [period,setPeriod]=useState('monthly');
   const [repFilter,setRepFilter]=useState('');     // '' = all reps, else a single rep
@@ -1683,6 +1721,10 @@ function clearAllLeadsFromSupabase(){
 function loadLeavesFromSupabase(){
   if(!SB) return Promise.resolve([]);
   return SB.from('leaves').select('*').order('created_at',{ascending:false}).then(({data,error})=>(error||!data)?[]:data).catch(()=>[]);
+}
+function loadAttendanceFromSupabase(){
+  if(!SB) return Promise.resolve([]);
+  return SB.from('attendance').select('*').order('ts',{ascending:false}).limit(1000).then(({data,error})=>(error||!data)?[]:data).catch(()=>[]);
 }
 
 // ── Replies / interest feed (🔔) ──────────────────────────
@@ -3870,6 +3912,8 @@ function App() {
   useEffect(()=>{ try{ localStorage.setItem('navCollapsed',navCollapsed?'1':'0'); }catch(e){} },[navCollapsed]);
   const [leaves,setLeaves]=useState([]);
   useEffect(()=>{ if(SB) loadLeavesFromSupabase().then(setLeaves); },[]);
+  const [attendance,setAttendance]=useState([]);
+  useEffect(()=>{ if(SB) loadAttendanceFromSupabase().then(setAttendance); },[]);
   const [showSearch,setShowSearch]=useState(false);
   const [searchLead,setSearchLead]=useState(null);
   const [closeSyncing,setCloseSyncing]=useState(false);
@@ -3940,6 +3984,17 @@ function App() {
       const saved=(data&&data[0])||row;
       setLeaves(ls=>[saved,...ls]); addToast('Leave request filed','success'); logH('🌴',`Leave filed: ${row.type} ${row.start_date||''}→${row.end_date||''}`);
       postLeaveSheet({ event:'filed', ...saved });
+    });
+  }
+  function clockEvent(type){
+    if(!SB){ addToast('Backend unavailable','error'); return; }
+    const row={ name:currentUser.name, type, ts:new Date().toISOString() };
+    SB.from('attendance').insert(row).select().then(({data,error})=>{
+      if(error){ addToast('Clock failed: '+error.message,'error'); return; }
+      const saved=(data&&data[0])||row;
+      setAttendance(a=>[saved,...a]);
+      addToast(type==='in'?'⏱ Clocked in':'⏱ Clocked out',type==='in'?'success':'info');
+      postLeaveSheet({ kind:'attendance', name:row.name, type, timestamp:row.ts });
     });
   }
   function decideLeave(id,status){
@@ -4321,6 +4376,7 @@ function App() {
     {id:'agency',icon:'▦',label:'Agency'},
     {id:'close-data',icon:'☁',label:'Close Leads Data'},
     {id:'leaves',icon:'🌴',label:'Leaves'},
+    {id:'attendance',icon:'⏱',label:'Attendance'},
   ];
   const NAV_FILTER=[
     {id:'pending',icon:'◔',label:'Pending Qualification',count:counts.pending,cls:'orange'},
@@ -4335,6 +4391,7 @@ function App() {
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave}/>;
+    if(tab==='attendance') return isAdmin ? <AttendanceView attendance={attendance} config={config}/> : <HomeView leads={vLeads} config={config}/>;
     if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
@@ -4375,6 +4432,11 @@ function App() {
           <button className="topbar-icon-btn" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </button>
+          {(()=>{ const myLast=attendance.find(a=>a.name===(currentUser&&currentUser.name)); const inNow=myLast&&myLast.type==='in';
+            return <button className="btn btn-sm" style={{background:inNow?'#DE350B':'#00875A',color:'#fff',borderColor:'transparent',fontWeight:600}}
+              onClick={()=>clockEvent(inNow?'out':'in')}
+              title={inNow?'You are clocked in — click to clock out':'Click to clock in'}>
+              {inNow?'⏱ Clock Out':'⏱ Clock In'}</button>; })()}
           {(()=>{
             const allMode = isAdmin && bellScope==='all';
             const myReplies = allMode ? replies : replies.filter(r=>(r.rep||'')===currentUser.name);
@@ -4461,7 +4523,7 @@ function App() {
             <span className="sct-icon">{navCollapsed?'»':'«'}</span><span className="sct-label">Collapse</span>
           </div>
           <div className="sidebar-section-label">Main</div>
-          {NAV_MAIN.filter(n=>n.id==='leaves'?config.tabs.leaves!==false:config.tabs[n.id]).map(n=>(
+          {NAV_MAIN.filter(n=>n.id==='attendance'?isAdmin:(n.id==='leaves'?config.tabs.leaves!==false:config.tabs[n.id])).map(n=>(
             <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
             </div>
