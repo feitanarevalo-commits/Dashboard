@@ -863,7 +863,7 @@ function InlineEmail({emails, onSave}) {
 }
 
 // ─── LEADS TABLE ──────────────────────────────────────────
-function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
+function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
   const [sel,setSel] = useState([]);
   const [searchState,setSearchState] = useState('');
   // When the parent provides search control (e.g. Scraper uses it as the
@@ -1032,10 +1032,10 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
           </select>
         )}
         <span className="count-label no-print">{filtered.length} lead{filtered.length!==1?'s':''}{sel.length>0&&` · ${sel.length} selected`}</span>
-        <div className="export-group no-print" style={{marginLeft:'auto'}}>
+        {!hideExport && <div className="export-group no-print" style={{marginLeft:'auto'}}>
           {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(filtered,`${filename}.csv`)}>⬇ CSV</button>}
           {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={()=>exportPDF()}>🖨 PDF</button>}
-        </div>
+        </div>}
       </div>
 
       {sel.length>0&&(
@@ -1235,6 +1235,71 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
 
 // ─── HOME VIEW ────────────────────────────────────────────
 const PERIODS=[{id:'daily',label:'Daily',days:1},{id:'weekly',label:'Weekly',days:7},{id:'monthly',label:'Monthly',days:30},{id:'yearly',label:'Yearly',days:365}];
+
+// ─── LEAVES VIEW ──────────────────────────────────────────
+// Everyone files leave requests; admins approve/reject. Stored in Supabase and
+// (optionally) mirrored to a Google Sheet via config.leavesWebhook.
+function LeavesView({leaves,currentUser,isAdmin,onFile,onDecide}) {
+  const LEAVE_TYPES=['Vacation','Sick','Personal','Emergency','Unpaid','Other'];
+  const today=new Date().toISOString().split('T')[0];
+  const [type,setType]=useState('Vacation');
+  const [start,setStart]=useState('');
+  const [end,setEnd]=useState('');
+  const [reason,setReason]=useState('');
+  const dayCount=(()=>{ if(!start||!end) return 0; const d=Math.round((new Date(end)-new Date(start))/86400000)+1; return d>0?d:0; })();
+  function submit(e){ e.preventDefault(); if(!start||!end||end<start) return; onFile({type,start,end,days:dayCount,reason:reason.trim()}); setType('Vacation');setStart('');setEnd('');setReason(''); }
+  const visible=isAdmin?leaves:leaves.filter(l=>l.name===currentUser.name);
+  const pending=visible.filter(l=>l.status==='Pending').length;
+  const sorted=[...visible].sort((a,b)=>((a.status==='Pending'?0:1)-(b.status==='Pending'?0:1))||(b.id-a.id));
+  const badge=s=> s==='Approved'?{background:'#E3FCF2',color:'#00875A'}:s==='Rejected'?{background:'#FFEBE6',color:'#DE350B'}:{background:'#FFF4E5',color:'#FF8B00'};
+  return (
+    <div className="home-content">
+      <div className="card">
+        <div className="card-header"><div className="card-title">🌴 File a Leave Request</div></div>
+        <div className="card-body">
+          <form onSubmit={submit} style={{display:'flex',flexWrap:'wrap',gap:14,alignItems:'flex-end'}}>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}><label className="form-label">Type</label>
+              <select value={type} onChange={e=>setType(e.target.value)} style={{padding:'7px 10px',minWidth:130}}>{LEAVE_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}><label className="form-label">From</label>
+              <input type="date" value={start} min={today} onChange={e=>setStart(e.target.value)}/></div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}><label className="form-label">To</label>
+              <input type="date" value={end} min={start||today} onChange={e=>setEnd(e.target.value)}/></div>
+            <div style={{display:'flex',flexDirection:'column',gap:4,flex:1,minWidth:220}}><label className="form-label">Reason</label>
+              <input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Optional note for the approver"/></div>
+            <div style={{fontSize:12,color:'var(--text-dim)',alignSelf:'center',minWidth:60}}>{dayCount>0?`${dayCount} day${dayCount>1?'s':''}`:''}</div>
+            <button type="submit" className="btn btn-primary" disabled={!start||!end||end<start}>Submit Request</button>
+          </form>
+        </div>
+      </div>
+      <div className="card">
+        <div className="card-header"><div className="card-title">{isAdmin?'All Leave Requests':'My Leave Requests'}{pending?` · ${pending} pending`:''}</div></div>
+        <div className="card-body" style={{padding:0,overflowX:'auto'}}>
+          <table className="kpi-table">
+            <thead><tr>{isAdmin&&<th>Name</th>}<th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th>{isAdmin&&<th>Action</th>}<th>Decided by</th></tr></thead>
+            <tbody>
+              {sorted.length===0 && <tr><td colSpan={isAdmin?9:7} style={{padding:16,color:'var(--text-dim)'}}>No leave requests yet.</td></tr>}
+              {sorted.map(l=>(
+                <tr key={l.id}>
+                  {isAdmin&&<td style={{fontWeight:600}}>{l.name}</td>}
+                  <td>{l.type}</td><td>{l.start_date||'—'}</td><td>{l.end_date||'—'}</td><td>{l.days||'—'}</td>
+                  <td style={{maxWidth:240,whiteSpace:'normal'}}>{l.reason||'—'}</td>
+                  <td><span style={{...badge(l.status),fontWeight:700,fontSize:11,padding:'2px 9px',borderRadius:8}}>{l.status}</span></td>
+                  {isAdmin&&<td>{l.status==='Pending'
+                    ? <div style={{display:'flex',gap:6}}>
+                        <button className="btn btn-sm" style={{background:'#00875A',color:'#fff'}} onClick={()=>onDecide(l.id,'Approved')}>Approve</button>
+                        <button className="btn btn-sm" style={{background:'#DE350B',color:'#fff'}} onClick={()=>onDecide(l.id,'Rejected')}>Reject</button>
+                      </div>
+                    : <span style={{color:'var(--text-dim)',fontSize:12}}>—</span>}</td>}
+                  <td style={{fontSize:12,color:'var(--text-dim)'}}>{l.decided_by||'—'}{l.decided_by&&l.decided_at?` · ${String(l.decided_at).slice(0,10)}`:''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function HomeView({leads,config}) {
   const [period,setPeriod]=useState('monthly');
@@ -1614,6 +1679,11 @@ function clearAllLeadsFromSupabase(){
   if(!SB) return Promise.resolve();
   try{ return SB.from('leads').delete().neq('id','__never__').then(()=>{}); }catch(e){ return Promise.resolve(); }
 }
+// ── Leaves (Supabase + optional Google-Sheet mirror) ───────
+function loadLeavesFromSupabase(){
+  if(!SB) return Promise.resolve([]);
+  return SB.from('leaves').select('*').order('created_at',{ascending:false}).then(({data,error})=>(error||!data)?[]:data).catch(()=>[]);
+}
 
 // ── Replies / interest feed (🔔) ──────────────────────────
 // One per reply from SmartReach (prospect replied / category) or Close (inbound
@@ -1854,6 +1924,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
         showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap}
         smartReachSend={{ campaigns:(config.smartReachCampaigns&&config.smartReachCampaigns[rep])||[], onSend:(leads,campId,campLabel)=>importToSmartReach(rep,leads,campId,campLabel) }}
         closeSend={{ onSend:(ls)=>importToClose(rep,ls) }}
+        hideExport
         filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
       />
       {showClose && <MyCloseLeads rep={rep} config={config} onClose={()=>setShowClose(false)}/>}
@@ -3797,6 +3868,8 @@ function App() {
   const [bellScope,setBellScope]=useState('mine'); // admins can flip to 'all' to see everyone's
   const [navCollapsed,setNavCollapsed]=useState(()=>{ try{ return localStorage.getItem('navCollapsed')!=='0'; }catch(e){ return true; } });
   useEffect(()=>{ try{ localStorage.setItem('navCollapsed',navCollapsed?'1':'0'); }catch(e){} },[navCollapsed]);
+  const [leaves,setLeaves]=useState([]);
+  useEffect(()=>{ if(SB) loadLeavesFromSupabase().then(setLeaves); },[]);
   const [showSearch,setShowSearch]=useState(false);
   const [searchLead,setSearchLead]=useState(null);
   const [closeSyncing,setCloseSyncing]=useState(false);
@@ -3854,6 +3927,28 @@ function App() {
   function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
   function bulkDelete(ids){ if(!ids||!ids.length) return; const set=new Set(ids); setLeads(ls=>ls.filter(l=>!set.has(l.id))); deleteLeadsFromSupabase(ids); logH('🗑',`Bulk: ${ids.length} lead(s) deleted`); addToast(`${ids.length} lead(s) deleted`,'error'); }
   function clearAllLeads(){ const n=leads.length; setLeads([]); leadsSyncRef.current={}; clearAllLeadsFromSupabase(); logH('🗑',`Cleared ALL leads (${n})`); addToast(`Cleared all ${n} lead(s)`,'error'); }
+  function postLeaveSheet(payload){ const wh=(config.leavesWebhook||'').trim(); if(!wh) return; try{ fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{}); }catch(e){} }
+  function fileLeave(form){
+    if(!SB){ addToast('Backend unavailable — cannot file leave','error'); return; }
+    const row={ name:currentUser.name, type:form.type, start_date:form.start||null, end_date:form.end||null, days:form.days||null, reason:form.reason||'', status:'Pending' };
+    SB.from('leaves').insert(row).select().then(({data,error})=>{
+      if(error){ addToast('Could not file leave: '+error.message,'error'); return; }
+      const saved=(data&&data[0])||row;
+      setLeaves(ls=>[saved,...ls]); addToast('Leave request filed','success'); logH('🌴',`Leave filed: ${row.type} ${row.start_date||''}→${row.end_date||''}`);
+      postLeaveSheet({ event:'filed', ...saved });
+    });
+  }
+  function decideLeave(id,status){
+    if(!SB) return;
+    const patch={ status, decided_by:currentUser.name, decided_at:new Date().toISOString(), note:'' };
+    SB.from('leaves').update(patch).eq('id',id).select().then(({data,error})=>{
+      if(error){ addToast('Update failed: '+error.message,'error'); return; }
+      const saved=(data&&data[0])||null;
+      setLeaves(ls=>ls.map(l=>l.id===id?{...l,...patch}:l)); addToast(`Leave ${status.toLowerCase()}`,status==='Approved'?'success':'info');
+      logH('🌴',`Leave ${status.toLowerCase()} by ${currentUser.name}`);
+      postLeaveSheet({ event:'decision', ...(saved||{id,...patch}) });
+    });
+  }
   function applyConfig(cfg){setConfig(cfg);if(!cfg.tabs[tab])setTab('home');}
   function importLeads(newLeads){
     setLeads(existing=>{
@@ -4221,6 +4316,7 @@ function App() {
     {id:'google-import',icon:'◫',label:'Google Sheets'},
     {id:'agency',icon:'▦',label:'Agency'},
     {id:'close-data',icon:'☁',label:'Close Leads Data'},
+    {id:'leaves',icon:'🌴',label:'Leaves'},
   ];
   const NAV_FILTER=[
     {id:'pending',icon:'◔',label:'Pending Qualification',count:counts.pending,cls:'orange'},
@@ -4234,6 +4330,7 @@ function App() {
     if(showRepSelect) return <RepSelectScreen leads={vLeads} config={config} activeRep={activeRep} onSelect={r=>{if(r){setActiveRep(r);setTab('rep-home');}setShowRepSelect(false);}}/>;
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
+    if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave}/>;
     if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
@@ -4360,7 +4457,7 @@ function App() {
             <span className="sct-icon">{navCollapsed?'»':'«'}</span><span className="sct-label">Collapse</span>
           </div>
           <div className="sidebar-section-label">Main</div>
-          {NAV_MAIN.filter(n=>config.tabs[n.id]).map(n=>(
+          {NAV_MAIN.filter(n=>n.id==='leaves'?config.tabs.leaves!==false:config.tabs[n.id]).map(n=>(
             <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
             </div>

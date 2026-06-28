@@ -1611,6 +1611,7 @@ function LeadsTable({
   searchPlaceholder = 'Search channels, niches, platforms...',
   smartReachSend = null,
   closeSend = null,
+  hideExport = false,
   config,
   feats,
   campColorMap,
@@ -1875,7 +1876,7 @@ function LeadsTable({
     key: r
   }, r))), /*#__PURE__*/React.createElement("span", {
     className: "count-label no-print"
-  }, filtered.length, " lead", filtered.length !== 1 ? 's' : '', sel.length > 0 && ` · ${sel.length} selected`), /*#__PURE__*/React.createElement("div", {
+  }, filtered.length, " lead", filtered.length !== 1 ? 's' : '', sel.length > 0 && ` · ${sel.length} selected`), !hideExport && /*#__PURE__*/React.createElement("div", {
     className: "export-group no-print",
     style: {
       marginLeft: 'auto'
@@ -2319,6 +2320,212 @@ const PERIODS = [{
   label: 'Yearly',
   days: 365
 }];
+
+// ─── LEAVES VIEW ──────────────────────────────────────────
+// Everyone files leave requests; admins approve/reject. Stored in Supabase and
+// (optionally) mirrored to a Google Sheet via config.leavesWebhook.
+function LeavesView({
+  leaves,
+  currentUser,
+  isAdmin,
+  onFile,
+  onDecide
+}) {
+  const LEAVE_TYPES = ['Vacation', 'Sick', 'Personal', 'Emergency', 'Unpaid', 'Other'];
+  const today = new Date().toISOString().split('T')[0];
+  const [type, setType] = useState('Vacation');
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const [reason, setReason] = useState('');
+  const dayCount = (() => {
+    if (!start || !end) return 0;
+    const d = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+    return d > 0 ? d : 0;
+  })();
+  function submit(e) {
+    e.preventDefault();
+    if (!start || !end || end < start) return;
+    onFile({
+      type,
+      start,
+      end,
+      days: dayCount,
+      reason: reason.trim()
+    });
+    setType('Vacation');
+    setStart('');
+    setEnd('');
+    setReason('');
+  }
+  const visible = isAdmin ? leaves : leaves.filter(l => l.name === currentUser.name);
+  const pending = visible.filter(l => l.status === 'Pending').length;
+  const sorted = [...visible].sort((a, b) => (a.status === 'Pending' ? 0 : 1) - (b.status === 'Pending' ? 0 : 1) || b.id - a.id);
+  const badge = s => s === 'Approved' ? {
+    background: '#E3FCF2',
+    color: '#00875A'
+  } : s === 'Rejected' ? {
+    background: '#FFEBE6',
+    color: '#DE350B'
+  } : {
+    background: '#FFF4E5',
+    color: '#FF8B00'
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "home-content"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title"
+  }, "🌴 File a Leave Request")), /*#__PURE__*/React.createElement("div", {
+    className: "card-body"
+  }, /*#__PURE__*/React.createElement("form", {
+    onSubmit: submit,
+    style: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 14,
+      alignItems: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Type"), /*#__PURE__*/React.createElement("select", {
+    value: type,
+    onChange: e => setType(e.target.value),
+    style: {
+      padding: '7px 10px',
+      minWidth: 130
+    }
+  }, LEAVE_TYPES.map(t => /*#__PURE__*/React.createElement("option", {
+    key: t
+  }, t)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "From"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: start,
+    min: today,
+    onChange: e => setStart(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "To"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: end,
+    min: start || today,
+    onChange: e => setEnd(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4,
+      flex: 1,
+      minWidth: 220
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Reason"), /*#__PURE__*/React.createElement("input", {
+    value: reason,
+    onChange: e => setReason(e.target.value),
+    placeholder: "Optional note for the approver"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-dim)',
+      alignSelf: 'center',
+      minWidth: 60
+    }
+  }, dayCount > 0 ? `${dayCount} day${dayCount > 1 ? 's' : ''}` : ''), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    className: "btn btn-primary",
+    disabled: !start || !end || end < start
+  }, "Submit Request")))), /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title"
+  }, isAdmin ? 'All Leave Requests' : 'My Leave Requests', pending ? ` · ${pending} pending` : '')), /*#__PURE__*/React.createElement("div", {
+    className: "card-body",
+    style: {
+      padding: 0,
+      overflowX: 'auto'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "kpi-table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, isAdmin && /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", null, "Type"), /*#__PURE__*/React.createElement("th", null, "From"), /*#__PURE__*/React.createElement("th", null, "To"), /*#__PURE__*/React.createElement("th", null, "Days"), /*#__PURE__*/React.createElement("th", null, "Reason"), /*#__PURE__*/React.createElement("th", null, "Status"), isAdmin && /*#__PURE__*/React.createElement("th", null, "Action"), /*#__PURE__*/React.createElement("th", null, "Decided by"))), /*#__PURE__*/React.createElement("tbody", null, sorted.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: isAdmin ? 9 : 7,
+    style: {
+      padding: 16,
+      color: 'var(--text-dim)'
+    }
+  }, "No leave requests yet.")), sorted.map(l => /*#__PURE__*/React.createElement("tr", {
+    key: l.id
+  }, isAdmin && /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 600
+    }
+  }, l.name), /*#__PURE__*/React.createElement("td", null, l.type), /*#__PURE__*/React.createElement("td", null, l.start_date || '—'), /*#__PURE__*/React.createElement("td", null, l.end_date || '—'), /*#__PURE__*/React.createElement("td", null, l.days || '—'), /*#__PURE__*/React.createElement("td", {
+    style: {
+      maxWidth: 240,
+      whiteSpace: 'normal'
+    }
+  }, l.reason || '—'), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      ...badge(l.status),
+      fontWeight: 700,
+      fontSize: 11,
+      padding: '2px 9px',
+      borderRadius: 8
+    }
+  }, l.status)), isAdmin && /*#__PURE__*/React.createElement("td", null, l.status === 'Pending' ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    style: {
+      background: '#00875A',
+      color: '#fff'
+    },
+    onClick: () => onDecide(l.id, 'Approved')
+  }, "Approve"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    style: {
+      background: '#DE350B',
+      color: '#fff'
+    },
+    onClick: () => onDecide(l.id, 'Rejected')
+  }, "Reject")) : /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-dim)',
+      fontSize: 12
+    }
+  }, "—")), /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-dim)'
+    }
+  }, l.decided_by || '—', l.decided_by && l.decided_at ? ` · ${String(l.decided_at).slice(0, 10)}` : ''))))))));
+}
 function HomeView({
   leads,
   config
@@ -3027,6 +3234,16 @@ function clearAllLeadsFromSupabase() {
     return Promise.resolve();
   }
 }
+// ── Leaves (Supabase + optional Google-Sheet mirror) ───────
+function loadLeavesFromSupabase() {
+  if (!SB) return Promise.resolve([]);
+  return SB.from('leaves').select('*').order('created_at', {
+    ascending: false
+  }).then(({
+    data,
+    error
+  }) => error || !data ? [] : data).catch(() => []);
+}
 
 // ── Replies / interest feed (🔔) ──────────────────────────
 // One per reply from SmartReach (prospect replied / category) or Close (inbound
@@ -3594,6 +3811,7 @@ function RepDashboard({
     closeSend: {
       onSend: ls => importToClose(rep, ls)
     },
+    hideExport: true,
     filename: `${rep}_leads`,
     printTitle: `${rep}'s Lead Report`
   }), showClose && /*#__PURE__*/React.createElement(MyCloseLeads, {
@@ -8252,6 +8470,10 @@ function App() {
       localStorage.setItem('navCollapsed', navCollapsed ? '1' : '0');
     } catch (e) {}
   }, [navCollapsed]);
+  const [leaves, setLeaves] = useState([]);
+  useEffect(() => {
+    if (SB) loadLeavesFromSupabase().then(setLeaves);
+  }, []);
   const [showSearch, setShowSearch] = useState(false);
   const [searchLead, setSearchLead] = useState(null);
   const [closeSyncing, setCloseSyncing] = useState(false);
@@ -8366,6 +8588,83 @@ function App() {
     clearAllLeadsFromSupabase();
     logH('🗑', `Cleared ALL leads (${n})`);
     addToast(`Cleared all ${n} lead(s)`, 'error');
+  }
+  function postLeaveSheet(payload) {
+    const wh = (config.leavesWebhook || '').trim();
+    if (!wh) return;
+    try {
+      fetch(wh, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      }).catch(() => {});
+    } catch (e) {}
+  }
+  function fileLeave(form) {
+    if (!SB) {
+      addToast('Backend unavailable — cannot file leave', 'error');
+      return;
+    }
+    const row = {
+      name: currentUser.name,
+      type: form.type,
+      start_date: form.start || null,
+      end_date: form.end || null,
+      days: form.days || null,
+      reason: form.reason || '',
+      status: 'Pending'
+    };
+    SB.from('leaves').insert(row).select().then(({
+      data,
+      error
+    }) => {
+      if (error) {
+        addToast('Could not file leave: ' + error.message, 'error');
+        return;
+      }
+      const saved = data && data[0] || row;
+      setLeaves(ls => [saved, ...ls]);
+      addToast('Leave request filed', 'success');
+      logH('🌴', `Leave filed: ${row.type} ${row.start_date || ''}→${row.end_date || ''}`);
+      postLeaveSheet({
+        event: 'filed',
+        ...saved
+      });
+    });
+  }
+  function decideLeave(id, status) {
+    if (!SB) return;
+    const patch = {
+      status,
+      decided_by: currentUser.name,
+      decided_at: new Date().toISOString(),
+      note: ''
+    };
+    SB.from('leaves').update(patch).eq('id', id).select().then(({
+      data,
+      error
+    }) => {
+      if (error) {
+        addToast('Update failed: ' + error.message, 'error');
+        return;
+      }
+      const saved = data && data[0] || null;
+      setLeaves(ls => ls.map(l => l.id === id ? {
+        ...l,
+        ...patch
+      } : l));
+      addToast(`Leave ${status.toLowerCase()}`, status === 'Approved' ? 'success' : 'info');
+      logH('🌴', `Leave ${status.toLowerCase()} by ${currentUser.name}`);
+      postLeaveSheet({
+        event: 'decision',
+        ...(saved || {
+          id,
+          ...patch
+        })
+      });
+    });
   }
   function applyConfig(cfg) {
     setConfig(cfg);
@@ -8945,6 +9244,10 @@ function App() {
     id: 'close-data',
     icon: '☁',
     label: 'Close Leads Data'
+  }, {
+    id: 'leaves',
+    icon: '🌴',
+    label: 'Leaves'
   }];
   const NAV_FILTER = [{
     id: 'pending',
@@ -9005,6 +9308,13 @@ function App() {
     if (tab === 'home') return /*#__PURE__*/React.createElement(HomeView, {
       leads: vLeads,
       config: config
+    });
+    if (tab === 'leaves') return /*#__PURE__*/React.createElement(LeavesView, {
+      leaves: leaves,
+      currentUser: currentUser,
+      isAdmin: isAdmin,
+      onFile: fileLeave,
+      onDecide: decideLeave
     });
     if (tab === 'scraper') return /*#__PURE__*/React.createElement(ScraperView, {
       leads: vLeads,
@@ -9394,7 +9704,7 @@ function App() {
     className: "sct-label"
   }, "Collapse")), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
-  }, "Main"), NAV_MAIN.filter(n => config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
+  }, "Main"), NAV_MAIN.filter(n => n.id === 'leaves' ? config.tabs.leaves !== false : config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
     key: n.id,
     title: n.label,
     className: `nav-item ${tab === n.id && !showRepSelect ? 'active' : ''}`,

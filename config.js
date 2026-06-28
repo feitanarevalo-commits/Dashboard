@@ -49,6 +49,7 @@ var DEFAULT_CONFIG = {
   tabs: {
     home: true, scraper: true, history: true,
     'prev-scraped': true, 'lead-mgmt': true, 'google-import': true, agency: true, 'close-data': true,
+    leaves: true,
     pending: true, contacted: true,
     recycle: true, recent: true, duplicates: true, msn: true, vvv: true,
   },
@@ -78,6 +79,14 @@ var DEFAULT_CONFIG = {
   closeLoadWebhook: '', // PUSH-ONLY: the real Enfinity org has ~628k leads — the dashboard's store is Supabase, not Close. (close-load fn still exists for the old test org if ever needed.)
   closeCheckWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-check', // dedup: which scraped channels already exist in Close (by channel id / email)
   closeMineWebhook: 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-mine',  // per-rep scoped view: leads in Close Assigned To a rep (📁 Close Leads button)
+  // ── Leaves → Google Sheet ──────────────────────────────────
+  // POST target that records every leave request + decision to a Google Sheet.
+  // Leaves are stored in Supabase (source of truth); this just mirrors them to a
+  // sheet for your records. Wire it to a Google Apps Script web app (Deploy →
+  // Web app → "Anyone") or a Make/Zapier "Webhook → Google Sheets" scenario.
+  // Each POST body: { event:'filed'|'decision', name, type, start_date, end_date,
+  //   days, reason, status, decided_by, decided_at }. Leave blank to skip the sheet.
+  leavesWebhook: '',
   scrapeWebhook:    'https://hook.eu1.make.com/amu0xr93i4q214760zi9rqa1lcxlch55', // YouTube scraper gateway
   smartreachWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/smartreach-add', // SEND prospects → SmartReach (Supabase Edge Function; was Make)
   // Replies / interest feed (🔔). Each returns an array of reply objects:
