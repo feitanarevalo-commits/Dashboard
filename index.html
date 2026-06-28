@@ -2962,7 +2962,8 @@ function normalizeReply(x, i) {
     sentiment: x.sentiment || inferSentiment(x.prospect_category || x.category),
     snippet: x.snippet || x.body || x.message || '',
     when: x.when || x.updated_at || x.last_contacted_at || x.date || '',
-    campaign: x.campaign || x.list || ''
+    campaign: x.campaign || x.list || '',
+    leadId: x.leadId || x.lead_id || '' // Close lead id → deep link into Close
   };
 }
 function fmtReplyWhen(w) {
@@ -8313,7 +8314,7 @@ function App() {
       return;
     }
     setRepliesLoading(true);
-    const who = isAdmin ? 'all' : currentUser && currentUser.name || '';
+    const who = currentUser && currentUser.name || ''; // each person sees only THEIR own Close/SmartReach messages
     fetch(wh, {
       method: 'POST',
       headers: {
@@ -8997,7 +8998,7 @@ function App() {
   }, /*#__PURE__*/React.createElement("span", {
     className: "webhook-dot"
   }), " n8n Live"), (() => {
-    const myReplies = isAdmin ? replies : replies.filter(r => (r.rep || '') === currentUser.name);
+    const myReplies = replies.filter(r => (r.rep || '') === currentUser.name); // own account only
     const seen = repliesSeenSet(currentUser.name);
     const unread = myReplies.filter(r => !seen.has(r.id)).length;
     return /*#__PURE__*/React.createElement("div", {
@@ -9018,7 +9019,7 @@ function App() {
       className: "bell-dropdown"
     }, /*#__PURE__*/React.createElement("div", {
       className: "bell-head"
-    }, /*#__PURE__*/React.createElement("span", null, "🔔 Replies & Interest", isAdmin ? ' · all reps' : ''), /*#__PURE__*/React.createElement("button", {
+    }, /*#__PURE__*/React.createElement("span", null, "🔔 Replies & Interest · ", currentUser.name), /*#__PURE__*/React.createElement("button", {
       className: "btn btn-ghost btn-xs",
       onClick: () => loadReplies(),
       disabled: repliesLoading
@@ -9042,9 +9043,7 @@ function App() {
       className: `rs-chip ${(REPLY_SENTIMENTS[r.sentiment] || {}).cls || 'rs-rep'}`
     }, r.sentiment), /*#__PURE__*/React.createElement("span", {
       className: "bell-src"
-    }, r.source === 'Close' ? '☁ Close' : '✉ SmartReach'), isAdmin && r.rep && /*#__PURE__*/React.createElement("span", {
-      className: "bell-rep"
-    }, r.rep), /*#__PURE__*/React.createElement("span", {
+    }, r.source === 'Close' ? '☁ Close' : '✉ SmartReach'), /*#__PURE__*/React.createElement("span", {
       className: "bell-when"
     }, fmtReplyWhen(r.when))), /*#__PURE__*/React.createElement("div", {
       className: "bell-name"
@@ -9052,7 +9051,17 @@ function App() {
       className: "bell-snip"
     }, r.snippet.slice(0, 140)), r.campaign && /*#__PURE__*/React.createElement("div", {
       className: "bell-camp"
-    }, "▸ ", r.campaign)))))));
+    }, "▸ ", r.campaign), r.source === 'Close' ? /*#__PURE__*/React.createElement("a", {
+      className: "bell-open",
+      href: r.leadId ? `https://app.close.com/lead/${r.leadId}/` : 'https://app.close.com/',
+      target: "_blank",
+      rel: "noreferrer"
+    }, "Open in Close ↗") : /*#__PURE__*/React.createElement("a", {
+      className: "bell-open",
+      href: "https://app.smartreach.io/",
+      target: "_blank",
+      rel: "noreferrer"
+    }, "Open in SmartReach ↗")))))));
   })(), /*#__PURE__*/React.createElement("div", {
     className: "profile-pill-wrap"
   }, /*#__PURE__*/React.createElement("div", {

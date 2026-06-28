@@ -1611,7 +1611,8 @@ function normalizeReply(x,i){
     sentiment: x.sentiment || inferSentiment(x.prospect_category||x.category),
     snippet: x.snippet||x.body||x.message||'',
     when: x.when||x.updated_at||x.last_contacted_at||x.date||'',
-    campaign: x.campaign||x.list||''
+    campaign: x.campaign||x.list||'',
+    leadId: x.leadId||x.lead_id||''   // Close lead id → deep link into Close
   };
 }
 function fmtReplyWhen(w){ if(!w) return ''; const d=new Date(w); return isNaN(d.getTime())?'':d.toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
@@ -3924,7 +3925,7 @@ function App() {
     const wh=(config.repliesWebhook||'').trim();
     if(!wh || wh.includes('your-')){ if(!opts.silent) addToast('Replies feed isn’t connected yet','info'); return; }
     setRepliesLoading(true);
-    const who=isAdmin?'all':((currentUser&&currentUser.name)||'');
+    const who=(currentUser&&currentUser.name)||''; // each person sees only THEIR own Close/SmartReach messages
     fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rep:who})})
       .then(r=>r.ok?r.json():null)
       .then(d=>{
@@ -4215,7 +4216,7 @@ function App() {
           </button>
           {(config.features||{}).webhookTrigger && <div className="topbar-badge"><span className="webhook-dot"></span> n8n Live</div>}
           {(()=>{
-            const myReplies = isAdmin ? replies : replies.filter(r=>(r.rep||'')===currentUser.name);
+            const myReplies = replies.filter(r=>(r.rep||'')===currentUser.name); // own account only
             const seen = repliesSeenSet(currentUser.name);
             const unread = myReplies.filter(r=>!seen.has(r.id)).length;
             return (
@@ -4228,7 +4229,7 @@ function App() {
                   <div className="bell-backdrop" onClick={()=>setShowBell(false)}/>
                   <div className="bell-dropdown">
                     <div className="bell-head">
-                      <span>🔔 Replies &amp; Interest{isAdmin?' · all reps':''}</span>
+                      <span>🔔 Replies &amp; Interest · {currentUser.name}</span>
                       <button className="btn btn-ghost btn-xs" onClick={()=>loadReplies()} disabled={repliesLoading}>{repliesLoading?'…':'⟳ Check'}</button>
                     </div>
                     <div className="bell-list">
@@ -4239,12 +4240,14 @@ function App() {
                             <div className="bell-item-top">
                               <span className={`rs-chip ${(REPLY_SENTIMENTS[r.sentiment]||{}).cls||'rs-rep'}`}>{r.sentiment}</span>
                               <span className="bell-src">{r.source==='Close'?'☁ Close':'✉ SmartReach'}</span>
-                              {isAdmin && r.rep && <span className="bell-rep">{r.rep}</span>}
                               <span className="bell-when">{fmtReplyWhen(r.when)}</span>
                             </div>
                             <div className="bell-name">{r.name}{r.email?` · ${r.email}`:''}</div>
                             {r.snippet && <div className="bell-snip">{r.snippet.slice(0,140)}</div>}
                             {r.campaign && <div className="bell-camp">▸ {r.campaign}</div>}
+                            {r.source==='Close'
+                              ? <a className="bell-open" href={r.leadId?`https://app.close.com/lead/${r.leadId}/`:'https://app.close.com/'} target="_blank" rel="noreferrer">Open in Close ↗</a>
+                              : <a className="bell-open" href="https://app.smartreach.io/" target="_blank" rel="noreferrer">Open in SmartReach ↗</a>}
                           </div>
                         ))}
                     </div>
