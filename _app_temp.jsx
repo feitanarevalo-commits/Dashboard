@@ -1366,6 +1366,7 @@ function HomeView({leads,config}) {
         <div className="stat-card green"><div className="stat-label">Potential</div><div className="stat-value">{potentialTot}</div><div className="stat-sub">{pct(potentialTot,total)}% · {htTot} high ticket</div></div>
         <div className="stat-card"><div className="stat-label">With Email</div><div className="stat-value">{withEmailTot}</div><div className="stat-sub">{pct(withEmailTot,total)}% coverage</div></div>
         <div className="stat-card accent"><div className="stat-label">Avg Followers</div><div className="stat-value">{fmtFollowers(avgFollTot)}</div><div className="stat-sub">per assigned lead</div></div>
+        {!repFilter && <div className="stat-card orange" title="Leads scraped/imported but not yet assigned to a rep — they don't count toward the period KPIs until assigned"><div className="stat-label">Unassigned</div><div className="stat-value">{leads.filter(l=>!l.assignedTo).length}</div><div className="stat-sub">in pipeline · not yet assigned</div></div>}
       </div>
 
       <div className="card">
@@ -3833,6 +3834,9 @@ function App() {
       return;
     }
     let updated={...upd};
+    // Any lead with a rep must carry a dateAssigned, else it's invisible to the
+    // date-based Home KPIs. Stamp today if a rep is set but the date is missing.
+    if(updated.assignedTo && !updated.dateAssigned) updated.dateAssigned=new Date().toISOString().split('T')[0];
     if(old&&!old.tags.includes('Contacted')&&upd.tags.includes('Contacted')){
       updated.lastContactDate=new Date().toISOString().split('T')[0];
       addToast(`"${upd.channelName}" marked Contacted — date recorded`,'success');

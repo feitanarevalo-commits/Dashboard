@@ -2606,7 +2606,16 @@ function HomeView({
     className: "stat-value"
   }, fmtFollowers(avgFollTot)), /*#__PURE__*/React.createElement("div", {
     className: "stat-sub"
-  }, "per assigned lead"))), /*#__PURE__*/React.createElement("div", {
+  }, "per assigned lead")), !repFilter && /*#__PURE__*/React.createElement("div", {
+    className: "stat-card orange",
+    title: "Leads scraped/imported but not yet assigned to a rep — they don't count toward the period KPIs until assigned"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-label"
+  }, "Unassigned"), /*#__PURE__*/React.createElement("div", {
+    className: "stat-value"
+  }, leads.filter(l => !l.assignedTo).length), /*#__PURE__*/React.createElement("div", {
+    className: "stat-sub"
+  }, "in pipeline · not yet assigned"))), /*#__PURE__*/React.createElement("div", {
     className: "card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-header"
@@ -8289,6 +8298,9 @@ function App() {
     let updated = {
       ...upd
     };
+    // Any lead with a rep must carry a dateAssigned, else it's invisible to the
+    // date-based Home KPIs. Stamp today if a rep is set but the date is missing.
+    if (updated.assignedTo && !updated.dateAssigned) updated.dateAssigned = new Date().toISOString().split('T')[0];
     if (old && !old.tags.includes('Contacted') && upd.tags.includes('Contacted')) {
       updated.lastContactDate = new Date().toISOString().split('T')[0];
       addToast(`"${upd.channelName}" marked Contacted — date recorded`, 'success');
