@@ -2324,6 +2324,10 @@ function HomeView({
   config
 }) {
   const [period, setPeriod] = useState('monthly');
+  const [repFilter, setRepFilter] = useState(''); // '' = all reps, else a single rep
+  const [cStart, setCStart] = useState(''); // custom date range (overrides period)
+  const [cEnd, setCEnd] = useState('');
+  const custom = !!(cStart && cEnd);
   const pdfRef = useRef(null);
   const campColorMap = {};
   (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
@@ -2331,12 +2335,17 @@ function HomeView({
   const cutoff = new Date();
   cutoff.setHours(0, 0, 0, 0);
   cutoff.setDate(cutoff.getDate() - (pDef.days - 1));
+  // A custom date range (both ends set) takes precedence over the period preset.
   function inPeriod(l) {
+    const d = (l.dateAssigned || '').slice(0, 10);
+    if (custom) return !!d && d >= cStart && d <= cEnd;
     return l.dateAssigned && new Date(l.dateAssigned) >= cutoff;
   }
+  const rangeLabel = custom ? `${cStart} → ${cEnd}` : pDef.label;
+  const repScope = l => !repFilter || l.assignedTo === repFilter;
 
   // Per-rep KPI rows for the selected period (based on dateAssigned).
-  const reps = config.salesReps || [];
+  const reps = (config.salesReps || []).filter(r => !repFilter || r === repFilter);
   const campDefs = (config.campaigns || []).map(c => ({
     id: c.id,
     label: c.label
@@ -2391,7 +2400,7 @@ function HomeView({
   };
   const repTotFollKnown = sumRep('follKnown');
   repTot.avgFoll = repTotFollKnown ? Math.round(repRows.reduce((s, r) => s + (r.avgFoll || 0) * (r.follKnown || 0), 0) / repTotFollKnown) : 0;
-  const periodLeads = leads.filter(inPeriod);
+  const periodLeads = leads.filter(l => repScope(l) && inPeriod(l));
   const total = periodLeads.length;
   const freshTot = periodLeads.filter(l => leadOrigin(l) === 'Fresh').length;
   const recycledTot = periodLeads.filter(l => isRecycled(l)).length;
@@ -2402,9 +2411,9 @@ function HomeView({
   const follAll = periodLeads.map(l => parseFollowers(l.followers)).filter(n => n > 0);
   const avgFollTot = follAll.length ? Math.round(follAll.reduce((a, b) => a + b, 0) / follAll.length) : 0;
   const kpiInfo = {
-    period: pDef.label,
-    rangeStart: cutoff.toISOString().split('T')[0],
-    rangeEnd: new Date().toISOString().split('T')[0],
+    period: rangeLabel,
+    rangeStart: custom ? cStart : cutoff.toISOString().split('T')[0],
+    rangeEnd: custom ? cEnd : new Date().toISOString().split('T')[0],
     campaigns: campDefs,
     platforms: PLATFORMS
   };
@@ -2433,7 +2442,7 @@ function HomeView({
     style: {
       margin: 0
     }
-  }, "Enfinity Sales Dashboard"), /*#__PURE__*/React.createElement("p", null, "Rep KPI Report — ", pDef.label, " (", cutoff.toISOString().split('T')[0], " → today)")), bdays.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, "Enfinity Sales Dashboard"), /*#__PURE__*/React.createElement("p", null, "Rep KPI Report — ", rangeLabel, repFilter ? ` · ${repFilter}` : '', " (", custom ? cStart : cutoff.toISOString().split('T')[0], " → ", custom ? cEnd : 'today', ")")), bdays.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: `bday-banner no-print${bdayToday.length ? ' today' : ''}`
   }, /*#__PURE__*/React.createElement("span", {
     className: "bday-cake"
@@ -2442,14 +2451,88 @@ function HomeView({
   }, joinNames(bdayToday.map(b => b.name)), " ", bdayToday.length > 1 ? 'have' : 'has', " a birthday today! 🎉"), bdayUpcoming.length > 0 && /*#__PURE__*/React.createElement("span", {
     className: "bday-up"
   }, bdayToday.length > 0 ? 'Coming up: ' : 'Upcoming birthdays: ', bdayUpcoming.map(b => `${b.name} (${b.days === 1 ? 'tomorrow' : 'in ' + b.days + ' days'})`).join(' · ')))), /*#__PURE__*/React.createElement("div", {
-    className: "analytics-toolbar no-print"
+    className: "analytics-toolbar no-print",
+    style: {
+      flexWrap: 'wrap',
+      gap: 10
+    }
   }, /*#__PURE__*/React.createElement("div", {
-    className: "period-toggle"
+    className: "period-toggle",
+    style: {
+      opacity: custom ? 0.4 : 1
+    },
+    title: custom ? 'Using the custom date range below' : ''
   }, PERIODS.map(p => /*#__PURE__*/React.createElement("button", {
     key: p.id,
     className: `period-btn${period === p.id ? ' active' : ''}`,
-    onClick: () => setPeriod(p.id)
-  }, p.label))), /*#__PURE__*/React.createElement("div", {
+    onClick: () => {
+      setPeriod(p.id);
+      setCStart('');
+      setCEnd('');
+    }
+  }, p.label))), /*#__PURE__*/React.createElement("select", {
+    value: repFilter,
+    onChange: e => setRepFilter(e.target.value),
+    title: "Filter KPIs by sales rep",
+    style: {
+      padding: '6px 10px',
+      border: `1px solid ${repFilter ? 'var(--accent)' : 'var(--border)'}`,
+      borderRadius: 8,
+      fontSize: 13,
+      background: 'var(--bg)',
+      color: 'var(--text)'
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "👥 All reps"), (config.salesReps || []).map(r => /*#__PURE__*/React.createElement("option", {
+    key: r,
+    value: r
+  }, r))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6
+    },
+    title: "Custom date range (overrides the period preset)"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: cStart,
+    max: cEnd || undefined,
+    onChange: e => setCStart(e.target.value),
+    style: {
+      padding: '5px 8px',
+      border: `1px solid ${custom ? 'var(--accent)' : 'var(--border)'}`,
+      borderRadius: 8,
+      fontSize: 12,
+      background: 'var(--bg)',
+      color: 'var(--text)'
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-dim)',
+      fontSize: 12
+    }
+  }, "→"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: cEnd,
+    min: cStart || undefined,
+    onChange: e => setCEnd(e.target.value),
+    style: {
+      padding: '5px 8px',
+      border: `1px solid ${custom ? 'var(--accent)' : 'var(--border)'}`,
+      borderRadius: 8,
+      fontSize: 12,
+      background: 'var(--bg)',
+      color: 'var(--text)'
+    }
+  }), (cStart || cEnd) && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: () => {
+      setCStart('');
+      setCEnd('');
+    },
+    title: "Clear date range"
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
     style: {
       marginLeft: 'auto',
       display: 'flex',
@@ -2471,11 +2554,11 @@ function HomeView({
     className: "stat-card accent"
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
-  }, "Assigned (", pDef.label, ")"), /*#__PURE__*/React.createElement("div", {
+  }, "Assigned (", rangeLabel, ")"), /*#__PURE__*/React.createElement("div", {
     className: "stat-value"
   }, total), /*#__PURE__*/React.createElement("div", {
     className: "stat-sub"
-  }, "across all reps")), /*#__PURE__*/React.createElement("div", {
+  }, repFilter ? `${repFilter} only` : 'across all reps')), /*#__PURE__*/React.createElement("div", {
     className: "stat-card green"
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
@@ -2575,7 +2658,7 @@ function HomeView({
     className: "card-header"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-title"
-  }, "Per-Rep KPI Breakdown (", pDef.label, ")")), /*#__PURE__*/React.createElement("div", {
+  }, "Per-Rep KPI Breakdown (", rangeLabel, ")", repFilter ? ` · ${repFilter}` : '')), /*#__PURE__*/React.createElement("div", {
     className: "card-body",
     style: {
       padding: 0,
@@ -2809,7 +2892,8 @@ function loadProfilesFromSupabase() {
         email: r.email || '',
         birthday: r.birthday || '',
         photo: r.photo_url || '',
-        color: r.color || ''
+        color: r.color || '',
+        links: Array.isArray(r.links) ? r.links : []
       };
     });
     PROFILE_CACHE = map;
@@ -2867,6 +2951,7 @@ function saveProfileData(name, data) {
     if ('photo' in data) row.photo_url = data.photo;
     if ('color' in data) row.color = data.color;
     if ('role' in data) row.role = data.role;
+    if ('links' in data) row.links = data.links;
     try {
       SB.from('profiles').upsert(row, {
         onConflict: 'name'
@@ -7147,7 +7232,24 @@ function ProfileModal({
   const [title, setTitle] = useState(ex.title || '');
   const [email, setEmail] = useState(ex.email || '');
   const [birthday, setBirthday] = useState(ex.birthday || '');
+  const [links, setLinks] = useState(Array.isArray(ex.links) ? ex.links : []);
   const fileRef = useRef(null);
+  const LINK_PRESETS = ['Instagram', 'TikTok', 'YouTube', 'LinkedIn', 'X / Twitter', 'Facebook', 'Website', 'Calendly'];
+  function addLink(label) {
+    setLinks(ls => [...ls, {
+      label: label || '',
+      url: ''
+    }]);
+  }
+  function updLink(i, k, v) {
+    setLinks(ls => ls.map((l, j) => j === i ? {
+      ...l,
+      [k]: v
+    } : l));
+  }
+  function delLink(i) {
+    setLinks(ls => ls.filter((_, j) => j !== i));
+  }
   function onFile(e) {
     const f = e.target.files && e.target.files[0];
     if (e.target) e.target.value = '';
@@ -7183,13 +7285,21 @@ function ProfileModal({
   }
   function save(e) {
     e && e.preventDefault();
+    const cleanLinks = links.map(l => ({
+      label: (l.label || '').trim(),
+      url: (l.url || '').trim()
+    })).filter(l => l.url).map(l => ({
+      label: l.label || l.url.replace(/^https?:\/\//, '').split('/')[0],
+      url: /^https?:\/\//i.test(l.url) ? l.url : 'https://' + l.url
+    }));
     saveProfileData(name, {
       photo,
       title: title.trim(),
       email: email.trim(),
-      birthday
+      birthday,
+      links: cleanLinks
     });
-    addToast('Profile saved on this device', 'success');
+    addToast('Profile saved', 'success');
     onClose();
   }
   return /*#__PURE__*/React.createElement("div", {
@@ -7290,6 +7400,57 @@ function ProfileModal({
     value: birthday,
     onChange: e => setBirthday(e.target.value)
   })), /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Links & Socials ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 400,
+      color: 'var(--text-light)'
+    }
+  }, "— quick shortcuts")), links.map((l, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      display: 'flex',
+      gap: 6,
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: l.label,
+    onChange: e => updLink(i, 'label', e.target.value),
+    placeholder: "Label",
+    style: {
+      flex: '0 0 34%'
+    }
+  }), /*#__PURE__*/React.createElement("input", {
+    value: l.url,
+    onChange: e => updLink(i, 'url', e.target.value),
+    placeholder: "https://…",
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn-ghost btn-sm",
+    onClick: () => delLink(i),
+    title: "Remove link"
+  }, "✕"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 6,
+      marginTop: 4
+    }
+  }, LINK_PRESETS.map(p => /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    key: p,
+    className: "btn btn-outline btn-sm",
+    style: {
+      fontSize: 11,
+      padding: '3px 8px'
+    },
+    onClick: () => addLink(p)
+  }, "+ ", p)))), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: 'var(--text-light)',
@@ -7298,7 +7459,7 @@ function ProfileModal({
       padding: '8px 10px',
       borderRadius: 'var(--radius)'
     }
-  }, "ⓘ Your profile is saved in ", /*#__PURE__*/React.createElement("b", null, "this browser only"), " — there's no server to sync it across devices yet."), /*#__PURE__*/React.createElement("div", {
+  }, "ⓘ Saved to your ", /*#__PURE__*/React.createElement("b", null, "team profile"), " (shared across devices). Title, email, birthday & links show on your profile card."), /*#__PURE__*/React.createElement("div", {
     className: "modal-footer"
   }, /*#__PURE__*/React.createElement("div", null), /*#__PURE__*/React.createElement("div", {
     className: "modal-footer-right"
@@ -9167,7 +9328,16 @@ function App() {
       className: "phc-row"
     }, /*#__PURE__*/React.createElement("span", null, "✉"), pr.email), pr.birthday && /*#__PURE__*/React.createElement("div", {
       className: "phc-row"
-    }, /*#__PURE__*/React.createElement("span", null, "🎂"), fmtBirthday(pr.birthday), d === 0 ? ' · today!' : d != null && d <= 30 ? ` · in ${d}d` : ''), !pr.title && !pr.email && !pr.birthday && /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("span", null, "🎂"), fmtBirthday(pr.birthday), d === 0 ? ' · today!' : d != null && d <= 30 ? ` · in ${d}d` : ''), (pr.links || []).length > 0 && /*#__PURE__*/React.createElement("div", {
+      className: "phc-links"
+    }, pr.links.map((l, i) => /*#__PURE__*/React.createElement("a", {
+      key: i,
+      className: "phc-link",
+      href: l.url,
+      target: "_blank",
+      rel: "noreferrer",
+      title: l.url
+    }, "🔗 ", l.label || l.url))), !pr.title && !pr.email && !pr.birthday && !(pr.links || []).length && /*#__PURE__*/React.createElement("div", {
       className: "phc-empty"
     }, "No details added yet."), /*#__PURE__*/React.createElement("div", {
       className: "phc-edit",

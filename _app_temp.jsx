@@ -1238,16 +1238,27 @@ const PERIODS=[{id:'daily',label:'Daily',days:1},{id:'weekly',label:'Weekly',day
 
 function HomeView({leads,config}) {
   const [period,setPeriod]=useState('monthly');
+  const [repFilter,setRepFilter]=useState('');     // '' = all reps, else a single rep
+  const [cStart,setCStart]=useState('');           // custom date range (overrides period)
+  const [cEnd,setCEnd]=useState('');
+  const custom=!!(cStart&&cEnd);
   const pdfRef=useRef(null);
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
 
   const pDef=PERIODS.find(p=>p.id===period)||PERIODS[2];
   const cutoff=new Date(); cutoff.setHours(0,0,0,0); cutoff.setDate(cutoff.getDate()-(pDef.days-1));
-  function inPeriod(l){ return l.dateAssigned && new Date(l.dateAssigned)>=cutoff; }
+  // A custom date range (both ends set) takes precedence over the period preset.
+  function inPeriod(l){
+    const d=(l.dateAssigned||'').slice(0,10);
+    if(custom) return !!d && d>=cStart && d<=cEnd;
+    return l.dateAssigned && new Date(l.dateAssigned)>=cutoff;
+  }
+  const rangeLabel = custom ? `${cStart} → ${cEnd}` : pDef.label;
+  const repScope = (l)=> !repFilter || l.assignedTo===repFilter;
 
   // Per-rep KPI rows for the selected period (based on dateAssigned).
-  const reps=config.salesReps||[];
+  const reps=(config.salesReps||[]).filter(r=>!repFilter||r===repFilter);
   const campDefs=(config.campaigns||[]).map(c=>({id:c.id,label:c.label}));
   const repRows=reps.map(r=>{
     const mine=leads.filter(l=>l.assignedTo===r && inPeriod(l));
@@ -1286,7 +1297,7 @@ function HomeView({leads,config}) {
   const repTotFollKnown=sumRep('follKnown');
   repTot.avgFoll=repTotFollKnown?Math.round(repRows.reduce((s,r)=>s+(r.avgFoll||0)*(r.follKnown||0),0)/repTotFollKnown):0;
 
-  const periodLeads=leads.filter(inPeriod);
+  const periodLeads=leads.filter(l=>repScope(l)&&inPeriod(l));
   const total=periodLeads.length;
   const freshTot=periodLeads.filter(l=>leadOrigin(l)==='Fresh').length;
   const recycledTot=periodLeads.filter(l=>isRecycled(l)).length;
@@ -1296,7 +1307,7 @@ function HomeView({leads,config}) {
   const htTot=periodLeads.filter(l=>l.tags.includes('HT')).length;
   const follAll=periodLeads.map(l=>parseFollowers(l.followers)).filter(n=>n>0);
   const avgFollTot=follAll.length?Math.round(follAll.reduce((a,b)=>a+b,0)/follAll.length):0;
-  const kpiInfo={period:pDef.label, rangeStart:cutoff.toISOString().split('T')[0], rangeEnd:new Date().toISOString().split('T')[0], campaigns:campDefs, platforms:PLATFORMS};
+  const kpiInfo={period:rangeLabel, rangeStart:custom?cStart:cutoff.toISOString().split('T')[0], rangeEnd:custom?cEnd:new Date().toISOString().split('T')[0], campaigns:campDefs, platforms:PLATFORMS};
 
   // Birthday reminders (next 14 days) from each user's profile birthday.
   const bdayNow=new Date();
@@ -1309,7 +1320,7 @@ function HomeView({leads,config}) {
     <div className="home-content" ref={pdfRef}>
       <div className="print-header" style={{display:'none'}}>
         <h1 style={{margin:0}}>Enfinity Sales Dashboard</h1>
-        <p>Rep KPI Report — {pDef.label} ({cutoff.toISOString().split('T')[0]} → today)</p>
+        <p>Rep KPI Report — {rangeLabel}{repFilter?` · ${repFilter}`:''} ({custom?cStart:cutoff.toISOString().split('T')[0]} → {custom?cEnd:'today'})</p>
       </div>
 
       {bdays.length>0 && (
@@ -1322,11 +1333,24 @@ function HomeView({leads,config}) {
         </div>
       )}
 
-      <div className="analytics-toolbar no-print">
-        <div className="period-toggle">
+      <div className="analytics-toolbar no-print" style={{flexWrap:'wrap',gap:10}}>
+        <div className="period-toggle" style={{opacity:custom?0.4:1}} title={custom?'Using the custom date range below':''}>
           {PERIODS.map(p=>(
-            <button key={p.id} className={`period-btn${period===p.id?' active':''}`} onClick={()=>setPeriod(p.id)}>{p.label}</button>
+            <button key={p.id} className={`period-btn${period===p.id?' active':''}`} onClick={()=>{setPeriod(p.id);setCStart('');setCEnd('');}}>{p.label}</button>
           ))}
+        </div>
+        <select value={repFilter} onChange={e=>setRepFilter(e.target.value)} title="Filter KPIs by sales rep"
+          style={{padding:'6px 10px',border:`1px solid ${repFilter?'var(--accent)':'var(--border)'}`,borderRadius:8,fontSize:13,background:'var(--bg)',color:'var(--text)'}}>
+          <option value="">👥 All reps</option>
+          {(config.salesReps||[]).map(r=><option key={r} value={r}>{r}</option>)}
+        </select>
+        <div style={{display:'flex',alignItems:'center',gap:6}} title="Custom date range (overrides the period preset)">
+          <input type="date" value={cStart} max={cEnd||undefined} onChange={e=>setCStart(e.target.value)}
+            style={{padding:'5px 8px',border:`1px solid ${custom?'var(--accent)':'var(--border)'}`,borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)'}}/>
+          <span style={{color:'var(--text-dim)',fontSize:12}}>→</span>
+          <input type="date" value={cEnd} min={cStart||undefined} onChange={e=>setCEnd(e.target.value)}
+            style={{padding:'5px 8px',border:`1px solid ${custom?'var(--accent)':'var(--border)'}`,borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)'}}/>
+          {(cStart||cEnd) && <button className="btn btn-ghost btn-sm" onClick={()=>{setCStart('');setCEnd('');}} title="Clear date range">✕</button>}
         </div>
         <div style={{marginLeft:'auto',display:'flex',gap:8}}>
           <button className="btn btn-outline btn-sm" onClick={()=>exportKpiCSV(repRows,kpiInfo,`enfinity_sales_kpis_${period}.csv`)}>⬇ Download CSV</button>
@@ -1335,7 +1359,7 @@ function HomeView({leads,config}) {
       </div>
 
       <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
-        <div className="stat-card accent"><div className="stat-label">Assigned ({pDef.label})</div><div className="stat-value">{total}</div><div className="stat-sub">across all reps</div></div>
+        <div className="stat-card accent"><div className="stat-label">Assigned ({rangeLabel})</div><div className="stat-value">{total}</div><div className="stat-sub">{repFilter?`${repFilter} only`:'across all reps'}</div></div>
         <div className="stat-card green"><div className="stat-label">Fresh Leads</div><div className="stat-value">{freshTot}</div><div className="stat-sub">never contacted</div></div>
         <div className="stat-card orange"><div className="stat-label">Recycled</div><div className="stat-value">{recycledTot}</div><div className="stat-sub">previously worked</div></div>
         <div className="stat-card"><div className="stat-label">Contacted</div><div className="stat-value">{contactedTot}</div><div className="stat-sub">{pct(contactedTot,total)}% contact rate</div></div>
@@ -1368,7 +1392,7 @@ function HomeView({leads,config}) {
       </div>
 
       <div className="card">
-        <div className="card-header"><div className="card-title">Per-Rep KPI Breakdown ({pDef.label})</div></div>
+        <div className="card-header"><div className="card-title">Per-Rep KPI Breakdown ({rangeLabel}){repFilter?` · ${repFilter}`:''}</div></div>
         <div className="card-body" style={{padding:0,overflowX:'auto'}}>
           <table className="kpi-table">
             <thead><tr>
@@ -1517,7 +1541,7 @@ function loadProfilesFromSupabase(){
   return SB.from('profiles').select('*').then(({data,error})=>{
     if(error||!data) return;
     const map={};
-    data.forEach(r=>{ map[r.name]={ role:r.role, title:r.title||'', email:r.email||'', birthday:r.birthday||'', photo:r.photo_url||'', color:r.color||'' }; });
+    data.forEach(r=>{ map[r.name]={ role:r.role, title:r.title||'', email:r.email||'', birthday:r.birthday||'', photo:r.photo_url||'', color:r.color||'', links:Array.isArray(r.links)?r.links:[] }; });
     PROFILE_CACHE=map;
   }).catch(()=>{});
 }
@@ -1555,6 +1579,7 @@ function saveProfileData(name,data){
     if('photo' in data) row.photo_url=data.photo;
     if('color' in data) row.color=data.color;
     if('role' in data) row.role=data.role;
+    if('links' in data) row.links=data.links;
     try{ SB.from('profiles').upsert(row,{onConflict:'name'}).then(({error})=>{ if(error) console.warn('[profiles] save failed',error.message); }); }catch(e){}
   }
 }
@@ -3359,7 +3384,12 @@ function ProfileModal({user,config,onClose,addToast}) {
   const [title,setTitle]=useState(ex.title||'');
   const [email,setEmail]=useState(ex.email||'');
   const [birthday,setBirthday]=useState(ex.birthday||'');
+  const [links,setLinks]=useState(Array.isArray(ex.links)?ex.links:[]);
   const fileRef=useRef(null);
+  const LINK_PRESETS=['Instagram','TikTok','YouTube','LinkedIn','X / Twitter','Facebook','Website','Calendly'];
+  function addLink(label){ setLinks(ls=>[...ls,{label:label||'',url:''}]); }
+  function updLink(i,k,v){ setLinks(ls=>ls.map((l,j)=>j===i?{...l,[k]:v}:l)); }
+  function delLink(i){ setLinks(ls=>ls.filter((_,j)=>j!==i)); }
 
   function onFile(e){
     const f=e.target.files&&e.target.files[0]; if(e.target) e.target.value='';
@@ -3383,8 +3413,11 @@ function ProfileModal({user,config,onClose,addToast}) {
   }
   function save(e){
     e&&e.preventDefault();
-    saveProfileData(name,{photo,title:title.trim(),email:email.trim(),birthday});
-    addToast('Profile saved on this device','success');
+    const cleanLinks=links.map(l=>({label:(l.label||'').trim(),url:(l.url||'').trim()}))
+      .filter(l=>l.url)
+      .map(l=>({label:l.label||l.url.replace(/^https?:\/\//,'').split('/')[0], url:/^https?:\/\//i.test(l.url)?l.url:'https://'+l.url}));
+    saveProfileData(name,{photo,title:title.trim(),email:email.trim(),birthday,links:cleanLinks});
+    addToast('Profile saved','success');
     onClose();
   }
 
@@ -3415,8 +3448,21 @@ function ProfileModal({user,config,onClose,addToast}) {
             <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@enfinity.co"/></div>
           <div className="form-group"><label className="form-label">Birthday</label>
             <input type="date" value={birthday} onChange={e=>setBirthday(e.target.value)}/></div>
+          <div className="form-group">
+            <label className="form-label">Links &amp; Socials <span style={{fontWeight:400,color:'var(--text-light)'}}>— quick shortcuts</span></label>
+            {links.map((l,i)=>(
+              <div key={i} style={{display:'flex',gap:6,marginBottom:6}}>
+                <input value={l.label} onChange={e=>updLink(i,'label',e.target.value)} placeholder="Label" style={{flex:'0 0 34%'}}/>
+                <input value={l.url} onChange={e=>updLink(i,'url',e.target.value)} placeholder="https://…" style={{flex:1}}/>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={()=>delLink(i)} title="Remove link">✕</button>
+              </div>
+            ))}
+            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:4}}>
+              {LINK_PRESETS.map(p=><button type="button" key={p} className="btn btn-outline btn-sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>addLink(p)}>+ {p}</button>)}
+            </div>
+          </div>
           <div style={{fontSize:11,color:'var(--text-light)',lineHeight:1.5,background:'var(--bg)',padding:'8px 10px',borderRadius:'var(--radius)'}}>
-            ⓘ Your profile is saved in <b>this browser only</b> — there's no server to sync it across devices yet.
+            ⓘ Saved to your <b>team profile</b> (shared across devices). Title, email, birthday &amp; links show on your profile card.
           </div>
           <div className="modal-footer">
             <div/>
@@ -4287,7 +4333,8 @@ function App() {
                 </div>
                 {pr.email && <div className="phc-row"><span>✉</span>{pr.email}</div>}
                 {pr.birthday && <div className="phc-row"><span>🎂</span>{fmtBirthday(pr.birthday)}{d===0?' · today!':(d!=null&&d<=30?` · in ${d}d`:'')}</div>}
-                {!pr.title&&!pr.email&&!pr.birthday && <div className="phc-empty">No details added yet.</div>}
+                {(pr.links||[]).length>0 && <div className="phc-links">{pr.links.map((l,i)=><a key={i} className="phc-link" href={l.url} target="_blank" rel="noreferrer" title={l.url}>🔗 {l.label||l.url}</a>)}</div>}
+                {!pr.title&&!pr.email&&!pr.birthday&&!(pr.links||[]).length && <div className="phc-empty">No details added yet.</div>}
                 <div className="phc-edit" onClick={()=>setShowProfile(true)}>✎ Edit profile</div>
               </div>
             ); })()}
