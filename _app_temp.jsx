@@ -1239,7 +1239,7 @@ const PERIODS=[{id:'daily',label:'Daily',days:1},{id:'weekly',label:'Weekly',day
 // ─── LEAVES VIEW ──────────────────────────────────────────
 // Everyone files leave requests; admins approve/reject. Stored in Supabase and
 // (optionally) mirrored to a Google Sheet via config.leavesWebhook.
-function LeavesView({leaves,currentUser,isAdmin,onFile,onDecide}) {
+function LeavesView({leaves,currentUser,isAdmin,onFile,onDecide,onDelete}) {
   const LEAVE_TYPES=['Vacation','Sick','Personal','Emergency','Unpaid','Other'];
   const today=new Date().toISOString().split('T')[0];
   const [type,setType]=useState('Vacation');
@@ -1275,24 +1275,26 @@ function LeavesView({leaves,currentUser,isAdmin,onFile,onDecide}) {
         <div className="card-header"><div className="card-title">{isAdmin?'All Leave Requests':'My Leave Requests'}{pending?` · ${pending} pending`:''}</div></div>
         <div className="card-body" style={{padding:0,overflowX:'auto'}}>
           <table className="kpi-table">
-            <thead><tr>{isAdmin&&<th>Name</th>}<th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th>{isAdmin&&<th>Action</th>}<th>Decided by</th></tr></thead>
+            <thead><tr>{isAdmin&&<th>Name</th>}<th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th><th>Action</th><th>Decided by</th></tr></thead>
             <tbody>
-              {sorted.length===0 && <tr><td colSpan={isAdmin?9:7} style={{padding:16,color:'var(--text-dim)'}}>No leave requests yet.</td></tr>}
-              {sorted.map(l=>(
+              {sorted.length===0 && <tr><td colSpan={isAdmin?9:8} style={{padding:16,color:'var(--text-dim)'}}>No leave requests yet.</td></tr>}
+              {sorted.map(l=>{ const canDelete=isAdmin||l.name===currentUser.name; return (
                 <tr key={l.id}>
                   {isAdmin&&<td style={{fontWeight:600}}>{l.name}</td>}
                   <td>{l.type}</td><td>{l.start_date||'—'}</td><td>{l.end_date||'—'}</td><td>{l.days||'—'}</td>
                   <td style={{maxWidth:240,whiteSpace:'normal'}}>{l.reason||'—'}</td>
                   <td><span style={{...badge(l.status),fontWeight:700,fontSize:11,padding:'2px 9px',borderRadius:8}}>{l.status}</span></td>
-                  {isAdmin&&<td>{l.status==='Pending'
-                    ? <div style={{display:'flex',gap:6}}>
-                        <button className="btn btn-sm" style={{background:'#00875A',color:'#fff'}} onClick={()=>onDecide(l.id,'Approved')}>Approve</button>
-                        <button className="btn btn-sm" style={{background:'#DE350B',color:'#fff'}} onClick={()=>onDecide(l.id,'Rejected')}>Reject</button>
-                      </div>
-                    : <span style={{color:'var(--text-dim)',fontSize:12}}>—</span>}</td>}
+                  <td><div style={{display:'flex',gap:6}}>
+                    {isAdmin&&l.status==='Pending'&&<>
+                      <button className="btn btn-sm" style={{background:'#00875A',color:'#fff'}} onClick={()=>onDecide(l.id,'Approved')}>Approve</button>
+                      <button className="btn btn-sm" style={{background:'#DE350B',color:'#fff'}} onClick={()=>onDecide(l.id,'Rejected')}>Reject</button>
+                    </>}
+                    {canDelete&&<button className="btn btn-sm btn-ghost" title="Delete this request" style={{color:'#DE350B'}} onClick={()=>onDelete(l)}>🗑</button>}
+                    {!canDelete&&!(isAdmin&&l.status==='Pending')&&<span style={{color:'var(--text-dim)',fontSize:12}}>—</span>}
+                  </div></td>
                   <td style={{fontSize:12,color:'var(--text-dim)'}}>{l.decided_by||'—'}{l.decided_by&&l.decided_at?` · ${String(l.decided_at).slice(0,10)}`:''}</td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
         </div>
@@ -4033,6 +4035,16 @@ function App() {
       postLeaveSheet({ event:'filed', ...saved });
     });
   }
+  function deleteLeave(l){
+    if(!SB) return;
+    if(!window.confirm(`Delete ${l.name}'s ${l.type} leave request (${l.start_date||''}${l.end_date&&l.end_date!==l.start_date?'→'+l.end_date:''})?\n\nThis cannot be undone.`)) return;
+    SB.from('leaves').delete().eq('id',l.id).then(({error})=>{
+      if(error){ addToast('Delete failed: '+error.message,'error'); return; }
+      setLeaves(ls=>ls.filter(x=>x.id!==l.id)); addToast('Leave request deleted','info'); logH('🌴',`Leave deleted (${l.name})`);
+      // mirror to the sheet: mark that row Deleted (upsert by id keeps the record)
+      postLeaveSheet({ event:'deleted', id:l.id, name:l.name, type:l.type, start_date:l.start_date, end_date:l.end_date, days:l.days, reason:l.reason, status:'Deleted', decided_by:currentUser.name, decided_at:new Date().toISOString() });
+    });
+  }
   function decideLeave(id,status){
     if(!SB) return;
     const patch={ status, decided_by:currentUser.name, decided_at:new Date().toISOString(), note:'' };
@@ -4426,7 +4438,7 @@ function App() {
     if(showRepSelect) return <RepSelectScreen leads={vLeads} config={config} activeRep={activeRep} onSelect={r=>{if(r){setActiveRep(r);setTab('rep-home');}setShowRepSelect(false);}}/>;
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
-    if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave}/>;
+    if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config}/>;
     if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;

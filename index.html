@@ -2329,7 +2329,8 @@ function LeavesView({
   currentUser,
   isAdmin,
   onFile,
-  onDecide
+  onDecide,
+  onDelete
 }) {
   const LEAVE_TYPES = ['Vacation', 'Sick', 'Personal', 'Emergency', 'Unpaid', 'Other'];
   const today = new Date().toISOString().split('T')[0];
@@ -2470,61 +2471,71 @@ function LeavesView({
     }
   }, /*#__PURE__*/React.createElement("table", {
     className: "kpi-table"
-  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, isAdmin && /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", null, "Type"), /*#__PURE__*/React.createElement("th", null, "From"), /*#__PURE__*/React.createElement("th", null, "To"), /*#__PURE__*/React.createElement("th", null, "Days"), /*#__PURE__*/React.createElement("th", null, "Reason"), /*#__PURE__*/React.createElement("th", null, "Status"), isAdmin && /*#__PURE__*/React.createElement("th", null, "Action"), /*#__PURE__*/React.createElement("th", null, "Decided by"))), /*#__PURE__*/React.createElement("tbody", null, sorted.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: isAdmin ? 9 : 7,
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, isAdmin && /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", null, "Type"), /*#__PURE__*/React.createElement("th", null, "From"), /*#__PURE__*/React.createElement("th", null, "To"), /*#__PURE__*/React.createElement("th", null, "Days"), /*#__PURE__*/React.createElement("th", null, "Reason"), /*#__PURE__*/React.createElement("th", null, "Status"), /*#__PURE__*/React.createElement("th", null, "Action"), /*#__PURE__*/React.createElement("th", null, "Decided by"))), /*#__PURE__*/React.createElement("tbody", null, sorted.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: isAdmin ? 9 : 8,
     style: {
       padding: 16,
       color: 'var(--text-dim)'
     }
-  }, "No leave requests yet.")), sorted.map(l => /*#__PURE__*/React.createElement("tr", {
-    key: l.id
-  }, isAdmin && /*#__PURE__*/React.createElement("td", {
-    style: {
-      fontWeight: 600
-    }
-  }, l.name), /*#__PURE__*/React.createElement("td", null, l.type), /*#__PURE__*/React.createElement("td", null, l.start_date || '—'), /*#__PURE__*/React.createElement("td", null, l.end_date || '—'), /*#__PURE__*/React.createElement("td", null, l.days || '—'), /*#__PURE__*/React.createElement("td", {
-    style: {
-      maxWidth: 240,
-      whiteSpace: 'normal'
-    }
-  }, l.reason || '—'), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
-    style: {
-      ...badge(l.status),
-      fontWeight: 700,
-      fontSize: 11,
-      padding: '2px 9px',
-      borderRadius: 8
-    }
-  }, l.status)), isAdmin && /*#__PURE__*/React.createElement("td", null, l.status === 'Pending' ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: 6
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-sm",
-    style: {
-      background: '#00875A',
-      color: '#fff'
-    },
-    onClick: () => onDecide(l.id, 'Approved')
-  }, "Approve"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-sm",
-    style: {
-      background: '#DE350B',
-      color: '#fff'
-    },
-    onClick: () => onDecide(l.id, 'Rejected')
-  }, "Reject")) : /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: 'var(--text-dim)',
-      fontSize: 12
-    }
-  }, "—")), /*#__PURE__*/React.createElement("td", {
-    style: {
-      fontSize: 12,
-      color: 'var(--text-dim)'
-    }
-  }, l.decided_by || '—', l.decided_by && l.decided_at ? ` · ${String(l.decided_at).slice(0, 10)}` : ''))))))));
+  }, "No leave requests yet.")), sorted.map(l => {
+    const canDelete = isAdmin || l.name === currentUser.name;
+    return /*#__PURE__*/React.createElement("tr", {
+      key: l.id
+    }, isAdmin && /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontWeight: 600
+      }
+    }, l.name), /*#__PURE__*/React.createElement("td", null, l.type), /*#__PURE__*/React.createElement("td", null, l.start_date || '—'), /*#__PURE__*/React.createElement("td", null, l.end_date || '—'), /*#__PURE__*/React.createElement("td", null, l.days || '—'), /*#__PURE__*/React.createElement("td", {
+      style: {
+        maxWidth: 240,
+        whiteSpace: 'normal'
+      }
+    }, l.reason || '—'), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+      style: {
+        ...badge(l.status),
+        fontWeight: 700,
+        fontSize: 11,
+        padding: '2px 9px',
+        borderRadius: 8
+      }
+    }, l.status)), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 6
+      }
+    }, isAdmin && l.status === 'Pending' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-sm",
+      style: {
+        background: '#00875A',
+        color: '#fff'
+      },
+      onClick: () => onDecide(l.id, 'Approved')
+    }, "Approve"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-sm",
+      style: {
+        background: '#DE350B',
+        color: '#fff'
+      },
+      onClick: () => onDecide(l.id, 'Rejected')
+    }, "Reject")), canDelete && /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-sm btn-ghost",
+      title: "Delete this request",
+      style: {
+        color: '#DE350B'
+      },
+      onClick: () => onDelete(l)
+    }, "🗑"), !canDelete && !(isAdmin && l.status === 'Pending') && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--text-dim)',
+        fontSize: 12
+      }
+    }, "—"))), /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontSize: 12,
+        color: 'var(--text-dim)'
+      }
+    }, l.decided_by || '—', l.decided_by && l.decided_at ? ` · ${String(l.decided_at).slice(0, 10)}` : ''));
+  }))))));
 }
 
 // ─── ATTENDANCE VIEW (admin-only) ─────────────────────────
@@ -8894,6 +8905,35 @@ function App() {
       });
     });
   }
+  function deleteLeave(l) {
+    if (!SB) return;
+    if (!window.confirm(`Delete ${l.name}'s ${l.type} leave request (${l.start_date || ''}${l.end_date && l.end_date !== l.start_date ? '→' + l.end_date : ''})?\n\nThis cannot be undone.`)) return;
+    SB.from('leaves').delete().eq('id', l.id).then(({
+      error
+    }) => {
+      if (error) {
+        addToast('Delete failed: ' + error.message, 'error');
+        return;
+      }
+      setLeaves(ls => ls.filter(x => x.id !== l.id));
+      addToast('Leave request deleted', 'info');
+      logH('🌴', `Leave deleted (${l.name})`);
+      // mirror to the sheet: mark that row Deleted (upsert by id keeps the record)
+      postLeaveSheet({
+        event: 'deleted',
+        id: l.id,
+        name: l.name,
+        type: l.type,
+        start_date: l.start_date,
+        end_date: l.end_date,
+        days: l.days,
+        reason: l.reason,
+        status: 'Deleted',
+        decided_by: currentUser.name,
+        decided_at: new Date().toISOString()
+      });
+    });
+  }
   function decideLeave(id, status) {
     if (!SB) return;
     const patch = {
@@ -9578,7 +9618,8 @@ function App() {
       currentUser: currentUser,
       isAdmin: isAdmin,
       onFile: fileLeave,
-      onDecide: decideLeave
+      onDecide: decideLeave,
+      onDelete: deleteLeave
     });
     if (tab === 'attendance') return isAdmin ? /*#__PURE__*/React.createElement(AttendanceView, {
       sessions: sessions,
