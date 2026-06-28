@@ -4272,7 +4272,6 @@ function App() {
           <button className="topbar-icon-btn" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </button>
-          {(config.features||{}).webhookTrigger && <div className="topbar-badge"><span className="webhook-dot"></span> n8n Live</div>}
           {(()=>{
             const allMode = isAdmin && bellScope==='all';
             const myReplies = allMode ? replies : replies.filter(r=>(r.rep||'')===currentUser.name);

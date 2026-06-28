@@ -9215,11 +9215,7 @@ function App() {
     r: "8"
   }), /*#__PURE__*/React.createElement("path", {
     d: "m21 21-4.35-4.35"
-  }))), (config.features || {}).webhookTrigger && /*#__PURE__*/React.createElement("div", {
-    className: "topbar-badge"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "webhook-dot"
-  }), " n8n Live"), (() => {
+  }))), (() => {
     const allMode = isAdmin && bellScope === 'all';
     const myReplies = allMode ? replies : replies.filter(r => (r.rep || '') === currentUser.name);
     const seen = repliesSeenSet(currentUser.name);
