@@ -1302,18 +1302,22 @@ function LeavesView({leaves,currentUser,isAdmin,onFile,onDecide}) {
 }
 
 // ─── ATTENDANCE VIEW (admin-only) ─────────────────────────
-// Clock in/out log. Everyone can clock via the topbar; only admins see this log.
-function AttendanceView({attendance,config}) {
+// Automatic login sessions: login time, duration on the dashboard, logout time.
+// Recorded automatically on sign-in/out; only admins see this log.
+function AttendanceView({sessions,config}) {
   const [rep,setRep]=useState('');
   const reps=config.salesReps||[];
-  const rows=attendance.filter(a=>!rep||a.name===rep);
-  const fmt=ts=>{ try{ return new Date(ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch(e){ return ts; } };
-  const names=[...new Set([...reps,...attendance.map(a=>a.name)])];
+  const rows=sessions.filter(s=>!rep||s.name===rep);
+  const names=[...new Set([...reps,...sessions.map(s=>s.name)])];
+  const fmt=ts=>{ if(!ts) return '—'; try{ return new Date(ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch(e){ return ts; } };
+  const isActive=s=> !s.logout_at && (Date.now()-new Date(s.last_seen).getTime())<5*60*1000;
+  const dur=s=>{ const end=s.logout_at||s.last_seen; if(!s.login_at||!end) return '—'; return fmtDuration((new Date(end)-new Date(s.login_at))/1000); };
+  const stat=s=> isActive(s)?{t:'Active',bg:'#E3FCF2',c:'#00875A'}:(s.logout_at?{t:'Logged out',bg:'#F0F2F5',c:'#68737D'}:{t:'Ended',bg:'#FFF4E5',c:'#FF8B00'});
   return (
     <div className="home-content">
       <div className="card">
         <div className="card-header" style={{display:'flex',gap:10,alignItems:'center'}}>
-          <div className="card-title">⏱ Attendance Log <span style={{fontWeight:400,color:'var(--text-dim)',fontSize:12}}>· {rows.length} record{rows.length!==1?'s':''}</span></div>
+          <div className="card-title">⏱ Login Sessions <span style={{fontWeight:400,color:'var(--text-dim)',fontSize:12}}>· {rows.length} session{rows.length!==1?'s':''}</span></div>
           <select value={rep} onChange={e=>setRep(e.target.value)} style={{marginLeft:'auto',padding:'6px 10px',border:`1px solid ${rep?'var(--accent)':'var(--border)'}`,borderRadius:8,fontSize:13,background:'var(--bg)',color:'var(--text)'}}>
             <option value="">All people</option>
             {names.map(r=><option key={r} value={r}>{r}</option>)}
@@ -1321,16 +1325,18 @@ function AttendanceView({attendance,config}) {
         </div>
         <div className="card-body" style={{padding:0,overflowX:'auto'}}>
           <table className="kpi-table">
-            <thead><tr><th>Name</th><th>Action</th><th>Date &amp; Time</th></tr></thead>
+            <thead><tr><th>Name</th><th>Login</th><th>Logout</th><th>Duration</th><th>Status</th></tr></thead>
             <tbody>
-              {rows.length===0 && <tr><td colSpan={3} style={{padding:16,color:'var(--text-dim)'}}>No clock in/out records yet.</td></tr>}
-              {rows.map(a=>(
-                <tr key={a.id}>
-                  <td style={{fontWeight:600}}>{a.name}</td>
-                  <td><span style={{background:a.type==='in'?'#E3FCF2':'#FFEBE6',color:a.type==='in'?'#00875A':'#DE350B',fontWeight:700,fontSize:11,padding:'2px 9px',borderRadius:8}}>{a.type==='in'?'Clock In':'Clock Out'}</span></td>
-                  <td>{fmt(a.ts)}</td>
+              {rows.length===0 && <tr><td colSpan={5} style={{padding:16,color:'var(--text-dim)'}}>No login sessions recorded yet.</td></tr>}
+              {rows.map(s=>{ const st=stat(s); return (
+                <tr key={s.id}>
+                  <td style={{fontWeight:600}}>{s.name}</td>
+                  <td>{fmt(s.login_at)}</td>
+                  <td>{s.logout_at?fmt(s.logout_at):(isActive(s)?'—':fmt(s.last_seen))}</td>
+                  <td>{dur(s)}</td>
+                  <td><span style={{background:st.bg,color:st.c,fontWeight:700,fontSize:11,padding:'2px 9px',borderRadius:8}}>{st.t}</span></td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
         </div>
@@ -1655,6 +1661,7 @@ function getProfile(name){
   const shared=(typeof DEFAULT_CONFIG!=='undefined' && DEFAULT_CONFIG.profiles && DEFAULT_CONFIG.profiles[name]) || {};
   return { ...shared, ...(loadProfiles()[name]||{}), ...(PROFILE_CACHE[name]||{}) };
 }
+function fmtDuration(secs){ secs=Math.max(0,Math.round(secs||0)); const h=Math.floor(secs/3600), m=Math.floor((secs%3600)/60); return h?(h+'h '+m+'m'):(m+'m'); }
 function fmtBirthday(b){
   const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(b||''); if(!m) return b||'';
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1722,9 +1729,9 @@ function loadLeavesFromSupabase(){
   if(!SB) return Promise.resolve([]);
   return SB.from('leaves').select('*').order('created_at',{ascending:false}).then(({data,error})=>(error||!data)?[]:data).catch(()=>[]);
 }
-function loadAttendanceFromSupabase(){
+function loadSessionsFromSupabase(){
   if(!SB) return Promise.resolve([]);
-  return SB.from('attendance').select('*').order('ts',{ascending:false}).limit(1000).then(({data,error})=>(error||!data)?[]:data).catch(()=>[]);
+  return SB.from('sessions').select('*').order('login_at',{ascending:false}).limit(1000).then(({data,error})=>(error||!data)?[]:data).catch(()=>[]);
 }
 
 // ── Replies / interest feed (🔔) ──────────────────────────
@@ -3912,8 +3919,48 @@ function App() {
   useEffect(()=>{ try{ localStorage.setItem('navCollapsed',navCollapsed?'1':'0'); }catch(e){} },[navCollapsed]);
   const [leaves,setLeaves]=useState([]);
   useEffect(()=>{ if(SB) loadLeavesFromSupabase().then(setLeaves); },[]);
-  const [attendance,setAttendance]=useState([]);
-  useEffect(()=>{ if(SB) loadAttendanceFromSupabase().then(setAttendance); },[]);
+  const [sessions,setSessions]=useState([]);
+  const sessionIdRef=useRef(null);
+  useEffect(()=>{ if(SB) loadSessionsFromSupabase().then(setSessions); },[]);
+  // Auto attendance: a login session is created when a user signs in (resumed on
+  // reload within 30 min), last_seen is heartbeat-updated while the tab is open,
+  // and logout_at is set on sign-out / tab close. No manual buttons.
+  useEffect(()=>{
+    if(!SB || !currentUser) return;
+    let cancelled=false; const KEY='sessionInfo';
+    const nowIso=()=>new Date().toISOString();
+    function startNew(){
+      SB.from('sessions').insert({name:currentUser.name,login_at:nowIso(),last_seen:nowIso()}).select().then(({data})=>{
+        if(cancelled) return; const s=data&&data[0]; if(!s) return;
+        sessionIdRef.current=s.id;
+        try{ localStorage.setItem(KEY,JSON.stringify({id:s.id,name:currentUser.name,login_at:s.login_at,lastBeat:Date.now()})); }catch(e){}
+        setSessions(a=>[s,...a.filter(x=>x.id!==s.id)]);
+        postLeaveSheet({kind:'session',id:s.id,name:currentUser.name,login_at:s.login_at,logout_at:'',duration:''});
+      });
+    }
+    let info=null; try{ info=JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){}
+    if(info&&info.id&&info.name===currentUser.name&&(Date.now()-(info.lastBeat||0))<30*60*1000){ sessionIdRef.current=info.id; }
+    else { startNew(); }
+    const beat=setInterval(()=>{ const id=sessionIdRef.current; if(!id) return; const ls=nowIso();
+      SB.from('sessions').update({last_seen:ls}).eq('id',id).then(()=>{});
+      setSessions(a=>a.map(x=>x.id===id?{...x,last_seen:ls}:x));
+      try{ const i=JSON.parse(localStorage.getItem(KEY)||'null')||{}; i.lastBeat=Date.now(); localStorage.setItem(KEY,JSON.stringify(i)); }catch(e){}
+    },60000);
+    function onUnload(){ const id=sessionIdRef.current; if(!id) return; try{ const i=JSON.parse(localStorage.getItem(KEY)||'null')||{}; const dur=i.login_at?fmtDuration((Date.now()-new Date(i.login_at).getTime())/1000):''; const wh=(config.leavesWebhook||'').trim(); if(wh&&navigator.sendBeacon) navigator.sendBeacon(wh,new Blob([JSON.stringify({kind:'session',id,name:currentUser.name,login_at:i.login_at||'',logout_at:nowIso(),duration:dur})],{type:'text/plain'})); }catch(e){} }
+    window.addEventListener('beforeunload',onUnload);
+    return ()=>{ cancelled=true; clearInterval(beat); window.removeEventListener('beforeunload',onUnload); };
+  },[currentUser && currentUser.name]);
+  function endSession(){
+    try{
+      const info=JSON.parse(localStorage.getItem('sessionInfo')||'null'); const id=sessionIdRef.current||(info&&info.id);
+      if(id){ const ts=new Date().toISOString(); const dur=info&&info.login_at?fmtDuration((Date.now()-new Date(info.login_at).getTime())/1000):'';
+        if(SB) SB.from('sessions').update({logout_at:ts,last_seen:ts}).eq('id',id).then(()=>{});
+        setSessions(a=>a.map(x=>x.id===id?{...x,logout_at:ts,last_seen:ts}:x));
+        postLeaveSheet({kind:'session',id,name:(info&&info.name)||(currentUser&&currentUser.name),login_at:(info&&info.login_at)||'',logout_at:ts,duration:dur});
+      }
+      localStorage.removeItem('sessionInfo'); sessionIdRef.current=null;
+    }catch(e){}
+  }
   const [showSearch,setShowSearch]=useState(false);
   const [searchLead,setSearchLead]=useState(null);
   const [closeSyncing,setCloseSyncing]=useState(false);
@@ -3921,7 +3968,7 @@ function App() {
   const isAdmin=isAdminUser(currentUser);
 
   function login(u){ setCurrentUser(u); localStorage.setItem('currentUser',JSON.stringify(u)); addToast(`Welcome, ${u.name}`,'success'); }
-  function logout(){ setCurrentUser(null); localStorage.removeItem('currentUser'); setActiveRep(null); setTab('home'); }
+  function logout(){ endSession(); setCurrentUser(null); localStorage.removeItem('currentUser'); setActiveRep(null); setTab('home'); }
 
   useEffect(()=>{
     function key(e){
@@ -3984,17 +4031,6 @@ function App() {
       const saved=(data&&data[0])||row;
       setLeaves(ls=>[saved,...ls]); addToast('Leave request filed','success'); logH('🌴',`Leave filed: ${row.type} ${row.start_date||''}→${row.end_date||''}`);
       postLeaveSheet({ event:'filed', ...saved });
-    });
-  }
-  function clockEvent(type){
-    if(!SB){ addToast('Backend unavailable','error'); return; }
-    const row={ name:currentUser.name, type, ts:new Date().toISOString() };
-    SB.from('attendance').insert(row).select().then(({data,error})=>{
-      if(error){ addToast('Clock failed: '+error.message,'error'); return; }
-      const saved=(data&&data[0])||row;
-      setAttendance(a=>[saved,...a]);
-      addToast(type==='in'?'⏱ Clocked in':'⏱ Clocked out',type==='in'?'success':'info');
-      postLeaveSheet({ kind:'attendance', name:row.name, type, timestamp:row.ts });
     });
   }
   function decideLeave(id,status){
@@ -4391,7 +4427,7 @@ function App() {
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave}/>;
-    if(tab==='attendance') return isAdmin ? <AttendanceView attendance={attendance} config={config}/> : <HomeView leads={vLeads} config={config}/>;
+    if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config}/>;
     if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
@@ -4432,11 +4468,6 @@ function App() {
           <button className="topbar-icon-btn" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </button>
-          {(()=>{ const myLast=attendance.find(a=>a.name===(currentUser&&currentUser.name)); const inNow=myLast&&myLast.type==='in';
-            return <button className="btn btn-sm" style={{background:inNow?'#DE350B':'#00875A',color:'#fff',borderColor:'transparent',fontWeight:600}}
-              onClick={()=>clockEvent(inNow?'out':'in')}
-              title={inNow?'You are clocked in — click to clock out':'Click to clock in'}>
-              {inNow?'⏱ Clock Out':'⏱ Clock In'}</button>; })()}
           {(()=>{
             const allMode = isAdmin && bellScope==='all';
             const myReplies = allMode ? replies : replies.filter(r=>(r.rep||'')===currentUser.name);

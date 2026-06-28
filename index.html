@@ -2528,15 +2528,18 @@ function LeavesView({
 }
 
 // ─── ATTENDANCE VIEW (admin-only) ─────────────────────────
-// Clock in/out log. Everyone can clock via the topbar; only admins see this log.
+// Automatic login sessions: login time, duration on the dashboard, logout time.
+// Recorded automatically on sign-in/out; only admins see this log.
 function AttendanceView({
-  attendance,
+  sessions,
   config
 }) {
   const [rep, setRep] = useState('');
   const reps = config.salesReps || [];
-  const rows = attendance.filter(a => !rep || a.name === rep);
+  const rows = sessions.filter(s => !rep || s.name === rep);
+  const names = [...new Set([...reps, ...sessions.map(s => s.name)])];
   const fmt = ts => {
+    if (!ts) return '—';
     try {
       return new Date(ts).toLocaleString(undefined, {
         month: 'short',
@@ -2548,7 +2551,25 @@ function AttendanceView({
       return ts;
     }
   };
-  const names = [...new Set([...reps, ...attendance.map(a => a.name)])];
+  const isActive = s => !s.logout_at && Date.now() - new Date(s.last_seen).getTime() < 5 * 60 * 1000;
+  const dur = s => {
+    const end = s.logout_at || s.last_seen;
+    if (!s.login_at || !end) return '—';
+    return fmtDuration((new Date(end) - new Date(s.login_at)) / 1000);
+  };
+  const stat = s => isActive(s) ? {
+    t: 'Active',
+    bg: '#E3FCF2',
+    c: '#00875A'
+  } : s.logout_at ? {
+    t: 'Logged out',
+    bg: '#F0F2F5',
+    c: '#68737D'
+  } : {
+    t: 'Ended',
+    bg: '#FFF4E5',
+    c: '#FF8B00'
+  };
   return /*#__PURE__*/React.createElement("div", {
     className: "home-content"
   }, /*#__PURE__*/React.createElement("div", {
@@ -2562,13 +2583,13 @@ function AttendanceView({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-title"
-  }, "⏱ Attendance Log ", /*#__PURE__*/React.createElement("span", {
+  }, "⏱ Login Sessions ", /*#__PURE__*/React.createElement("span", {
     style: {
       fontWeight: 400,
       color: 'var(--text-dim)',
       fontSize: 12
     }
-  }, "· ", rows.length, " record", rows.length !== 1 ? 's' : '')), /*#__PURE__*/React.createElement("select", {
+  }, "· ", rows.length, " session", rows.length !== 1 ? 's' : '')), /*#__PURE__*/React.createElement("select", {
     value: rep,
     onChange: e => setRep(e.target.value),
     style: {
@@ -2593,28 +2614,31 @@ function AttendanceView({
     }
   }, /*#__PURE__*/React.createElement("table", {
     className: "kpi-table"
-  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", null, "Action"), /*#__PURE__*/React.createElement("th", null, "Date & Time"))), /*#__PURE__*/React.createElement("tbody", null, rows.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: 3,
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", null, "Login"), /*#__PURE__*/React.createElement("th", null, "Logout"), /*#__PURE__*/React.createElement("th", null, "Duration"), /*#__PURE__*/React.createElement("th", null, "Status"))), /*#__PURE__*/React.createElement("tbody", null, rows.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: 5,
     style: {
       padding: 16,
       color: 'var(--text-dim)'
     }
-  }, "No clock in/out records yet.")), rows.map(a => /*#__PURE__*/React.createElement("tr", {
-    key: a.id
-  }, /*#__PURE__*/React.createElement("td", {
-    style: {
-      fontWeight: 600
-    }
-  }, a.name), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
-    style: {
-      background: a.type === 'in' ? '#E3FCF2' : '#FFEBE6',
-      color: a.type === 'in' ? '#00875A' : '#DE350B',
-      fontWeight: 700,
-      fontSize: 11,
-      padding: '2px 9px',
-      borderRadius: 8
-    }
-  }, a.type === 'in' ? 'Clock In' : 'Clock Out')), /*#__PURE__*/React.createElement("td", null, fmt(a.ts)))))))));
+  }, "No login sessions recorded yet.")), rows.map(s => {
+    const st = stat(s);
+    return /*#__PURE__*/React.createElement("tr", {
+      key: s.id
+    }, /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontWeight: 600
+      }
+    }, s.name), /*#__PURE__*/React.createElement("td", null, fmt(s.login_at)), /*#__PURE__*/React.createElement("td", null, s.logout_at ? fmt(s.logout_at) : isActive(s) ? '—' : fmt(s.last_seen)), /*#__PURE__*/React.createElement("td", null, dur(s)), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+      style: {
+        background: st.bg,
+        color: st.c,
+        fontWeight: 700,
+        fontSize: 11,
+        padding: '2px 9px',
+        borderRadius: 8
+      }
+    }, st.t)));
+  }))))));
 }
 function HomeView({
   leads,
@@ -3215,6 +3239,12 @@ function getProfile(name) {
     ...(PROFILE_CACHE[name] || {})
   };
 }
+function fmtDuration(secs) {
+  secs = Math.max(0, Math.round(secs || 0));
+  const h = Math.floor(secs / 3600),
+    m = Math.floor(secs % 3600 / 60);
+  return h ? h + 'h ' + m + 'm' : m + 'm';
+}
 function fmtBirthday(b) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(b || '');
   if (!m) return b || '';
@@ -3334,9 +3364,9 @@ function loadLeavesFromSupabase() {
     error
   }) => error || !data ? [] : data).catch(() => []);
 }
-function loadAttendanceFromSupabase() {
+function loadSessionsFromSupabase() {
   if (!SB) return Promise.resolve([]);
-  return SB.from('attendance').select('*').order('ts', {
+  return SB.from('sessions').select('*').order('login_at', {
     ascending: false
   }).limit(1000).then(({
     data,
@@ -8573,10 +8603,131 @@ function App() {
   useEffect(() => {
     if (SB) loadLeavesFromSupabase().then(setLeaves);
   }, []);
-  const [attendance, setAttendance] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const sessionIdRef = useRef(null);
   useEffect(() => {
-    if (SB) loadAttendanceFromSupabase().then(setAttendance);
+    if (SB) loadSessionsFromSupabase().then(setSessions);
   }, []);
+  // Auto attendance: a login session is created when a user signs in (resumed on
+  // reload within 30 min), last_seen is heartbeat-updated while the tab is open,
+  // and logout_at is set on sign-out / tab close. No manual buttons.
+  useEffect(() => {
+    if (!SB || !currentUser) return;
+    let cancelled = false;
+    const KEY = 'sessionInfo';
+    const nowIso = () => new Date().toISOString();
+    function startNew() {
+      SB.from('sessions').insert({
+        name: currentUser.name,
+        login_at: nowIso(),
+        last_seen: nowIso()
+      }).select().then(({
+        data
+      }) => {
+        if (cancelled) return;
+        const s = data && data[0];
+        if (!s) return;
+        sessionIdRef.current = s.id;
+        try {
+          localStorage.setItem(KEY, JSON.stringify({
+            id: s.id,
+            name: currentUser.name,
+            login_at: s.login_at,
+            lastBeat: Date.now()
+          }));
+        } catch (e) {}
+        setSessions(a => [s, ...a.filter(x => x.id !== s.id)]);
+        postLeaveSheet({
+          kind: 'session',
+          id: s.id,
+          name: currentUser.name,
+          login_at: s.login_at,
+          logout_at: '',
+          duration: ''
+        });
+      });
+    }
+    let info = null;
+    try {
+      info = JSON.parse(localStorage.getItem(KEY) || 'null');
+    } catch (e) {}
+    if (info && info.id && info.name === currentUser.name && Date.now() - (info.lastBeat || 0) < 30 * 60 * 1000) {
+      sessionIdRef.current = info.id;
+    } else {
+      startNew();
+    }
+    const beat = setInterval(() => {
+      const id = sessionIdRef.current;
+      if (!id) return;
+      const ls = nowIso();
+      SB.from('sessions').update({
+        last_seen: ls
+      }).eq('id', id).then(() => {});
+      setSessions(a => a.map(x => x.id === id ? {
+        ...x,
+        last_seen: ls
+      } : x));
+      try {
+        const i = JSON.parse(localStorage.getItem(KEY) || 'null') || {};
+        i.lastBeat = Date.now();
+        localStorage.setItem(KEY, JSON.stringify(i));
+      } catch (e) {}
+    }, 60000);
+    function onUnload() {
+      const id = sessionIdRef.current;
+      if (!id) return;
+      try {
+        const i = JSON.parse(localStorage.getItem(KEY) || 'null') || {};
+        const dur = i.login_at ? fmtDuration((Date.now() - new Date(i.login_at).getTime()) / 1000) : '';
+        const wh = (config.leavesWebhook || '').trim();
+        if (wh && navigator.sendBeacon) navigator.sendBeacon(wh, new Blob([JSON.stringify({
+          kind: 'session',
+          id,
+          name: currentUser.name,
+          login_at: i.login_at || '',
+          logout_at: nowIso(),
+          duration: dur
+        })], {
+          type: 'text/plain'
+        }));
+      } catch (e) {}
+    }
+    window.addEventListener('beforeunload', onUnload);
+    return () => {
+      cancelled = true;
+      clearInterval(beat);
+      window.removeEventListener('beforeunload', onUnload);
+    };
+  }, [currentUser && currentUser.name]);
+  function endSession() {
+    try {
+      const info = JSON.parse(localStorage.getItem('sessionInfo') || 'null');
+      const id = sessionIdRef.current || info && info.id;
+      if (id) {
+        const ts = new Date().toISOString();
+        const dur = info && info.login_at ? fmtDuration((Date.now() - new Date(info.login_at).getTime()) / 1000) : '';
+        if (SB) SB.from('sessions').update({
+          logout_at: ts,
+          last_seen: ts
+        }).eq('id', id).then(() => {});
+        setSessions(a => a.map(x => x.id === id ? {
+          ...x,
+          logout_at: ts,
+          last_seen: ts
+        } : x));
+        postLeaveSheet({
+          kind: 'session',
+          id,
+          name: info && info.name || currentUser && currentUser.name,
+          login_at: info && info.login_at || '',
+          logout_at: ts,
+          duration: dur
+        });
+      }
+      localStorage.removeItem('sessionInfo');
+      sessionIdRef.current = null;
+    } catch (e) {}
+  }
   const [showSearch, setShowSearch] = useState(false);
   const [searchLead, setSearchLead] = useState(null);
   const [closeSyncing, setCloseSyncing] = useState(false);
@@ -8588,6 +8739,7 @@ function App() {
     addToast(`Welcome, ${u.name}`, 'success');
   }
   function logout() {
+    endSession();
     setCurrentUser(null);
     localStorage.removeItem('currentUser');
     setActiveRep(null);
@@ -8739,35 +8891,6 @@ function App() {
       postLeaveSheet({
         event: 'filed',
         ...saved
-      });
-    });
-  }
-  function clockEvent(type) {
-    if (!SB) {
-      addToast('Backend unavailable', 'error');
-      return;
-    }
-    const row = {
-      name: currentUser.name,
-      type,
-      ts: new Date().toISOString()
-    };
-    SB.from('attendance').insert(row).select().then(({
-      data,
-      error
-    }) => {
-      if (error) {
-        addToast('Clock failed: ' + error.message, 'error');
-        return;
-      }
-      const saved = data && data[0] || row;
-      setAttendance(a => [saved, ...a]);
-      addToast(type === 'in' ? '⏱ Clocked in' : '⏱ Clocked out', type === 'in' ? 'success' : 'info');
-      postLeaveSheet({
-        kind: 'attendance',
-        name: row.name,
-        type,
-        timestamp: row.ts
       });
     });
   }
@@ -9458,7 +9581,7 @@ function App() {
       onDecide: decideLeave
     });
     if (tab === 'attendance') return isAdmin ? /*#__PURE__*/React.createElement(AttendanceView, {
-      attendance: attendance,
+      sessions: sessions,
       config: config
     }) : /*#__PURE__*/React.createElement(HomeView, {
       leads: vLeads,
@@ -9686,20 +9809,6 @@ function App() {
   }), /*#__PURE__*/React.createElement("path", {
     d: "m21 21-4.35-4.35"
   }))), (() => {
-    const myLast = attendance.find(a => a.name === (currentUser && currentUser.name));
-    const inNow = myLast && myLast.type === 'in';
-    return /*#__PURE__*/React.createElement("button", {
-      className: "btn btn-sm",
-      style: {
-        background: inNow ? '#DE350B' : '#00875A',
-        color: '#fff',
-        borderColor: 'transparent',
-        fontWeight: 600
-      },
-      onClick: () => clockEvent(inNow ? 'out' : 'in'),
-      title: inNow ? 'You are clocked in — click to clock out' : 'Click to clock in'
-    }, inNow ? '⏱ Clock Out' : '⏱ Clock In');
-  })(), (() => {
     const allMode = isAdmin && bellScope === 'all';
     const myReplies = allMode ? replies : replies.filter(r => (r.rep || '') === currentUser.name);
     const seen = repliesSeenSet(currentUser.name);
