@@ -8589,14 +8589,19 @@ function App() {
     logH('🗑', `Cleared ALL leads (${n})`);
     addToast(`Cleared all ${n} lead(s)`, 'error');
   }
+  // Fire-and-forget mirror to the leaves Google Sheet. Uses no-cors + text/plain
+  // so it works with a Google Apps Script web app (which can't answer CORS
+  // preflight); the body is still a JSON string the script parses. Works with
+  // Make/Zapier too. Supabase is the source of truth, so we don't read the reply.
   function postLeaveSheet(payload) {
     const wh = (config.leavesWebhook || '').trim();
     if (!wh) return;
     try {
       fetch(wh, {
         method: 'POST',
+        mode: 'no-cors',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'text/plain;charset=utf-8'
         },
         body: JSON.stringify(payload)
       }).catch(() => {});

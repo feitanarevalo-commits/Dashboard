@@ -3927,7 +3927,11 @@ function App() {
   function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
   function bulkDelete(ids){ if(!ids||!ids.length) return; const set=new Set(ids); setLeads(ls=>ls.filter(l=>!set.has(l.id))); deleteLeadsFromSupabase(ids); logH('🗑',`Bulk: ${ids.length} lead(s) deleted`); addToast(`${ids.length} lead(s) deleted`,'error'); }
   function clearAllLeads(){ const n=leads.length; setLeads([]); leadsSyncRef.current={}; clearAllLeadsFromSupabase(); logH('🗑',`Cleared ALL leads (${n})`); addToast(`Cleared all ${n} lead(s)`,'error'); }
-  function postLeaveSheet(payload){ const wh=(config.leavesWebhook||'').trim(); if(!wh) return; try{ fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{}); }catch(e){} }
+  // Fire-and-forget mirror to the leaves Google Sheet. Uses no-cors + text/plain
+  // so it works with a Google Apps Script web app (which can't answer CORS
+  // preflight); the body is still a JSON string the script parses. Works with
+  // Make/Zapier too. Supabase is the source of truth, so we don't read the reply.
+  function postLeaveSheet(payload){ const wh=(config.leavesWebhook||'').trim(); if(!wh) return; try{ fetch(wh,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)}).catch(()=>{}); }catch(e){} }
   function fileLeave(form){
     if(!SB){ addToast('Backend unavailable — cannot file leave','error'); return; }
     const row={ name:currentUser.name, type:form.type, start_date:form.start||null, end_date:form.end||null, days:form.days||null, reason:form.reason||'', status:'Pending' };
