@@ -157,6 +157,24 @@ html, body, #root { height: 100%; font-family: 'Inter', -apple-system, BlinkMacS
 .nav-item.settings { opacity: .75; }
 .nav-item.settings:hover { opacity: 1; }
 
+/* ── Collapsible icon-rail sidebar (hover to expand as an overlay) ── */
+.app-body { position: relative; }
+.sidebar-spacer { width: 60px; min-width: 60px; flex-shrink: 0; }
+.sidebar.collapsed { position: absolute; top: 0; left: 0; bottom: 0; width: 60px; min-width: 60px; overflow: hidden; z-index: 40; transition: width .18s var(--ease), box-shadow .18s var(--ease); }
+.sidebar.collapsed:hover { width: 222px; min-width: 222px; overflow-y: auto; box-shadow: 4px 0 22px rgba(0,0,0,.16); }
+.sidebar.collapsed .nav-item, .sidebar.collapsed .sidebar-collapse-toggle { justify-content: center; }
+.sidebar.collapsed .nav-item { font-size: 0; }
+.sidebar.collapsed .nav-item .nav-icon { font-size: 14px; }
+.sidebar.collapsed .sidebar-section-label, .sidebar.collapsed .nav-badge { opacity: 0; pointer-events: none; }
+.sidebar.collapsed:hover .nav-item { font-size: 13px; justify-content: flex-start; }
+.sidebar.collapsed:hover .sidebar-collapse-toggle { justify-content: flex-start; }
+.sidebar.collapsed:hover .sidebar-section-label, .sidebar.collapsed:hover .nav-badge { opacity: 1; }
+.sidebar-collapse-toggle { display: flex; align-items: center; gap: 9px; padding: 8px 12px; margin: 6px 8px 2px; border-radius: 6px; cursor: pointer; color: #6B7280; font-size: 13px; font-weight: 600; user-select: none; }
+.sidebar-collapse-toggle:hover { background: var(--sidebar-hover); color: #111827; }
+.sidebar-collapse-toggle .sct-icon { width: 18px; text-align: center; font-size: 16px; flex-shrink: 0; }
+.sidebar.collapsed .sidebar-collapse-toggle .sct-label { font-size: 0; }
+.sidebar.collapsed:hover .sidebar-collapse-toggle .sct-label { font-size: 13px; }
+
 /* ── MAIN ── */
 .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
 .main-header { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,.04); }

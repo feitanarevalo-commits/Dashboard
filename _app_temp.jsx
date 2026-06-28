@@ -3795,6 +3795,8 @@ function App() {
   const [showBell,setShowBell]=useState(false);
   const [repliesLoading,setRepliesLoading]=useState(false);
   const [bellScope,setBellScope]=useState('mine'); // admins can flip to 'all' to see everyone's
+  const [navCollapsed,setNavCollapsed]=useState(()=>{ try{ return localStorage.getItem('navCollapsed')!=='0'; }catch(e){ return true; } });
+  useEffect(()=>{ try{ localStorage.setItem('navCollapsed',navCollapsed?'1':'0'); }catch(e){} },[navCollapsed]);
   const [showSearch,setShowSearch]=useState(false);
   const [searchLead,setSearchLead]=useState(null);
   const [closeSyncing,setCloseSyncing]=useState(false);
@@ -4352,8 +4354,11 @@ function App() {
 
       <div className="app-body">
         {/* SIDEBAR */}
-        <nav className="sidebar">
-          <div style={{height:8}}/>
+        {navCollapsed && <div className="sidebar-spacer"/>}
+        <nav className={`sidebar${navCollapsed?' collapsed':''}`}>
+          <div className="sidebar-collapse-toggle" onClick={()=>setNavCollapsed(c=>!c)} title={navCollapsed?'Pin sidebar open':'Collapse to icons'}>
+            <span className="sct-icon">{navCollapsed?'»':'«'}</span><span className="sct-label">Collapse</span>
+          </div>
           <div className="sidebar-section-label">Main</div>
           {NAV_MAIN.filter(n=>config.tabs[n.id]).map(n=>(
             <div key={n.id} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>

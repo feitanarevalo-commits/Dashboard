@@ -8240,6 +8240,18 @@ function App() {
   const [showBell, setShowBell] = useState(false);
   const [repliesLoading, setRepliesLoading] = useState(false);
   const [bellScope, setBellScope] = useState('mine'); // admins can flip to 'all' to see everyone's
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('navCollapsed') !== '0';
+    } catch (e) {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('navCollapsed', navCollapsed ? '1' : '0');
+    } catch (e) {}
+  }, [navCollapsed]);
   const [showSearch, setShowSearch] = useState(false);
   const [searchLead, setSearchLead] = useState(null);
   const [closeSyncing, setCloseSyncing] = useState(false);
@@ -9368,13 +9380,19 @@ function App() {
     title: "Sign out"
   }, "⎋ Logout"))), /*#__PURE__*/React.createElement("div", {
     className: "app-body"
-  }, /*#__PURE__*/React.createElement("nav", {
-    className: "sidebar"
+  }, navCollapsed && /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-spacer"
+  }), /*#__PURE__*/React.createElement("nav", {
+    className: `sidebar${navCollapsed ? ' collapsed' : ''}`
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      height: 8
-    }
-  }), /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-collapse-toggle",
+    onClick: () => setNavCollapsed(c => !c),
+    title: navCollapsed ? 'Pin sidebar open' : 'Collapse to icons'
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "sct-icon"
+  }, navCollapsed ? '»' : '«'), /*#__PURE__*/React.createElement("span", {
+    className: "sct-label"
+  }, "Collapse")), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
   }, "Main"), NAV_MAIN.filter(n => config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
     key: n.id,
