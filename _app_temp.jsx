@@ -4361,14 +4361,14 @@ function App() {
           </div>
           <div className="sidebar-section-label">Main</div>
           {NAV_MAIN.filter(n=>config.tabs[n.id]).map(n=>(
-            <div key={n.id} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
+            <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
             </div>
           ))}
           <div className="nav-divider"/>
           <div className="sidebar-section-label">Lead Filters</div>
           {NAV_FILTER.filter(n=>config.tabs[n.id]).map(n=>(
-            <div key={n.id} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
+            <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
               <span className={`nav-badge ${n.cls}`}>{n.count}</span>
             </div>
@@ -4380,7 +4380,7 @@ function App() {
               const id=c.id.toLowerCase();
               const cnt=vLeads.filter(l=>l.campaigns.includes(c.id)).length;
               return(
-                <div key={id} className={`nav-item ${tab===id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(id);}}>
+                <div key={id} title={c.label} className={`nav-item ${tab===id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(id);}}>
                   <span className="nav-icon" style={{color:c.color}}>●</span>{c.label}
                   <span className="nav-badge">{cnt}</span>
                 </div>
@@ -4393,7 +4393,7 @@ function App() {
             // Active (non-contacted) leads — the rep's remaining work queue.
             const cnt=vLeads.filter(l=>l.assignedTo===r && !l.tags.includes('Contacted')).length;
             return(
-              <div key={r} className={`nav-item ${tab==='rep-home'&&activeRep===r?'active':''}`} onClick={()=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}>
+              <div key={r} title={r} className={`nav-item ${tab==='rep-home'&&activeRep===r?'active':''}`} onClick={()=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}>
                 <div style={{position:'relative',flexShrink:0}}>
                   <RepAvatar rep={r} config={config} size={20} online={activeRep===r} bgOverride="var(--sidebar)"/>
                 </div>
@@ -4404,22 +4404,22 @@ function App() {
           })}
           <div style={{flex:1}}/>
           <div className="sidebar-footer">
-            {isAdmin && <div className="nav-item settings" onClick={()=>closeSyncing?null:loadFromClose()}>
+            {isAdmin && <div className="nav-item settings" title="Load from Close" onClick={()=>closeSyncing?null:loadFromClose()}>
               <span className="nav-icon">☁</span>{closeSyncing?'Syncing…':'Load from Close'}
             </div>}
-            {isAdmin && <div className="nav-item settings" onClick={()=>closeSyncing?null:saveToClose()}>
+            {isAdmin && <div className="nav-item settings" title="Save to Close" onClick={()=>closeSyncing?null:saveToClose()}>
               <span className="nav-icon">⬆</span>Save to Close
             </div>}
-            {isAdmin && <div className="nav-item settings" onClick={()=>setShowSettings(true)}>
+            {isAdmin && <div className="nav-item settings" title="Settings & Customize" onClick={()=>setShowSettings(true)}>
               <span className="nav-icon">⚙</span>Settings &amp; Customize
             </div>}
-            <div className="nav-item settings" onClick={()=>setShowChangePw(true)}>
+            <div className="nav-item settings" title="Change Password" onClick={()=>setShowChangePw(true)}>
               <span className="nav-icon">🔑</span>Change Password
             </div>
-            {isAdmin && <div className="nav-item settings" onClick={()=>setShowAdminReset(true)}>
+            {isAdmin && <div className="nav-item settings" title="Reset Teammate's Password" onClick={()=>setShowAdminReset(true)}>
               <span className="nav-icon">🛠</span>Reset Teammate's Password
             </div>}
-            <div className="nav-item settings" onClick={logout}>
+            <div className="nav-item settings" title={`Logout (${currentUser.name})`} onClick={logout}>
               <span className="nav-icon">⎋</span>Logout ({currentUser.name})
             </div>
           </div>

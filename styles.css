@@ -159,8 +159,8 @@ html, body, #root { height: 100%; font-family: 'Inter', -apple-system, BlinkMacS
 
 /* ── Collapsible icon-rail sidebar (hover to expand as an overlay) ── */
 .app-body { position: relative; }
-.sidebar-spacer { width: 60px; min-width: 60px; flex-shrink: 0; }
-.sidebar.collapsed { position: absolute; top: 0; left: 0; bottom: 0; width: 60px; min-width: 60px; overflow: hidden; z-index: 40; transition: width .18s var(--ease), box-shadow .18s var(--ease); }
+.sidebar-spacer { width: 72px; min-width: 72px; flex-shrink: 0; }
+.sidebar.collapsed { position: absolute; top: 0; left: 0; bottom: 0; width: 72px; min-width: 72px; overflow: hidden; z-index: 40; transition: width .18s var(--ease), box-shadow .18s var(--ease); }
 .sidebar.collapsed:hover { width: 222px; min-width: 222px; overflow-y: auto; box-shadow: 4px 0 22px rgba(0,0,0,.16); }
 .sidebar.collapsed .nav-item, .sidebar.collapsed .sidebar-collapse-toggle { justify-content: center; }
 .sidebar.collapsed .nav-item { font-size: 0; }

@@ -9396,6 +9396,7 @@ function App() {
     className: "sidebar-section-label"
   }, "Main"), NAV_MAIN.filter(n => config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
     key: n.id,
+    title: n.label,
     className: `nav-item ${tab === n.id && !showRepSelect ? 'active' : ''}`,
     onClick: () => {
       setShowRepSelect(false);
@@ -9409,6 +9410,7 @@ function App() {
     className: "sidebar-section-label"
   }, "Lead Filters"), NAV_FILTER.filter(n => config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
     key: n.id,
+    title: n.label,
     className: `nav-item ${tab === n.id && !showRepSelect ? 'active' : ''}`,
     onClick: () => {
       setShowRepSelect(false);
@@ -9427,6 +9429,7 @@ function App() {
     const cnt = vLeads.filter(l => l.campaigns.includes(c.id)).length;
     return /*#__PURE__*/React.createElement("div", {
       key: id,
+      title: c.label,
       className: `nav-item ${tab === id && !showRepSelect ? 'active' : ''}`,
       onClick: () => {
         setShowRepSelect(false);
@@ -9449,6 +9452,7 @@ function App() {
     const cnt = vLeads.filter(l => l.assignedTo === r && !l.tags.includes('Contacted')).length;
     return /*#__PURE__*/React.createElement("div", {
       key: r,
+      title: r,
       className: `nav-item ${tab === 'rep-home' && activeRep === r ? 'active' : ''}`,
       onClick: () => {
         setShowRepSelect(false);
@@ -9477,31 +9481,37 @@ function App() {
     className: "sidebar-footer"
   }, isAdmin && /*#__PURE__*/React.createElement("div", {
     className: "nav-item settings",
+    title: "Load from Close",
     onClick: () => closeSyncing ? null : loadFromClose()
   }, /*#__PURE__*/React.createElement("span", {
     className: "nav-icon"
   }, "☁"), closeSyncing ? 'Syncing…' : 'Load from Close'), isAdmin && /*#__PURE__*/React.createElement("div", {
     className: "nav-item settings",
+    title: "Save to Close",
     onClick: () => closeSyncing ? null : saveToClose()
   }, /*#__PURE__*/React.createElement("span", {
     className: "nav-icon"
   }, "⬆"), "Save to Close"), isAdmin && /*#__PURE__*/React.createElement("div", {
     className: "nav-item settings",
+    title: "Settings & Customize",
     onClick: () => setShowSettings(true)
   }, /*#__PURE__*/React.createElement("span", {
     className: "nav-icon"
   }, "⚙"), "Settings & Customize"), /*#__PURE__*/React.createElement("div", {
     className: "nav-item settings",
+    title: "Change Password",
     onClick: () => setShowChangePw(true)
   }, /*#__PURE__*/React.createElement("span", {
     className: "nav-icon"
   }, "🔑"), "Change Password"), isAdmin && /*#__PURE__*/React.createElement("div", {
     className: "nav-item settings",
+    title: "Reset Teammate's Password",
     onClick: () => setShowAdminReset(true)
   }, /*#__PURE__*/React.createElement("span", {
     className: "nav-icon"
   }, "🛠"), "Reset Teammate's Password"), /*#__PURE__*/React.createElement("div", {
     className: "nav-item settings",
+    title: `Logout (${currentUser.name})`,
     onClick: logout
   }, /*#__PURE__*/React.createElement("span", {
     className: "nav-icon"
