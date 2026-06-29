@@ -3998,7 +3998,7 @@ function HomeView({
     bdayUpcoming = bdays.filter(b => b.days > 0);
   const joinNames = arr => arr.length <= 1 ? arr[0] || '' : arr.length === 2 ? `${arr[0]} & ${arr[1]}` : `${arr.slice(0, -1).join(', ')} & ${arr[arr.length - 1]}`;
   return /*#__PURE__*/React.createElement("div", {
-    className: "home-content",
+    className: "home-content kb-hero-layout",
     ref: pdfRef
   }, /*#__PURE__*/React.createElement("div", {
     className: "print-header",
@@ -4009,20 +4009,18 @@ function HomeView({
     style: {
       margin: 0
     }
-  }, "Enfinity Sales Dashboard"), /*#__PURE__*/React.createElement("p", null, "Rep KPI Report — ", rangeLabel, repFilter ? ` · ${repFilter}` : '', " (", custom ? cStart : cutoff.toISOString().split('T')[0], " → ", custom ? cEnd : 'today', ")")), bdays.length > 0 && /*#__PURE__*/React.createElement("div", {
-    className: `bday-banner no-print${bdayToday.length ? ' today' : ''}`
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "bday-cake"
-  }, "🎂"), /*#__PURE__*/React.createElement("div", null, bdayToday.length > 0 && /*#__PURE__*/React.createElement("span", {
-    className: "bday-today"
-  }, joinNames(bdayToday.map(b => b.name)), " ", bdayToday.length > 1 ? 'have' : 'has', " a birthday today! 🎉"), bdayUpcoming.length > 0 && /*#__PURE__*/React.createElement("span", {
-    className: "bday-up"
-  }, bdayToday.length > 0 ? 'Coming up: ' : 'Upcoming birthdays: ', bdayUpcoming.map(b => `${b.name} (${b.days === 1 ? 'tomorrow' : 'in ' + b.days + ' days'})`).join(' · ')))), /*#__PURE__*/React.createElement("div", {
-    className: "analytics-toolbar no-print",
-    style: {
-      flexWrap: 'wrap',
-      gap: 10
-    }
+  }, "Enfinity Sales Dashboard"), /*#__PURE__*/React.createElement("p", null, "Rep KPI Report — ", rangeLabel, repFilter ? ` · ${repFilter}` : '', " (", custom ? cStart : cutoff.toISOString().split('T')[0], " → ", custom ? cEnd : 'today', ")")), /*#__PURE__*/React.createElement("div", {
+    className: "home-hero no-print"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "home-hero-inner"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "home-hero-eyebrow"
+  }, "SALES OVERVIEW · ", rangeLabel.toUpperCase()), /*#__PURE__*/React.createElement("h1", {
+    className: "home-hero-title"
+  }, repFilter ? `${repFilter}'s performance` : 'Sales performance at a glance.'), /*#__PURE__*/React.createElement("p", {
+    className: "home-hero-sub"
+  }, "Track every rep, every lead, every day — KPIs, fresh vs recycled, and per-rep breakdown."), /*#__PURE__*/React.createElement("div", {
+    className: "home-hero-controls"
   }, /*#__PURE__*/React.createElement("div", {
     className: "period-toggle",
     style: {
@@ -4042,12 +4040,9 @@ function HomeView({
     onChange: e => setRepFilter(e.target.value),
     title: "Filter KPIs by sales rep",
     style: {
-      padding: '6px 10px',
-      border: `1px solid ${repFilter ? 'var(--accent)' : 'var(--border)'}`,
-      borderRadius: 8,
+      padding: '7px 12px',
       fontSize: 13,
-      background: 'var(--bg)',
-      color: 'var(--text)'
+      fontFamily: 'inherit'
     }
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
@@ -4067,16 +4062,13 @@ function HomeView({
     max: cEnd || undefined,
     onChange: e => setCStart(e.target.value),
     style: {
-      padding: '5px 8px',
-      border: `1px solid ${custom ? 'var(--accent)' : 'var(--border)'}`,
-      borderRadius: 8,
+      padding: '6px 10px',
       fontSize: 12,
-      background: 'var(--bg)',
-      color: 'var(--text)'
+      fontFamily: 'inherit'
     }
   }), /*#__PURE__*/React.createElement("span", {
+    className: "home-controls-arrow",
     style: {
-      color: 'var(--text-dim)',
       fontSize: 12
     }
   }, "→"), /*#__PURE__*/React.createElement("input", {
@@ -4085,12 +4077,9 @@ function HomeView({
     min: cStart || undefined,
     onChange: e => setCEnd(e.target.value),
     style: {
-      padding: '5px 8px',
-      border: `1px solid ${custom ? 'var(--accent)' : 'var(--border)'}`,
-      borderRadius: 8,
+      padding: '6px 10px',
       fontSize: 12,
-      background: 'var(--bg)',
-      color: 'var(--text)'
+      fontFamily: 'inherit'
     }
   }), (cStart || cEnd) && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost btn-sm",
@@ -4108,10 +4097,20 @@ function HomeView({
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
     onClick: () => exportKpiCSV(repRows, kpiInfo, `enfinity_sales_kpis_${period}.csv`)
-  }, "⬇ Download CSV"), /*#__PURE__*/React.createElement("button", {
+  }, "⬇ CSV"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
     onClick: () => exportPDF('Rep KPI Report')
-  }, "🖨 Download PDF"))), /*#__PURE__*/React.createElement("div", {
+  }, "🖨 PDF"))))), /*#__PURE__*/React.createElement("div", {
+    className: "home-body"
+  }, bdays.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: `bday-banner no-print${bdayToday.length ? ' today' : ''}`
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "bday-cake"
+  }, "🎂"), /*#__PURE__*/React.createElement("div", null, bdayToday.length > 0 && /*#__PURE__*/React.createElement("span", {
+    className: "bday-today"
+  }, joinNames(bdayToday.map(b => b.name)), " ", bdayToday.length > 1 ? 'have' : 'has', " a birthday today! 🎉"), bdayUpcoming.length > 0 && /*#__PURE__*/React.createElement("span", {
+    className: "bday-up"
+  }, bdayToday.length > 0 ? 'Coming up: ' : 'Upcoming birthdays: ', bdayUpcoming.map(b => `${b.name} (${b.days === 1 ? 'tomorrow' : 'in ' + b.days + ' days'})`).join(' · ')))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 12,
@@ -4426,7 +4425,7 @@ function HomeView({
     })), /*#__PURE__*/React.createElement("div", {
       className: "bar-count"
     }, cnt));
-  })))));
+  }))))));
 }
 
 // ─── REP AVATAR COMPONENT ────────────────────────────────

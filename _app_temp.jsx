@@ -1744,11 +1744,47 @@ function HomeView({leads,config}) {
   const joinNames=arr=> arr.length<=1 ? (arr[0]||'') : (arr.length===2 ? `${arr[0]} & ${arr[1]}` : `${arr.slice(0,-1).join(', ')} & ${arr[arr.length-1]}`);
 
   return (
-    <div className="home-content" ref={pdfRef}>
+    <div className="home-content kb-hero-layout" ref={pdfRef}>
       <div className="print-header" style={{display:'none'}}>
         <h1 style={{margin:0}}>Enfinity Sales Dashboard</h1>
         <p>Rep KPI Report — {rangeLabel}{repFilter?` · ${repFilter}`:''} ({custom?cStart:cutoff.toISOString().split('T')[0]} → {custom?cEnd:'today'})</p>
       </div>
+
+      {/* HERO ──────────────────────────────────────────────── */}
+      <div className="home-hero no-print">
+        <div className="home-hero-inner">
+          <div className="home-hero-eyebrow">SALES OVERVIEW · {rangeLabel.toUpperCase()}</div>
+          <h1 className="home-hero-title">{repFilter?`${repFilter}'s performance`:'Sales performance at a glance.'}</h1>
+          <p className="home-hero-sub">Track every rep, every lead, every day — KPIs, fresh vs recycled, and per-rep breakdown.</p>
+          <div className="home-hero-controls">
+            <div className="period-toggle" style={{opacity:custom?0.4:1}} title={custom?'Using the custom date range below':''}>
+              {PERIODS.map(p=>(
+                <button key={p.id} className={`period-btn${period===p.id?' active':''}`} onClick={()=>{setPeriod(p.id);setCStart('');setCEnd('');}}>{p.label}</button>
+              ))}
+            </div>
+            <select value={repFilter} onChange={e=>setRepFilter(e.target.value)} title="Filter KPIs by sales rep"
+              style={{padding:'7px 12px',fontSize:13,fontFamily:'inherit'}}>
+              <option value="">👥 All reps</option>
+              {(config.salesReps||[]).map(r=><option key={r} value={r}>{r}</option>)}
+            </select>
+            <div style={{display:'flex',alignItems:'center',gap:6}} title="Custom date range (overrides the period preset)">
+              <input type="date" value={cStart} max={cEnd||undefined} onChange={e=>setCStart(e.target.value)}
+                style={{padding:'6px 10px',fontSize:12,fontFamily:'inherit'}}/>
+              <span className="home-controls-arrow" style={{fontSize:12}}>→</span>
+              <input type="date" value={cEnd} min={cStart||undefined} onChange={e=>setCEnd(e.target.value)}
+                style={{padding:'6px 10px',fontSize:12,fontFamily:'inherit'}}/>
+              {(cStart||cEnd) && <button className="btn btn-ghost btn-sm" onClick={()=>{setCStart('');setCEnd('');}} title="Clear date range">✕</button>}
+            </div>
+            <div style={{marginLeft:'auto',display:'flex',gap:8}}>
+              <button className="btn btn-outline btn-sm" onClick={()=>exportKpiCSV(repRows,kpiInfo,`enfinity_sales_kpis_${period}.csv`)}>⬇ CSV</button>
+              <button className="btn btn-outline btn-sm" onClick={()=>exportPDF('Rep KPI Report')}>🖨 PDF</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* BODY ──────────────────────────────────────────────── */}
+      <div className="home-body">
 
       {bdays.length>0 && (
         <div className={`bday-banner no-print${bdayToday.length?' today':''}`}>
@@ -1759,31 +1795,6 @@ function HomeView({leads,config}) {
           </div>
         </div>
       )}
-
-      <div className="analytics-toolbar no-print" style={{flexWrap:'wrap',gap:10}}>
-        <div className="period-toggle" style={{opacity:custom?0.4:1}} title={custom?'Using the custom date range below':''}>
-          {PERIODS.map(p=>(
-            <button key={p.id} className={`period-btn${period===p.id?' active':''}`} onClick={()=>{setPeriod(p.id);setCStart('');setCEnd('');}}>{p.label}</button>
-          ))}
-        </div>
-        <select value={repFilter} onChange={e=>setRepFilter(e.target.value)} title="Filter KPIs by sales rep"
-          style={{padding:'6px 10px',border:`1px solid ${repFilter?'var(--accent)':'var(--border)'}`,borderRadius:8,fontSize:13,background:'var(--bg)',color:'var(--text)'}}>
-          <option value="">👥 All reps</option>
-          {(config.salesReps||[]).map(r=><option key={r} value={r}>{r}</option>)}
-        </select>
-        <div style={{display:'flex',alignItems:'center',gap:6}} title="Custom date range (overrides the period preset)">
-          <input type="date" value={cStart} max={cEnd||undefined} onChange={e=>setCStart(e.target.value)}
-            style={{padding:'5px 8px',border:`1px solid ${custom?'var(--accent)':'var(--border)'}`,borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)'}}/>
-          <span style={{color:'var(--text-dim)',fontSize:12}}>→</span>
-          <input type="date" value={cEnd} min={cStart||undefined} onChange={e=>setCEnd(e.target.value)}
-            style={{padding:'5px 8px',border:`1px solid ${custom?'var(--accent)':'var(--border)'}`,borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)'}}/>
-          {(cStart||cEnd) && <button className="btn btn-ghost btn-sm" onClick={()=>{setCStart('');setCEnd('');}} title="Clear date range">✕</button>}
-        </div>
-        <div style={{marginLeft:'auto',display:'flex',gap:8}}>
-          <button className="btn btn-outline btn-sm" onClick={()=>exportKpiCSV(repRows,kpiInfo,`enfinity_sales_kpis_${period}.csv`)}>⬇ Download CSV</button>
-          <button className="btn btn-outline btn-sm" onClick={()=>exportPDF('Rep KPI Report')}>🖨 Download PDF</button>
-        </div>
-      </div>
 
       <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
         <div className="stat-card accent"><div className="stat-label">Assigned ({rangeLabel})</div><div className="stat-value">{total}</div><div className="stat-sub">{repFilter?`${repFilter} only`:'across all reps'}</div></div>
@@ -1941,6 +1952,7 @@ function HomeView({leads,config}) {
           </div>
         </div>
       </div>
+      </div>{/* /.home-body */}
     </div>
   );
 }
