@@ -1423,7 +1423,10 @@ function KbLaunchpad({tools,onManual}) {
               <span style={{fontFamily:SG,fontWeight:700,fontSize:17,color:'#fff'}}>Knowledge</span>
               <span style={{fontSize:11,fontWeight:700,letterSpacing:'.04em',color:accentLight,background:accentRing,padding:'3px 9px',borderRadius:999}}>ENFINITY</span>
             </div>
-            <span onClick={onManual} style={{fontSize:13,fontWeight:600,color:'rgba(255,255,255,.7)',cursor:'pointer'}} title="Open the full Sales Operations Manual">📖 Read the manual →</span>
+            <div style={{display:'inline-flex',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.14)',borderRadius:10,padding:3,gap:2}}>
+              <span style={{padding:'6px 13px',borderRadius:7,fontSize:13,fontWeight:600,background:accent,color:'#fff'}}>🚀 Tools</span>
+              <span onClick={onManual} style={{padding:'6px 13px',borderRadius:7,fontSize:13,fontWeight:600,color:'rgba(255,255,255,.75)',cursor:'pointer'}} title="Open the full Sales Operations Manual">📖 Manual</span>
+            </div>
           </div>
           <div style={{fontSize:11,fontWeight:700,letterSpacing:'.12em',color:accentLight,marginBottom:12}}>TOOLS &amp; SYSTEMS — LAUNCHPAD</div>
           <h1 style={{fontFamily:SG,fontWeight:700,fontSize:40,lineHeight:1.05,letterSpacing:'-.025em',margin:'0 0 14px',maxWidth:560}}>Everything the sales team runs on, one click away.</h1>
@@ -1512,7 +1515,10 @@ function KnowledgeBaseView({kb,isAdmin,onAdd,onDelete}) {
   if(view==='launchpad') return <KbLaunchpad tools={tools} onManual={()=>setView('manual')}/>;
   return (
     <div className="home-content">
-      <button className="btn btn-ghost btn-sm" style={{alignSelf:'flex-start',marginBottom:4}} onClick={()=>setView('launchpad')}>← Tools launchpad</button>
+      <div style={{display:'inline-flex',alignSelf:'flex-start',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:3,gap:2,marginBottom:6}}>
+        <span onClick={()=>setView('launchpad')} style={{padding:'6px 13px',borderRadius:7,fontSize:13,fontWeight:600,color:'var(--text-dim)',cursor:'pointer'}}>🚀 Tools</span>
+        <span style={{padding:'6px 13px',borderRadius:7,fontSize:13,fontWeight:600,background:'var(--accent)',color:'#fff'}}>📖 Manual</span>
+      </div>
       <div style={{display:'flex',gap:16,alignItems:'flex-start'}}>
         <div className="card" style={{flex:'0 0 250px',position:'sticky',top:0,maxHeight:'calc(100vh - 90px)',display:'flex',flexDirection:'column'}}>
           <div style={{padding:12,borderBottom:'1px solid var(--border)'}}>

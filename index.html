@@ -2938,16 +2938,36 @@ function KbLaunchpad({
       padding: '3px 9px',
       borderRadius: 999
     }
-  }, "ENFINITY")), /*#__PURE__*/React.createElement("span", {
-    onClick: onManual,
+  }, "ENFINITY")), /*#__PURE__*/React.createElement("div", {
     style: {
+      display: 'inline-flex',
+      background: 'rgba(255,255,255,.08)',
+      border: '1px solid rgba(255,255,255,.14)',
+      borderRadius: 10,
+      padding: 3,
+      gap: 2
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      padding: '6px 13px',
+      borderRadius: 7,
       fontSize: 13,
       fontWeight: 600,
-      color: 'rgba(255,255,255,.7)',
+      background: accent,
+      color: '#fff'
+    }
+  }, "🚀 Tools"), /*#__PURE__*/React.createElement("span", {
+    onClick: onManual,
+    style: {
+      padding: '6px 13px',
+      borderRadius: 7,
+      fontSize: 13,
+      fontWeight: 600,
+      color: 'rgba(255,255,255,.75)',
       cursor: 'pointer'
     },
     title: "Open the full Sales Operations Manual"
-  }, "📖 Read the manual →")), /*#__PURE__*/React.createElement("div", {
+  }, "📖 Manual"))), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       fontWeight: 700,
@@ -3376,14 +3396,37 @@ function KnowledgeBaseView({
   });
   return /*#__PURE__*/React.createElement("div", {
     className: "home-content"
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost btn-sm",
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
+      display: 'inline-flex',
       alignSelf: 'flex-start',
-      marginBottom: 4
-    },
-    onClick: () => setView('launchpad')
-  }, "← Tools launchpad"), /*#__PURE__*/React.createElement("div", {
+      background: 'var(--bg)',
+      border: '1px solid var(--border)',
+      borderRadius: 10,
+      padding: 3,
+      gap: 2,
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    onClick: () => setView('launchpad'),
+    style: {
+      padding: '6px 13px',
+      borderRadius: 7,
+      fontSize: 13,
+      fontWeight: 600,
+      color: 'var(--text-dim)',
+      cursor: 'pointer'
+    }
+  }, "🚀 Tools"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      padding: '6px 13px',
+      borderRadius: 7,
+      fontSize: 13,
+      fontWeight: 600,
+      background: 'var(--accent)',
+      color: '#fff'
+    }
+  }, "📖 Manual")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 16,
