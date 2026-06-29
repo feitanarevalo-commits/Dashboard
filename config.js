@@ -79,6 +79,7 @@ var DEFAULT_CONFIG = {
   closeLoadWebhook: '', // PUSH-ONLY: the real Enfinity org has ~628k leads — the dashboard's store is Supabase, not Close. (close-load fn still exists for the old test org if ever needed.)
   closeCheckWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-check', // dedup: which scraped channels already exist in Close (by channel id / email)
   closeMineWebhook: 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-mine',  // per-rep scoped view: leads in Close Assigned To a rep (📁 Close Leads button)
+  closeSearchWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-search', // free-text search of the Close DB (Close Database tab) to check if a lead exists
   // ── Leaves → Google Sheet ──────────────────────────────────
   // POST target that records every leave request + decision to a Google Sheet.
   // Leaves are stored in Supabase (source of truth); this just mirrors them to a

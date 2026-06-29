@@ -1347,6 +1347,53 @@ function AttendanceView({sessions,config}) {
   );
 }
 
+// ─── CLOSE DATABASE SEARCH ────────────────────────────────
+// Live free-text search of the real Close org (~628k leads) to check whether a
+// lead already exists. Replaces the old (now-empty) "loaded from Close" view.
+function CloseSearchView({config}) {
+  const [q,setQ]=useState('');
+  const [leads,setLeads]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const [searched,setSearched]=useState(false);
+  const [total,setTotal]=useState(0);
+  const wh=(config.closeSearchWebhook||'').trim();
+  function run(e){ e&&e.preventDefault(); const term=q.trim(); if(!term||!wh) return; setLoading(true); setSearched(true);
+    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:term})})
+      .then(r=>r.json()).then(d=>{ if(d&&d.ok===false) throw new Error(d.error||'failed'); setLeads((d&&d.leads)||[]); setTotal((d&&d.total)||0); })
+      .catch(()=>{ setLeads([]); setTotal(0); }).finally(()=>setLoading(false));
+  }
+  const th={textAlign:'left',padding:'8px 10px',borderBottom:'2px solid var(--border)',fontWeight:600,fontSize:12};
+  const td={padding:'7px 10px',borderBottom:'1px solid var(--border)',verticalAlign:'top'};
+  return (
+    <div className="home-content">
+      <div className="card">
+        <div className="card-header"><div className="card-title">☁ Search Close Database <span style={{fontWeight:400,color:'var(--text-dim)',fontSize:12}}>· check if a lead already exists</span></div></div>
+        <div className="card-body">
+          <form onSubmit={run} style={{display:'flex',gap:8}}>
+            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search by channel name, email, or URL…" style={{flex:1,padding:'9px 12px'}} autoFocus/>
+            <button type="submit" className="btn btn-primary" disabled={loading||!q.trim()}>{loading?'Searching…':'🔍 Search'}</button>
+          </form>
+          <div style={{marginTop:6,fontSize:12,color:'var(--text-dim)'}}>Searches your full Close database (~628k leads) — by lead name, contact email & channel fields.</div>
+        </div>
+      </div>
+      {searched && <div className="card">
+        <div className="card-header"><div className="card-title">{loading?'Searching…':`${total} match${total!==1?'es':''}${total>leads.length?` · showing ${leads.length}`:''}`}</div></div>
+        <div className="card-body" style={{padding:0,overflowX:'auto'}}>
+          {!loading && leads.length===0 && <div style={{padding:'28px 24px',textAlign:'center',color:'var(--text-dim)',fontSize:13,lineHeight:1.6}}>No leads in Close match “{q}”.<br/><span style={{fontSize:12}}>That likely means it's a <b>fresh lead</b> — not in your Close database yet.</span></div>}
+          {leads.length>0 && <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+            <thead><tr><th style={th}>Lead / Channel</th><th style={th}>Followers</th><th style={th}>Niche</th><th style={th}>Status</th><th style={th}>Assigned</th><th style={th}></th></tr></thead>
+            <tbody>{leads.map(l=>(<tr key={l.id}>
+              <td style={td}>{l.channelName||l.name}{l.url?<a href={l.url} target="_blank" rel="noreferrer" title={l.url} style={{marginLeft:6,fontSize:11,textDecoration:'none'}}>↗</a>:null}</td>
+              <td style={td}>{l.followers||'—'}</td><td style={td}>{l.niche||'—'}</td><td style={td}>{l.status||'—'}</td><td style={td}>{l.assignedTo||'—'}</td>
+              <td style={td}>{l.closeUrl?<a href={l.closeUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{fontSize:11}}>Open ↗</a>:null}</td>
+            </tr>))}</tbody>
+          </table>}
+        </div>
+      </div>}
+    </div>
+  );
+}
+
 function HomeView({leads,config}) {
   const [period,setPeriod]=useState('monthly');
   const [repFilter,setRepFilter]=useState('');     // '' = all reps, else a single rep
@@ -4422,7 +4469,7 @@ function App() {
     {id:'lead-mgmt',icon:'◉',label:'Lead Management'},
     {id:'google-import',icon:'◫',label:'Google Sheets'},
     {id:'agency',icon:'▦',label:'Agency'},
-    {id:'close-data',icon:'☁',label:'Close Leads Data'},
+    {id:'close-data',icon:'☁',label:'Search Close DB'},
     {id:'leaves',icon:'🌴',label:'Leaves'},
     {id:'attendance',icon:'⏱',label:'Attendance'},
   ];
@@ -4451,7 +4498,7 @@ function App() {
     if(tab==='duplicates') return <DuplicatesView groups={dupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
     if(tab==='google-import') return <GoogleImportView onImport={importLeads} addToast={addToast}/>;
     if(tab==='agency') return <AgencyView agencies={agencies} setAgencies={setAgencies} leads={vLeads} config={config} currentUser={currentUser} isAdmin={isAdmin} addToast={addToast} onImportSheet={importAgencyLeads}/>;
-    if(tab==='close-data') return <LeadsTable leads={vLeads.filter(l=>l.fromClose)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="close_leads_data" printTitle="Close Leads Data"/>;
+    if(tab==='close-data') return <CloseSearchView config={config}/>;
     const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);
     if(camp) return <CampaignView campaign={camp} campColor={camp.color} leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
     return null;
