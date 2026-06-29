@@ -80,6 +80,7 @@ var DEFAULT_CONFIG = {
   closeCheckWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-check', // dedup: which scraped channels already exist in Close (by channel id / email)
   closeMineWebhook: 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-mine',  // per-rep scoped view: leads in Close Assigned To a rep (📁 Close Leads button)
   closeSearchWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/close-search', // free-text search of the Close DB (Close Database tab) to check if a lead exists
+  ytLookupWebhook:  'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/yt-lookup',     // paste a YouTube URL → auto-pull channel name + subscriber count (Add Lead form)
   // ── Leaves → Google Sheet ──────────────────────────────────
   // POST target that records every leave request + decision to a Google Sheet.
   // Leaves are stored in Supabase (source of truth); this just mirrors them to a

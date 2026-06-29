@@ -3853,6 +3853,65 @@ function AddLeadModal({
   const [niche, setNiche] = useState('');
   const [followers, setFollowers] = useState('');
   const [emails, setEmails] = useState('');
+  const [channelId, setChannelId] = useState('');
+  const [looking, setLooking] = useState(false);
+  const [lookMsg, setLookMsg] = useState('');
+  const [onClose_, setOnClose_] = useState(false); // is this channel already in Close?
+  const ytWh = (config.ytLookupWebhook || '').trim();
+  const checkWh = (config.closeCheckWebhook || '').trim();
+  // Paste a YouTube URL -> auto-pull channel name + subs, and flag if it's already in Close.
+  function lookup(override) {
+    const u = (typeof override === 'string' ? override : url).trim();
+    if (!u) {
+      setLookMsg('Paste a YouTube channel URL first');
+      return;
+    }
+    if (!ytWh) {
+      return;
+    }
+    setLooking(true);
+    setLookMsg('');
+    setOnClose_(false);
+    fetch(ytWh, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        url: u
+      })
+    }).then(r => r.json()).then(d => {
+      if (d && d.ok && (d.name || d.subs)) {
+        if (d.name) setName(d.name);
+        if (d.subs) setFollowers(d.subs);
+        if (d.url) setUrl(d.url);
+        if (d.channelId) setChannelId(d.channelId);
+        setPlatform('YouTube');
+        setLookMsg(`✓ Pulled “${d.name || 'channel'}”${d.subs ? ` · ${d.subs} subs` : ''}`);
+        // Non-blocking Close duplicate check
+        if (checkWh) {
+          fetch(checkWh, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              leads: [{
+                key: 0,
+                channelId: d.channelId,
+                url: d.url || u,
+                emails: emails.split(/[,;\s]+/)
+              }]
+            })
+          }).then(r => r.json()).then(c => {
+            if (c && (c.existing || []).length) setOnClose_(true);
+          }).catch(() => {});
+        }
+      } else {
+        setLookMsg("Couldn't read that channel — fill it in manually");
+      }
+    }).catch(() => setLookMsg("Lookup failed — fill it in manually")).finally(() => setLooking(false));
+  }
   function submit(e) {
     e.preventDefault();
     const n = name.trim();
@@ -3861,6 +3920,7 @@ function AddLeadModal({
       id: Date.now() + Math.floor(Math.random() * 1e6),
       channelName: n,
       url: url.trim(),
+      channelId,
       platform,
       niche: niche.trim(),
       followers: followers.trim(),
@@ -3910,11 +3970,61 @@ function AddLeadModal({
     className: "form-group"
   }, /*#__PURE__*/React.createElement("label", {
     className: "form-label"
+  }, "Channel URL ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 400,
+      color: 'var(--text-light)'
+    }
+  }, "— paste & auto‑fill")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: url,
+    onChange: e => setUrl(e.target.value),
+    onPaste: e => {
+      try {
+        const v = ((e.clipboardData || window.clipboardData).getData('text') || '').trim();
+        if (/youtu\.?be|youtube\.com|^@|^UC/i.test(v)) {
+          setUrl(v);
+          setTimeout(() => lookup(v), 0);
+        }
+      } catch (err) {}
+    },
+    placeholder: "https://youtube.com/@… or /channel/UC…",
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn-outline btn-sm",
+    disabled: looking || !url.trim(),
+    onClick: lookup
+  }, looking ? '…' : '🔍 Fetch')), lookMsg && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      marginTop: 5,
+      color: lookMsg[0] === '✓' ? 'var(--success,#00875A)' : 'var(--text-dim)'
+    }
+  }, lookMsg), onClose_ && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      marginTop: 6,
+      background: '#FFF4E5',
+      color: '#B45309',
+      padding: '6px 9px',
+      borderRadius: 6,
+      lineHeight: 1.45
+    }
+  }, "⚠ This channel is already in your ", /*#__PURE__*/React.createElement("b", null, "Close database"), ". You can still add it (e.g. a recycle lead) — just flagging it.")), /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
   }, "Channel Name *"), /*#__PURE__*/React.createElement("input", {
     value: name,
     onChange: e => setName(e.target.value),
-    placeholder: "e.g. Bites with Lily",
-    autoFocus: true
+    placeholder: "e.g. Bites with Lily"
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
@@ -3942,14 +4052,6 @@ function AddLeadModal({
     onChange: e => setFollowers(e.target.value),
     placeholder: "e.g. 120K"
   }))), /*#__PURE__*/React.createElement("div", {
-    className: "form-group"
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "form-label"
-  }, "Channel URL"), /*#__PURE__*/React.createElement("input", {
-    value: url,
-    onChange: e => setUrl(e.target.value),
-    placeholder: "https://youtube.com/@…"
-  })), /*#__PURE__*/React.createElement("div", {
     className: "form-group"
   }, /*#__PURE__*/React.createElement("label", {
     className: "form-label"

@@ -1921,10 +1921,36 @@ function AddLeadModal({rep,config,onAdd,onClose}) {
   const [niche,setNiche]=useState('');
   const [followers,setFollowers]=useState('');
   const [emails,setEmails]=useState('');
+  const [channelId,setChannelId]=useState('');
+  const [looking,setLooking]=useState(false);
+  const [lookMsg,setLookMsg]=useState('');
+  const [onClose_,setOnClose_]=useState(false);   // is this channel already in Close?
+  const ytWh=(config.ytLookupWebhook||'').trim();
+  const checkWh=(config.closeCheckWebhook||'').trim();
+  // Paste a YouTube URL -> auto-pull channel name + subs, and flag if it's already in Close.
+  function lookup(override){
+    const u=(typeof override==='string'?override:url).trim(); if(!u){ setLookMsg('Paste a YouTube channel URL first'); return; }
+    if(!ytWh){ return; }
+    setLooking(true); setLookMsg(''); setOnClose_(false);
+    fetch(ytWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u})})
+      .then(r=>r.json()).then(d=>{
+        if(d&&d.ok&&(d.name||d.subs)){
+          if(d.name) setName(d.name); if(d.subs) setFollowers(d.subs);
+          if(d.url) setUrl(d.url); if(d.channelId) setChannelId(d.channelId);
+          setPlatform('YouTube');
+          setLookMsg(`✓ Pulled “${d.name||'channel'}”${d.subs?` · ${d.subs} subs`:''}`);
+          // Non-blocking Close duplicate check
+          if(checkWh){ fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads:[{key:0,channelId:d.channelId,url:d.url||u,emails:emails.split(/[,;\s]+/)}]})})
+            .then(r=>r.json()).then(c=>{ if(c&&(c.existing||[]).length) setOnClose_(true); }).catch(()=>{}); }
+        } else { setLookMsg("Couldn't read that channel — fill it in manually"); }
+      })
+      .catch(()=>setLookMsg("Lookup failed — fill it in manually"))
+      .finally(()=>setLooking(false));
+  }
   function submit(e){ e.preventDefault(); const n=name.trim(); if(!n) return;
     onAdd({
       id: Date.now()+Math.floor(Math.random()*1e6),
-      channelName:n, url:url.trim(), platform, niche:niche.trim(), followers:followers.trim(),
+      channelName:n, url:url.trim(), channelId, platform, niche:niche.trim(), followers:followers.trim(),
       emails: emails.split(/[,;\s]+/).map(x=>x.trim()).filter(Boolean),
       tags:[], campaigns:[], assignedTo:rep, dateAssigned:new Date().toISOString().split('T')[0],
       lastContactDate:null, channels:[n], addedAt:new Date().toISOString(), source:'manual',
@@ -1939,16 +1965,22 @@ function AddLeadModal({rep,config,onAdd,onClose}) {
           <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
         </div>
         <form onSubmit={submit} style={{display:'flex',flexDirection:'column',gap:12}}>
+          <div className="form-group"><label className="form-label">Channel URL <span style={{fontWeight:400,color:'var(--text-light)'}}>— paste & auto‑fill</span></label>
+            <div style={{display:'flex',gap:6}}>
+              <input value={url} onChange={e=>setUrl(e.target.value)} onPaste={e=>{ try{ const v=((e.clipboardData||window.clipboardData).getData('text')||'').trim(); if(/youtu\.?be|youtube\.com|^@|^UC/i.test(v)){ setUrl(v); setTimeout(()=>lookup(v),0); } }catch(err){} }} placeholder="https://youtube.com/@… or /channel/UC…" style={{flex:1}}/>
+              <button type="button" className="btn btn-outline btn-sm" disabled={looking||!url.trim()} onClick={lookup}>{looking?'…':'🔍 Fetch'}</button>
+            </div>
+            {lookMsg && <div style={{fontSize:12,marginTop:5,color:lookMsg[0]==='✓'?'var(--success,#00875A)':'var(--text-dim)'}}>{lookMsg}</div>}
+            {onClose_ && <div style={{fontSize:12,marginTop:6,background:'#FFF4E5',color:'#B45309',padding:'6px 9px',borderRadius:6,lineHeight:1.45}}>⚠ This channel is already in your <b>Close database</b>. You can still add it (e.g. a recycle lead) — just flagging it.</div>}
+          </div>
           <div className="form-group"><label className="form-label">Channel Name *</label>
-            <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Bites with Lily" autoFocus/></div>
+            <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Bites with Lily"/></div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
             <div className="form-group"><label className="form-label">Platform</label>
               <select value={platform} onChange={e=>setPlatform(e.target.value)} style={{width:'100%'}}>{(typeof PLATFORMS!=='undefined'?PLATFORMS:['YouTube']).map(p=><option key={p}>{p}</option>)}</select></div>
             <div className="form-group"><label className="form-label">Followers / Subs</label>
               <input value={followers} onChange={e=>setFollowers(e.target.value)} placeholder="e.g. 120K"/></div>
           </div>
-          <div className="form-group"><label className="form-label">Channel URL</label>
-            <input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://youtube.com/@…"/></div>
           <div className="form-group"><label className="form-label">Niche / Category</label>
             <input value={niche} onChange={e=>setNiche(e.target.value)} placeholder="e.g. Cooking"/></div>
           <div className="form-group"><label className="form-label">Email(s)</label>
