@@ -206,3 +206,327 @@ var SAMPLE_HISTORY = [];
 // feeds). Shape: { id, rep, source:'SmartReach'|'Close', name, email,
 //   sentiment:'Interested'|'Neutral'|'Not interested'|'Reply', snippet, when, campaign }
 var SAMPLE_REPLIES = [];
+
+// ── KNOWLEDGE BASE ARTICLES ────────────────────────────────
+// The Sales Operations Manual, rendered in the 📚 Knowledge Base tab.
+// (Passwords from the source doc are intentionally redacted — ask an admin.)
+var KB_ARTICLES = [
+{ id:'ch1', chapter:'1 · Company Overview', title:'Company Overview', body:
+`## About Enfinity
+Enfinity is a **Creator Service Provider (CSP)**, formerly a Multi-Channel Network (MCN). A CSP partners with creators to help grow, protect, and monetize their content across platforms.
+
+Founded in 2020 by creators, with a simple mission: **Do what is right for creators, no matter what.** Enfinity remains 100% creator and founder owned.
+
+## Core Values
+- **Creators Come First** — everything is designed around creators' needs.
+- **Always Help Those In Need (AHTIN)** — a service-first mindset.
+- **Creators Make the Rules** — creators keep ownership of content, brand, audience & decisions.
+- **Long-Term Partnerships** — sustainable, long-term value.
+
+## What We Do
+### 1. Content Distribution (Microsoft)
+- **Adcelerate** — distribute & monetize videos on Microsoft platforms.
+- **EnfiniBoost** — the same Microsoft distribution under the Enfinity ecosystem.
+Benefits: additional revenue, distribution to MSN & Microsoft properties, increased reach, managed publishing. Platforms: MSN, Microsoft Start, Bing, Microsoft Edge, Xbox.
+
+### 2. Copyright Protection
+- **CreatorShield** — identify, track & monetize unauthorized uploads on YouTube.
+- **EnfiniShield** — the same protection under the Enfinity ecosystem.
+Benefits: Content ID management, unauthorized-content tracking, revenue recovery, rights management.
+
+### 3. Licensed Content Library
+- **Very Viral Videos (VVV)** — millions of licensed clips for compilation/reaction content with full usage rights.
+
+### 4. Creator Service Provider (CSP)
+Additional support, business resources, monetization, and creator perks.
+
+## The Enfinity Dashboard
+The central hub for enrolled creators — view earnings & performance, manage payouts, track transactions, access services & perks, manage settings.` },
+
+{ id:'ch2-msn', chapter:'2 · Services', title:'MSN — Adcelerate & EnfiniBoost', body:
+`## Service Overview
+Adcelerate & EnfiniBoost distribute creator content across Microsoft-owned properties (MSN, Microsoft Start, Bing, Microsoft Edge, Xbox), earning additional revenue while creators keep ownership.
+
+## Program Benefits
+- Additional revenue beyond YouTube/social
+- Wider distribution & increased reach
+- Managed publishing by Enfinity
+- Access to Microsoft's content ecosystem
+- No need to create additional content
+
+## Content & Upload Requirements
+- Original, high-quality content, consistent uploads, strong catalog.
+- **English channels:** last upload within **2 weeks**.
+- **Other markets:** last upload within **1 month**.
+- Channels with no recent uploads should not be qualified.
+
+## Markets to Avoid
+Turkish, Arabic, Indonesian, Indian, Hindi-speaking (lower monetization).
+
+## Low-Priority Categories (case-by-case)
+Toy Reviews, Tech Reviews, Arts, Drawing, Cosplay, Makeup, ASMR, Gaming.
+
+## Platform Qualification
+### YouTube (preferred — long or short form)
+- **Subscribers:** 10,000
+- **Total Videos:** 300
+- **Avg Views/Video:** 1,000
+- **Upload Activity:** Active
+
+*Exception:* under 10,000 subs may still qualify with exceptional quality, consistent uploads, an extensive catalog, and strong engagement — review carefully.
+
+### TikTok
+- **Followers:** 100,000 · **Likes:** 300,000 · **Videos:** 300 · **Avg Views:** 1,000
+
+### Instagram / Facebook
+- **Followers:** 100,000 · **Videos:** 300 · **Avg Views:** 1,000
+
+## Lead Qualification Checklist
+☐ Original content
+☐ Meets platform requirements
+☐ Active uploader
+☐ Meets upload timeframe
+☐ Strong content quality
+☐ Email available
+☐ Email validated (ZeroBounce)
+☐ Not already in the lead database
+☐ Appropriate market & niche
+
+## Notes for Sales
+- Quality > follower count. YouTube is the primary MSN platform.
+- Review borderline cases before disqualifying; escalate if uncertain.
+- Always validate emails via ZeroBounce and check for duplicates.` },
+
+{ id:'ch2-cs', chapter:'2 · Services', title:'CreatorShield & EnfiniShield', body:
+`## Service Overview
+Copyright protection & digital rights management. Helps creators identify, track & monetize unauthorized uses of their content on YouTube via Content ID — recovering revenue from reuploads and strengthening IP control.
+
+## Program Benefits
+Copyright protection · unauthorized-content detection · revenue recovery from reuploads · Content ID management · rights management · ongoing monitoring.
+
+## Ideal Creator Profile
+Creators who produce original content, own their rights, create unique material consistently, have an established audience, and whose content is frequently reused by others.
+
+## Qualification Requirements
+- **Followers/Subscribers:** 100,000
+- **Total Likes:** 500,000
+- **Total Uploads:** 50 videos
+- **Content Ownership:** original content required (all content owned by the creator)
+
+## Content Ownership
+Must own the rights, appear in / create / produce the content, have authority to grant Content ID rights, and avoid significant third-party material.
+
+## Disqualified Markets
+India, Pakistan, Russia, Turkey, Indonesia.
+
+## Non-Eligible Content
+- **Copyright/ownership risks:** copyrighted, compiled/movie/TV/series clips, celebrity/athlete clips, reaction videos, compilations, TikTok duets/stitch, split-screen.
+- **Music:** music videos, DJ content, lyric videos, lip-sync.
+- **Gaming:** all gaming content.
+- **AI/third-party:** AI-generated content/videos, AI-tool & third-party-software tutorials.
+- **Product/promo:** product reviews, promotional/sponsored, business-focused.
+- **Restricted:** politics, religion, crime, violence, firearms, drugs, adult/explicit, profanity-heavy, dangerous pranks/acts.
+- **Children's:** toy reviews/unboxing, slime, squishy.
+- **Other:** anime/digital art with copyrighted characters, mukbang, general public-frame, travel vlogs of public locations without creator participation.
+
+## Special Review Cases
+Travel, educational, commentary, mixed-format channels — escalate rather than auto-qualify.
+
+## Lead Qualification Checklist
+☐ Creator owns the content
+☐ Content is original
+☐ Meets follower/like/upload minimums
+☐ No significant third-party material
+☐ Not a restricted country
+☐ Eligible content category
+☐ Email available & validated (ZeroBounce)
+☐ Not already in the database
+
+## Notes for Sales
+- Original content ownership is the most important factor.
+- If ownership is unclear, don't qualify immediately — escalate.
+- Quality & ownership > follower count.` },
+
+{ id:'ch2-vvv', chapter:'2 · Services', title:'Very Viral Videos (VVV)', body:
+`## Service Overview
+A licensed video library giving creators access to thousands of licensed clips for compilation/reaction content. Primarily for compilation channels — monetizable compilation videos with reduced copyright risk.
+
+## Program Benefits
+Licensed viral clips · thousands available · full usage rights · built for compilation creators · additional monetization · reduced copyright risk · continuous new content.
+
+## Best-Suited Content
+Compilation, viral, reaction, and entertainment-compilation channels — or creators expanding into compilation content. Prioritize channels already publishing random compilations.
+
+## Qualification
+- **Active channels:** uploaded within the last **3 months**, primarily random compilations, active & operational. (No minimum views.)
+- **Aged channels:** ≥ **50,000 SocialBlade views in the last 30 days** + primarily random compilations.
+- **Monetized channels:** eligible if a legitimate compilation channel (not primarily original creator-owned content).
+- **Subscribers:** no minimum — evaluate by content type & activity.
+
+## Non-Eligible Content
+- **Restricted:** black/racial/religious/political/crime/violence/explicit/sexual/adult.
+- **Entertainment:** anime series, movie clips, documentaries, K-Pop compilations, specific creator/influencer compilations.
+- **Children's:** toy, slime, squishy.
+- **Other:** gaming, POV, mukbang, promotional, business, product promos, AI-generated.
+
+## Restricted Markets
+India, Pakistan, Russia.
+
+## Video Length
+Channels primarily **under 4 minutes** are not eligible — prioritize longer-form compilation content.
+
+## Lead Qualification Checklist
+☐ Primarily compilation content
+☐ Random compilations
+☐ Upload activity within 3 months
+☐ Eligible category
+☐ Videos generally > 4 minutes
+☐ Not restricted category/market
+☐ Email available & validated (ZeroBounce)
+☐ Not already in the database
+
+## Notes for Sales
+- Goal: recruit compilation creators (reuploaders are strong candidates).
+- Original creators are generally not the target.
+- Review content quality/legitimacy; escalate if uncertain.` },
+
+{ id:'ch3', chapter:'3 · Sales Process', title:'End-to-End Sales Process (18 steps)', body:
+`## Overview
+The Sales Team sources qualified creators, runs outreach, manages relationships, and supports onboarding — tracking every qualified creator from first contact through activation & submission.
+
+## Process Flow
+Lead Generation → Lead Validation → Lead Assignment → CRM Import → Outreach Campaign → Creator Response → Signup → Qualification Review → Dashboard Invitation → KYC & Payment → Submission → Approval/Rejection → Ongoing Management
+
+## Step 1 — Lead Generation
+Manually scrape qualifying creators from YouTube, Instagram, TikTok, Facebook (Infludata optional). Review the qualification requirements for each service before adding.
+
+## Step 2 — Lead Validation & Encoding
+Enter qualified leads into the Lead Database: Account Name, Channel/Page URL, Email, Service Qualification. Validate all emails via **ZeroBounce** — only valid emails are added.
+
+## Step 3 — Daily Lead Assignment
+**Cut-off: 4:30 PM.** Leads move to the Assigning Tab, become the official daily record, and are assigned to the rep who sourced them.
+
+## Step 4 — Import into Close CRM
+Assigned leads go into **Close** — the primary platform for lead tracking, inbox, follow-ups, tasks, and communication history.
+
+## Step 5 — Import into SmartReach
+Export via CSV → upload to SmartReach → assign to the right campaign (MSN, CreatorShield/EnfiniShield, or VVV).
+
+## Step 6 — Campaign Launch
+Launch in SmartReach per the approved schedule. Monitor performance, track replies, manage responses.
+
+## Step 7 — Creator Communication
+Replies arrive in the **Close Inbox**. Monitor daily, respond promptly, personalize, address concerns. **Calls are strongly encouraged** — they build trust and improve conversion.
+
+## Step 8 — Signup Monitoring
+Manager reviews signups daily. Qualified creators are added to the **Enfinity Clients Database** (Full Name, Country, Social Links, Service Enrolled).
+
+## Step 9 — Service Review
+- **MSN:** if opted into CID → Ingest Team → MS Team → approved for dashboard invite.
+- **CreatorShield/EnfiniShield:** Ingest Team → Content ID eligibility verified.
+- **VVV:** added to database → dashboard invite → asset label assigned.
+
+## Step 10 — Dashboard Invitation
+- **Adcelerate:** sent manually.
+- **EnfiniBoost:** approved in-dashboard → automatic invite.
+- **VVV:** sent manually via recruit link.
+
+## Step 11 — KYC & Payment Setup
+Creators activate dashboard access, complete **Tipalti** registration & KYC — mandatory before CID ingestion, MSN submission, or revenue processing.
+
+## Step 12 — Sales Follow-Up
+Manager creates a Close task → assigned rep sends the approved signup email → schedule follow-ups until the dashboard is activated and Tipalti is completed.
+
+## Step 13 — MSN Submission
+Creator submitted to Microsoft → review queue → approval/rejection. Processing times vary.
+
+## Step 14 — Approved Creators
+Nette endorses to Rein → Rein updates dashboard info → Close task → Sales notifies the creator. Provide creator updates **quarterly**.
+
+## Step 15 — Rejected Creators
+Update dashboard access → Close task → notify creator. Review upsell options (CID, VVV). **MCN upsells handled by Czarina.**
+
+## Step 16 — Pipeline Monitoring
+Monitor: New Leads, Active Campaigns, Pending Replies/Signups/Review/Dashboard Activation/Tipalti/KYC/CID Ingestion/MSN Submission, Approved & Rejected creators.
+
+## Step 17 — Escalation
+- **Sales concerns:** Chai, Rein
+- **Revenue & earnings:** Czarina
+
+## Step 18 — Performance Monitoring
+Reviewed monthly: lead generation, outreach, reply management, follow-ups, conversions, CRM updates, pipeline, communication quality.` },
+
+{ id:'ch4', chapter:'4 · Tools & Systems', title:'Tools & Systems (with links)', body:
+`## Infludata — lead generation & research
+Creator discovery, audience analysis, channel research, qualification, sourcing.
+🔗 https://app.infludata.com/search
+
+## Google Sheets — lead database & monitoring
+Lead storage, assignment, duplicate checking, monitoring, tracking, reporting.
+Key sheets: **Lead Database** (Leads) · **Enfinity Clients Database** · **Monitoring** (SALES MONITORING 2026).
+
+## ZeroBounce — email validation
+Email verification, bounce prevention, quality control. **Only validated emails go into the database.**
+🔗 https://www.zerobounce.net/members/signin
+
+## Close CRM — primary CRM
+Lead management, email, tasks, pipeline, inbox, activity logging.
+🔗 https://app.close.com/tasks/inbox/
+
+## SmartReach — outreach
+Campaign management, automated follow-ups, scheduling, sequencing, performance.
+🔗 https://app.smartreach.io/
+
+## Enfinity Dashboard — creator platform
+Onboarding, activation, revenue tracking, performance, service management.
+🔗 https://app.enfinity.com/
+**VVV Dashboard:** https://staff.veryviralvideos.com/ — Login: support@veryviralvideos.com · Password: 🔒 ask an admin
+
+## Tipalti — payments
+Payment setup, tax docs, KYC. Dashboard activation + Tipalti are required before onboarding/monetization.
+🔗 https://hub.tipalti.com/login/login-user-name — Login: cyril@enfinity.co · Password: 🔒 ask an admin
+
+## Dropbox Sign (HelloSign) — contracts
+Send, track & manage creator agreements. Edit requests: escalate to Management → approval → update → upload → send for signature. **Never approve/modify contract terms without management approval.**
+🔗 https://app.hellosign.com/ — Username: contracts@enfinity.com · Password: 🔒 ask an admin
+Contracts: MCN Partnership · EnfiniShield · EnfiniBoost/Adcelerate · VeryViralVideos Content Distribution.
+
+## SocialBlade — research & performance
+Channel growth tracking, monthly view analysis, VVV qualification review.
+🔗 https://socialblade.com/
+
+## Gmail — direct communication
+Outreach, follow-ups, creator support, internal comms.
+
+## Email Templates
+SALES TEMPLATES 2026.
+
+> Keep all tools updated and used per company procedures — accurate records & timely documentation are essential.` },
+
+{ id:'ch5', chapter:'5 · Commission', title:'Commission Structure & Rules', body:
+`## Overview
+The Sales Commission Program rewards onboarding creators into Enfinity services. A creator is a **completed sale** only once all onboarding steps for the service are finished.
+
+## MCN Commission
+- Contract signed (**100% Revenue Share**) + CMS invite accepted — **$100**
+- Contract signed (**Revenue Split**) + CMS invite accepted — **$200**
+Requires: fully signed contract + CMS invitation accepted + successful onboarding.
+
+## CreatorShield / EnfiniShield
+- Individual creator — **$30**
+- Agency — **$200**
+Complete when: approved internally + dashboard invite sent + dashboard activated + Tipalti/payment completed. *(No Tipalti = pending, no commission.)*
+
+## Adcelerate / EnfiniBoost
+- Individual creator — **$50**
+- Agency — **$200**
+- High Ticket creator — **$200**
+Complete only when **all three** are met: Microsoft approval + dashboard activation + Tipalti setup. Rejected by Microsoft, or incomplete activation/Tipalti = not a completed sale.
+
+## Very Viral Videos (VVV)
+- Individual creator — **$25 + 10% of first revenue generated**
+Complete when: dashboard activated + first upload submitted to VVV. The $25 is eligible once the first upload is submitted; the 10% bonus is paid after the creator generates first revenue. *(Dashboard activation alone is not a completed sale.)*
+
+## General Rules
+Commissions are only for completed sales meeting all requirements. Reps must actively monitor & follow up (pending signups, contracts, activations, Tipalti, KYC, CID/MSN reviews, Microsoft decisions, CMS acceptance, VVV activations & first uploads) until completion. **Disputes → escalate to Management.**` },
+];

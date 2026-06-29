@@ -1395,48 +1395,81 @@ function CloseSearchView({config}) {
 }
 
 // ─── KNOWLEDGE BASE ───────────────────────────────────────
-// Shared link library (guides, docs, references). Everyone views; admins add/remove.
+// The Sales Operations Manual (KB_ARTICLES) as a navigable, searchable site,
+// plus an admin-managed Quick Links list (kb_links in Supabase).
+function kbInline(s){
+  const nodes=[]; let k=0, last=0; const re=/(\*\*(.+?)\*\*)|(https?:\/\/[^\s)]+)/g; let m;
+  while((m=re.exec(s))){
+    if(m.index>last) nodes.push(s.slice(last,m.index));
+    if(m[1]) nodes.push(<strong key={k++}>{m[2]}</strong>);
+    else if(m[3]) nodes.push(<a key={k++} href={m[3]} target="_blank" rel="noreferrer" style={{color:'var(--accent)',wordBreak:'break-all'}}>{m[3]}</a>);
+    last=re.lastIndex;
+  }
+  if(last<s.length) nodes.push(s.slice(last));
+  return nodes;
+}
+function renderKbBody(text){
+  const lines=String(text||'').split('\n'); const out=[]; let ul=null; let k=0;
+  const flush=()=>{ if(ul){ out.push(<ul key={'ul'+k++} style={{margin:'4px 0 10px',paddingLeft:20}}>{ul}</ul>); ul=null; } };
+  lines.forEach(raw=>{
+    const line=raw.replace(/ /g,' ').trim();
+    if(!line){ flush(); return; }
+    if(line.startsWith('### ')){ flush(); out.push(<h4 key={k++} style={{margin:'14px 0 4px',fontSize:14,fontWeight:700}}>{kbInline(line.slice(4))}</h4>); return; }
+    if(line.startsWith('## ')){ flush(); out.push(<h3 key={k++} style={{margin:'20px 0 6px',fontSize:16.5,fontWeight:700,borderBottom:'1px solid var(--border)',paddingBottom:4}}>{kbInline(line.slice(3))}</h3>); return; }
+    if(line.startsWith('> ')){ flush(); out.push(<div key={k++} style={{borderLeft:'3px solid var(--accent)',padding:'7px 11px',margin:'8px 0',background:'var(--bg)',borderRadius:6,fontSize:13}}>{kbInline(line.slice(2))}</div>); return; }
+    if(line.startsWith('☐ ')){ flush(); out.push(<div key={k++} style={{margin:'2px 0',fontSize:13.5}}>▢ {kbInline(line.slice(2))}</div>); return; }
+    if(line.startsWith('- ')){ ul=ul||[]; ul.push(<li key={k++} style={{margin:'3px 0',lineHeight:1.55}}>{kbInline(line.slice(2))}</li>); return; }
+    flush(); out.push(<p key={k++} style={{margin:'7px 0',lineHeight:1.6}}>{kbInline(line)}</p>);
+  });
+  flush(); return out;
+}
 function KnowledgeBaseView({kb,isAdmin,onAdd,onDelete}) {
-  const [title,setTitle]=useState('');
-  const [url,setUrl]=useState('');
-  const [category,setCategory]=useState('');
-  const [desc,setDesc]=useState('');
-  const [showForm,setShowForm]=useState(false);
-  function submit(e){ e.preventDefault(); if(!title.trim()||!url.trim()) return; onAdd({title,url,category:category||'General',description:desc}); setTitle('');setUrl('');setCategory('');setDesc(''); setShowForm(false); }
-  const cats={}; kb.forEach(l=>{ const c=l.category||'General'; (cats[c]=cats[c]||[]).push(l); });
-  const catNames=Object.keys(cats).sort();
+  const articles=(typeof KB_ARTICLES!=='undefined'?KB_ARTICLES:[]);
+  const [sel,setSel]=useState(articles[0]?articles[0].id:'');
+  const [q,setQ]=useState('');
+  const [adding,setAdding]=useState(false);
+  const [lt,setLt]=useState(''); const [lu,setLu]=useState('');
+  const ql=q.trim().toLowerCase();
+  const navArticles= ql ? articles.filter(a=>(a.title+' '+a.body).toLowerCase().includes(ql)) : articles;
+  const current=articles.find(a=>a.id===sel)||articles[0];
+  const chapters={}; navArticles.forEach(a=>{ (chapters[a.chapter]=chapters[a.chapter]||[]).push(a); });
+  function addLink(e){ e.preventDefault(); if(!lt.trim()||!lu.trim()) return; onAdd({title:lt,url:lu,category:'Quick Links',description:''}); setLt('');setLu('');setAdding(false); }
   return (
     <div className="home-content">
-      <div className="card">
-        <div className="card-header" style={{display:'flex',alignItems:'center',gap:10}}>
-          <div className="card-title">📚 Knowledge Base <span style={{fontWeight:400,color:'var(--text-dim)',fontSize:12}}>· {kb.length} link{kb.length!==1?'s':''}</span></div>
-          {isAdmin && <button className="btn btn-primary btn-sm" style={{marginLeft:'auto'}} onClick={()=>setShowForm(s=>!s)}>{showForm?'✕ Cancel':'➕ Add Link'}</button>}
-        </div>
-        {isAdmin && showForm && <div className="card-body" style={{borderTop:'1px solid var(--border)'}}>
-          <form onSubmit={submit} style={{display:'flex',flexWrap:'wrap',gap:10,alignItems:'flex-end'}}>
-            <div style={{display:'flex',flexDirection:'column',gap:4,flex:'1 1 200px'}}><label className="form-label">Title *</label><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Scraper guide"/></div>
-            <div style={{display:'flex',flexDirection:'column',gap:4,flex:'1 1 240px'}}><label className="form-label">URL *</label><input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://…"/></div>
-            <div style={{display:'flex',flexDirection:'column',gap:4,flex:'0 0 160px'}}><label className="form-label">Category</label><input value={category} onChange={e=>setCategory(e.target.value)} placeholder="General" list="kb-cats"/><datalist id="kb-cats">{catNames.map(c=><option key={c} value={c}/>)}</datalist></div>
-            <div style={{display:'flex',flexDirection:'column',gap:4,flex:'1 1 100%'}}><label className="form-label">Description</label><input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Short description (optional)"/></div>
-            <button type="submit" className="btn btn-primary" disabled={!title.trim()||!url.trim()}>Add Link</button>
-          </form>
-        </div>}
-      </div>
-      {kb.length===0 && <div className="card"><div className="card-body" style={{textAlign:'center',color:'var(--text-dim)',padding:'28px'}}>No knowledge base links yet.{isAdmin?' Click “➕ Add Link” to add one.':''}</div></div>}
-      {catNames.map(c=>(
-        <div className="card" key={c}>
-          <div className="card-header"><div className="card-title" style={{fontSize:14}}>{c}</div></div>
-          <div className="card-body" style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
-            {cats[c].map(l=>(
-              <div key={l.id} style={{border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px',display:'flex',flexDirection:'column',gap:6,position:'relative'}}>
-                <a href={l.url} target="_blank" rel="noreferrer" style={{fontWeight:700,fontSize:14,color:'var(--accent)',textDecoration:'none',paddingRight:isAdmin?22:0}}>{l.title} ↗</a>
-                {l.description && <div style={{fontSize:12.5,color:'var(--text-dim)',lineHeight:1.5}}>{l.description}</div>}
-                {isAdmin && <button title="Remove link" style={{position:'absolute',top:8,right:8,background:'none',border:'none',cursor:'pointer',color:'#DE350B',fontSize:13}} onClick={()=>onDelete(l)}>🗑</button>}
+      <div style={{display:'flex',gap:16,alignItems:'flex-start'}}>
+        <div className="card" style={{flex:'0 0 250px',position:'sticky',top:0,maxHeight:'calc(100vh - 90px)',display:'flex',flexDirection:'column'}}>
+          <div style={{padding:12,borderBottom:'1px solid var(--border)'}}>
+            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Search the manual…" style={{width:'100%',padding:'8px 10px'}}/>
+          </div>
+          <div style={{padding:'4px 8px 10px',overflowY:'auto',flex:1}}>
+            {navArticles.length===0 && <div style={{padding:12,fontSize:13,color:'var(--text-dim)'}}>No sections match “{q}”.</div>}
+            {Object.keys(chapters).map(ch=>(
+              <div key={ch}>
+                <div style={{fontSize:10.5,fontWeight:700,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'.04em',padding:'12px 8px 4px'}}>{ch}</div>
+                {chapters[ch].map(a=>{ const on=current&&current.id===a.id; return (
+                  <div key={a.id} onClick={()=>{setSel(a.id);setQ('');}} style={{padding:'7px 10px',borderRadius:6,cursor:'pointer',fontSize:13,fontWeight:on?600:400,color:on?'var(--sidebar-text-active)':'var(--text)',background:on?'var(--sidebar-active)':'transparent'}}>{a.title}</div>
+                );})}
               </div>
             ))}
+            <div style={{fontSize:10.5,fontWeight:700,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'.04em',padding:'14px 8px 4px',display:'flex',alignItems:'center'}}>🔗 Quick Links{isAdmin&&<button onClick={()=>setAdding(s=>!s)} title="Add link" style={{marginLeft:'auto',background:'none',border:'none',cursor:'pointer',color:'var(--accent)',fontSize:13}}>{adding?'✕':'➕'}</button>}</div>
+            {isAdmin&&adding&&<form onSubmit={addLink} style={{padding:'2px 8px 6px',display:'flex',flexDirection:'column',gap:5}}>
+              <input value={lt} onChange={e=>setLt(e.target.value)} placeholder="Title" style={{fontSize:12,padding:'5px 8px'}}/>
+              <input value={lu} onChange={e=>setLu(e.target.value)} placeholder="https://…" style={{fontSize:12,padding:'5px 8px'}}/>
+              <button type="submit" className="btn btn-primary btn-sm" disabled={!lt.trim()||!lu.trim()}>Add</button>
+            </form>}
+            {kb.map(l=>(<div key={l.id} style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px'}}>
+              <a href={l.url} target="_blank" rel="noreferrer" style={{fontSize:12.5,color:'var(--accent)',textDecoration:'none',flex:1}}>{l.title} ↗</a>
+              {isAdmin&&<button onClick={()=>onDelete(l)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#DE350B',fontSize:11}}>🗑</button>}
+            </div>))}
           </div>
         </div>
-      ))}
+        <div className="card" style={{flex:1,minWidth:0}}>
+          <div className="card-header"><div className="card-title">📚 {current?current.title:'Knowledge Base'}</div></div>
+          <div className="card-body" style={{maxWidth:780}}>
+            {current ? renderKbBody(current.body) : <div style={{color:'var(--text-dim)'}}>No content.</div>}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

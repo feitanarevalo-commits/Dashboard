@@ -2818,207 +2818,333 @@ function CloseSearchView({
 }
 
 // ─── KNOWLEDGE BASE ───────────────────────────────────────
-// Shared link library (guides, docs, references). Everyone views; admins add/remove.
+// The Sales Operations Manual (KB_ARTICLES) as a navigable, searchable site,
+// plus an admin-managed Quick Links list (kb_links in Supabase).
+function kbInline(s) {
+  const nodes = [];
+  let k = 0,
+    last = 0;
+  const re = /(\*\*(.+?)\*\*)|(https?:\/\/[^\s)]+)/g;
+  let m;
+  while (m = re.exec(s)) {
+    if (m.index > last) nodes.push(s.slice(last, m.index));
+    if (m[1]) nodes.push(/*#__PURE__*/React.createElement("strong", {
+      key: k++
+    }, m[2]));else if (m[3]) nodes.push(/*#__PURE__*/React.createElement("a", {
+      key: k++,
+      href: m[3],
+      target: "_blank",
+      rel: "noreferrer",
+      style: {
+        color: 'var(--accent)',
+        wordBreak: 'break-all'
+      }
+    }, m[3]));
+    last = re.lastIndex;
+  }
+  if (last < s.length) nodes.push(s.slice(last));
+  return nodes;
+}
+function renderKbBody(text) {
+  const lines = String(text || '').split('\n');
+  const out = [];
+  let ul = null;
+  let k = 0;
+  const flush = () => {
+    if (ul) {
+      out.push(/*#__PURE__*/React.createElement("ul", {
+        key: 'ul' + k++,
+        style: {
+          margin: '4px 0 10px',
+          paddingLeft: 20
+        }
+      }, ul));
+      ul = null;
+    }
+  };
+  lines.forEach(raw => {
+    const line = raw.replace(/ /g, ' ').trim();
+    if (!line) {
+      flush();
+      return;
+    }
+    if (line.startsWith('### ')) {
+      flush();
+      out.push(/*#__PURE__*/React.createElement("h4", {
+        key: k++,
+        style: {
+          margin: '14px 0 4px',
+          fontSize: 14,
+          fontWeight: 700
+        }
+      }, kbInline(line.slice(4))));
+      return;
+    }
+    if (line.startsWith('## ')) {
+      flush();
+      out.push(/*#__PURE__*/React.createElement("h3", {
+        key: k++,
+        style: {
+          margin: '20px 0 6px',
+          fontSize: 16.5,
+          fontWeight: 700,
+          borderBottom: '1px solid var(--border)',
+          paddingBottom: 4
+        }
+      }, kbInline(line.slice(3))));
+      return;
+    }
+    if (line.startsWith('> ')) {
+      flush();
+      out.push(/*#__PURE__*/React.createElement("div", {
+        key: k++,
+        style: {
+          borderLeft: '3px solid var(--accent)',
+          padding: '7px 11px',
+          margin: '8px 0',
+          background: 'var(--bg)',
+          borderRadius: 6,
+          fontSize: 13
+        }
+      }, kbInline(line.slice(2))));
+      return;
+    }
+    if (line.startsWith('☐ ')) {
+      flush();
+      out.push(/*#__PURE__*/React.createElement("div", {
+        key: k++,
+        style: {
+          margin: '2px 0',
+          fontSize: 13.5
+        }
+      }, "▢ ", kbInline(line.slice(2))));
+      return;
+    }
+    if (line.startsWith('- ')) {
+      ul = ul || [];
+      ul.push(/*#__PURE__*/React.createElement("li", {
+        key: k++,
+        style: {
+          margin: '3px 0',
+          lineHeight: 1.55
+        }
+      }, kbInline(line.slice(2))));
+      return;
+    }
+    flush();
+    out.push(/*#__PURE__*/React.createElement("p", {
+      key: k++,
+      style: {
+        margin: '7px 0',
+        lineHeight: 1.6
+      }
+    }, kbInline(line)));
+  });
+  flush();
+  return out;
+}
 function KnowledgeBaseView({
   kb,
   isAdmin,
   onAdd,
   onDelete
 }) {
-  const [title, setTitle] = useState('');
-  const [url, setUrl] = useState('');
-  const [category, setCategory] = useState('');
-  const [desc, setDesc] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  function submit(e) {
-    e.preventDefault();
-    if (!title.trim() || !url.trim()) return;
-    onAdd({
-      title,
-      url,
-      category: category || 'General',
-      description: desc
-    });
-    setTitle('');
-    setUrl('');
-    setCategory('');
-    setDesc('');
-    setShowForm(false);
-  }
-  const cats = {};
-  kb.forEach(l => {
-    const c = l.category || 'General';
-    (cats[c] = cats[c] || []).push(l);
+  const articles = typeof KB_ARTICLES !== 'undefined' ? KB_ARTICLES : [];
+  const [sel, setSel] = useState(articles[0] ? articles[0].id : '');
+  const [q, setQ] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [lt, setLt] = useState('');
+  const [lu, setLu] = useState('');
+  const ql = q.trim().toLowerCase();
+  const navArticles = ql ? articles.filter(a => (a.title + ' ' + a.body).toLowerCase().includes(ql)) : articles;
+  const current = articles.find(a => a.id === sel) || articles[0];
+  const chapters = {};
+  navArticles.forEach(a => {
+    (chapters[a.chapter] = chapters[a.chapter] || []).push(a);
   });
-  const catNames = Object.keys(cats).sort();
+  function addLink(e) {
+    e.preventDefault();
+    if (!lt.trim() || !lu.trim()) return;
+    onAdd({
+      title: lt,
+      url: lu,
+      category: 'Quick Links',
+      description: ''
+    });
+    setLt('');
+    setLu('');
+    setAdding(false);
+  }
   return /*#__PURE__*/React.createElement("div", {
     className: "home-content"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "card"
+    style: {
+      display: 'flex',
+      gap: 16,
+      alignItems: 'flex-start'
+    }
   }, /*#__PURE__*/React.createElement("div", {
-    className: "card-header",
+    className: "card",
+    style: {
+      flex: '0 0 250px',
+      position: 'sticky',
+      top: 0,
+      maxHeight: 'calc(100vh - 90px)',
+      display: 'flex',
+      flexDirection: 'column'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: 12,
+      borderBottom: '1px solid var(--border)'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: q,
+    onChange: e => setQ(e.target.value),
+    placeholder: "🔍 Search the manual…",
+    style: {
+      width: '100%',
+      padding: '8px 10px'
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '4px 8px 10px',
+      overflowY: 'auto',
+      flex: 1
+    }
+  }, navArticles.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: 12,
+      fontSize: 13,
+      color: 'var(--text-dim)'
+    }
+  }, "No sections match “", q, "”."), Object.keys(chapters).map(ch => /*#__PURE__*/React.createElement("div", {
+    key: ch
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10.5,
+      fontWeight: 700,
+      color: 'var(--text-dim)',
+      textTransform: 'uppercase',
+      letterSpacing: '.04em',
+      padding: '12px 8px 4px'
+    }
+  }, ch), chapters[ch].map(a => {
+    const on = current && current.id === a.id;
+    return /*#__PURE__*/React.createElement("div", {
+      key: a.id,
+      onClick: () => {
+        setSel(a.id);
+        setQ('');
+      },
+      style: {
+        padding: '7px 10px',
+        borderRadius: 6,
+        cursor: 'pointer',
+        fontSize: 13,
+        fontWeight: on ? 600 : 400,
+        color: on ? 'var(--sidebar-text-active)' : 'var(--text)',
+        background: on ? 'var(--sidebar-active)' : 'transparent'
+      }
+    }, a.title);
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10.5,
+      fontWeight: 700,
+      color: 'var(--text-dim)',
+      textTransform: 'uppercase',
+      letterSpacing: '.04em',
+      padding: '14px 8px 4px',
+      display: 'flex',
+      alignItems: 'center'
+    }
+  }, "🔗 Quick Links", isAdmin && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setAdding(s => !s),
+    title: "Add link",
+    style: {
+      marginLeft: 'auto',
+      background: 'none',
+      border: 'none',
+      cursor: 'pointer',
+      color: 'var(--accent)',
+      fontSize: 13
+    }
+  }, adding ? '✕' : '➕')), isAdmin && adding && /*#__PURE__*/React.createElement("form", {
+    onSubmit: addLink,
+    style: {
+      padding: '2px 8px 6px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 5
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: lt,
+    onChange: e => setLt(e.target.value),
+    placeholder: "Title",
+    style: {
+      fontSize: 12,
+      padding: '5px 8px'
+    }
+  }), /*#__PURE__*/React.createElement("input", {
+    value: lu,
+    onChange: e => setLu(e.target.value),
+    placeholder: "https://…",
+    style: {
+      fontSize: 12,
+      padding: '5px 8px'
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    className: "btn btn-primary btn-sm",
+    disabled: !lt.trim() || !lu.trim()
+  }, "Add")), kb.map(l => /*#__PURE__*/React.createElement("div", {
+    key: l.id,
     style: {
       display: 'flex',
       alignItems: 'center',
-      gap: 10
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-title"
-  }, "📚 Knowledge Base ", /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontWeight: 400,
-      color: 'var(--text-dim)',
-      fontSize: 12
-    }
-  }, "· ", kb.length, " link", kb.length !== 1 ? 's' : '')), isAdmin && /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-primary btn-sm",
-    style: {
-      marginLeft: 'auto'
-    },
-    onClick: () => setShowForm(s => !s)
-  }, showForm ? '✕ Cancel' : '➕ Add Link')), isAdmin && showForm && /*#__PURE__*/React.createElement("div", {
-    className: "card-body",
-    style: {
-      borderTop: '1px solid var(--border)'
-    }
-  }, /*#__PURE__*/React.createElement("form", {
-    onSubmit: submit,
-    style: {
-      display: 'flex',
-      flexWrap: 'wrap',
-      gap: 10,
-      alignItems: 'flex-end'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
       gap: 4,
-      flex: '1 1 200px'
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "form-label"
-  }, "Title *"), /*#__PURE__*/React.createElement("input", {
-    value: title,
-    onChange: e => setTitle(e.target.value),
-    placeholder: "e.g. Scraper guide"
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 4,
-      flex: '1 1 240px'
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "form-label"
-  }, "URL *"), /*#__PURE__*/React.createElement("input", {
-    value: url,
-    onChange: e => setUrl(e.target.value),
-    placeholder: "https://…"
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 4,
-      flex: '0 0 160px'
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "form-label"
-  }, "Category"), /*#__PURE__*/React.createElement("input", {
-    value: category,
-    onChange: e => setCategory(e.target.value),
-    placeholder: "General",
-    list: "kb-cats"
-  }), /*#__PURE__*/React.createElement("datalist", {
-    id: "kb-cats"
-  }, catNames.map(c => /*#__PURE__*/React.createElement("option", {
-    key: c,
-    value: c
-  })))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 4,
-      flex: '1 1 100%'
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "form-label"
-  }, "Description"), /*#__PURE__*/React.createElement("input", {
-    value: desc,
-    onChange: e => setDesc(e.target.value),
-    placeholder: "Short description (optional)"
-  })), /*#__PURE__*/React.createElement("button", {
-    type: "submit",
-    className: "btn btn-primary",
-    disabled: !title.trim() || !url.trim()
-  }, "Add Link")))), kb.length === 0 && /*#__PURE__*/React.createElement("div", {
-    className: "card"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-body",
-    style: {
-      textAlign: 'center',
-      color: 'var(--text-dim)',
-      padding: '28px'
-    }
-  }, "No knowledge base links yet.", isAdmin ? ' Click “➕ Add Link” to add one.' : '')), catNames.map(c => /*#__PURE__*/React.createElement("div", {
-    className: "card",
-    key: c
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-header"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-title",
-    style: {
-      fontSize: 14
-    }
-  }, c)), /*#__PURE__*/React.createElement("div", {
-    className: "card-body",
-    style: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))',
-      gap: 12
-    }
-  }, cats[c].map(l => /*#__PURE__*/React.createElement("div", {
-    key: l.id,
-    style: {
-      border: '1px solid var(--border)',
-      borderRadius: 10,
-      padding: '12px 14px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 6,
-      position: 'relative'
+      padding: '4px 8px'
     }
   }, /*#__PURE__*/React.createElement("a", {
     href: l.url,
     target: "_blank",
     rel: "noreferrer",
     style: {
-      fontWeight: 700,
-      fontSize: 14,
+      fontSize: 12.5,
       color: 'var(--accent)',
       textDecoration: 'none',
-      paddingRight: isAdmin ? 22 : 0
+      flex: 1
     }
-  }, l.title, " ↗"), l.description && /*#__PURE__*/React.createElement("div", {
+  }, l.title, " ↗"), isAdmin && /*#__PURE__*/React.createElement("button", {
+    onClick: () => onDelete(l),
+    title: "Remove",
     style: {
-      fontSize: 12.5,
-      color: 'var(--text-dim)',
-      lineHeight: 1.5
-    }
-  }, l.description), isAdmin && /*#__PURE__*/React.createElement("button", {
-    title: "Remove link",
-    style: {
-      position: 'absolute',
-      top: 8,
-      right: 8,
       background: 'none',
       border: 'none',
       cursor: 'pointer',
       color: '#DE350B',
-      fontSize: 13
-    },
-    onClick: () => onDelete(l)
-  }, "🗑")))))));
+      fontSize: 11
+    }
+  }, "🗑"))))), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title"
+  }, "📚 ", current ? current.title : 'Knowledge Base')), /*#__PURE__*/React.createElement("div", {
+    className: "card-body",
+    style: {
+      maxWidth: 780
+    }
+  }, current ? renderKbBody(current.body) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--text-dim)'
+    }
+  }, "No content.")))));
 }
 function HomeView({
   leads,
