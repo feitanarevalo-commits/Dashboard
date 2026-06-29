@@ -1397,21 +1397,79 @@ function CloseSearchView({config}) {
 // ─── KNOWLEDGE BASE ───────────────────────────────────────
 // The Sales Operations Manual (KB_ARTICLES) as a navigable, searchable site,
 // plus an admin-managed Quick Links list (kb_links in Supabase).
-// Tools & Systems "Launchpad" (from the Cowork v3 design handoff).
-function KbLaunchpad({tools,onManual}) {
+// Extract a short clean excerpt from an article's markdown body.
+function getKbExcerpt(body, n){
+  n=n||160;
+  const lines=String(body||'').split('\n');
+  for(const raw of lines){
+    const l=raw.trim();
+    if(!l) continue;
+    if(l[0]==='#'||l[0]==='>'||l[0]==='-'||l[0]==='☐') continue;
+    const plain=l.replace(/\*\*(.+?)\*\*/g,'$1');
+    return plain.length>n? plain.slice(0,n).trim()+'…' : plain;
+  }
+  return '';
+}
+// Unified Knowledge Base UI — Tools launchpad + Manual articles (same design language).
+function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack}) {
   // Accent options: Blue #2f6bf0/#7db0ff · Indigo #5b5bd6/#a6a6ff · Teal #0f9b8e/#67e8d5 · Violet #7c5cfc/#c4a6ff
   const accent='#5b5bd6', accentLight='#a6a6ff';
   const hexA=(hex,a)=>{ const n=parseInt(hex.slice(1),16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
   const accentRing=hexA(accent,.12);
   const CAT_COLORS={Research:'#2f6bf0',Data:'#0f9d58',CRM:'#1f6f6b',Outreach:'#7c3aed',Platform:'#5b5bd6',Finance:'#e0552f'};
+  const CHAPTER_COLORS={
+    '1 · Company Overview':'#5b5bd6',
+    '2 · Services':'#0f9b8e',
+    '3 · Sales Process':'#7c5cfc',
+    '4 · Tools & Systems':'#2f6bf0',
+    '5 · Commission':'#e0552f',
+  };
   const [query,setQuery]=useState(''); const [cat,setCat]=useState('All');
-  const all=tools||[];
-  const cats=['All',...Array.from(new Set(all.map(t=>t.category)))];
-  const q=query.trim().toLowerCase();
-  const shown=all.filter(t=>cat==='All'||t.category===cat).filter(t=>!q||(t.name+' '+t.tagline+' '+t.desc).toLowerCase().includes(q));
+  const isManual = view==='manual';
   const SG="'Space Grotesk',sans-serif";
+  const scrollRef=useRef(null);
+  // Reset filter + scroll when switching modes or opening/closing an article.
+  useEffect(()=>{ setQuery(''); setCat('All'); if(scrollRef.current) scrollRef.current.scrollTop=0; },[view, selected && selected.id]);
+
+  // ─── Article reader ─────────────────────────────────────────
+  if(selected){
+    const chapColor=CHAPTER_COLORS[selected.chapter]||accent;
+    return (
+      <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",color:'#1c1a26',background:'#f4f4f8'}}>
+        <div style={{position:'relative',overflow:'hidden',background:'#15131f',color:'#fff',padding:'28px 0 60px'}}>
+          <div style={{position:'absolute',width:560,height:380,borderRadius:'50%',top:-200,right:-80,background:`radial-gradient(circle, ${chapColor} 0%, transparent 70%)`,filter:'blur(80px)',opacity:.45,pointerEvents:'none'}}/>
+          <div style={{position:'relative',maxWidth:840,margin:'0 auto',padding:'0 40px'}}>
+            <span className="kbl-back" onClick={onBack} style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:13,fontWeight:600,color:'rgba(255,255,255,.7)',cursor:'pointer',marginBottom:22,userSelect:'none'}}>← Back to manual</span>
+            <div style={{fontSize:11,fontWeight:700,letterSpacing:'.12em',color:accentLight,marginBottom:10}}>{selected.chapter.replace(/^\d+ · /,'').toUpperCase()}</div>
+            <h1 style={{fontFamily:SG,fontWeight:700,fontSize:36,lineHeight:1.1,letterSpacing:'-.02em',margin:0,maxWidth:680}}>{selected.title}</h1>
+          </div>
+        </div>
+        <div style={{maxWidth:840,margin:'-28px auto 80px',padding:'0 40px',position:'relative'}}>
+          <div className="kb-article" style={{background:'#fff',borderRadius:18,border:'1px solid #ebeaf0',padding:'44px 52px',boxShadow:'0 18px 36px -18px rgba(20,18,40,.18)','--accent':accent,'--border':'#ebeaf0','--bg':'#f7f7fd','--text':'#1f1d2b','--text-dim':'#6b6878'}}>
+            {renderKbBody(selected.body)}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── List view (tools or manual) ───────────────────────────
+  let chips, items;
+  if(isManual){
+    chips=['All',...Array.from(new Set((articles||[]).map(a=>a.chapter)))];
+    const q=query.trim().toLowerCase();
+    items=(articles||[]).filter(a=>cat==='All'||a.chapter===cat).filter(a=>!q||(a.title+' '+a.body).toLowerCase().includes(q));
+  } else {
+    chips=['All',...Array.from(new Set((tools||[]).map(t=>t.category)))];
+    const q=query.trim().toLowerCase();
+    items=(tools||[]).filter(t=>cat==='All'||t.category===cat).filter(t=>!q||(t.name+' '+t.tagline+' '+t.desc).toLowerCase().includes(q));
+  }
+  const heroEyebrow=isManual?'SALES OPERATIONS MANUAL':'TOOLS & SYSTEMS — LAUNCHPAD';
+  const heroHeadline=isManual?'Everything you need to know, in one place.':'Everything the sales team runs on, one click away.';
+  const heroSub=isManual?'The full Sales Operations Manual — company, services, the 18-step sales process, tools, and commissions.':'Search, filter, and jump straight into any platform in the stack.';
+  const searchPh=isManual?'Search the manual…':'Search tools…';
   return (
-    <div style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",color:'#1c1a26',background:'#f4f4f8'}}>
+    <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",color:'#1c1a26',background:'#f4f4f8'}}>
       <div style={{position:'relative',overflow:'hidden',background:'#15131f',color:'#fff',padding:'40px 0 48px'}}>
         <div style={{position:'absolute',width:560,height:380,borderRadius:'50%',top:-160,right:-80,background:`radial-gradient(circle, ${accent} 0%, transparent 70%)`,filter:'blur(80px)',opacity:.5,pointerEvents:'none'}}/>
         <div style={{position:'relative',maxWidth:1040,margin:'0 auto',padding:'0 40px'}}>
@@ -1424,49 +1482,69 @@ function KbLaunchpad({tools,onManual}) {
               <span style={{fontSize:11,fontWeight:700,letterSpacing:'.04em',color:accentLight,background:accentRing,padding:'3px 9px',borderRadius:999}}>ENFINITY</span>
             </div>
             <div style={{display:'inline-flex',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.14)',borderRadius:10,padding:3,gap:2}}>
-              <span style={{padding:'6px 13px',borderRadius:7,fontSize:13,fontWeight:600,background:accent,color:'#fff'}}>🚀 Tools</span>
-              <span onClick={onManual} style={{padding:'6px 13px',borderRadius:7,fontSize:13,fontWeight:600,color:'rgba(255,255,255,.75)',cursor:'pointer'}} title="Open the full Sales Operations Manual">📖 Manual</span>
+              <span onClick={()=>onView('tools')} style={{padding:'7px 14px',borderRadius:7,fontSize:13,fontWeight:600,background:!isManual?accent:'transparent',color:!isManual?'#fff':'rgba(255,255,255,.75)',cursor:'pointer',userSelect:'none',transition:'all .15s'}}>🚀 Tools</span>
+              <span onClick={()=>onView('manual')} style={{padding:'7px 14px',borderRadius:7,fontSize:13,fontWeight:600,background:isManual?accent:'transparent',color:isManual?'#fff':'rgba(255,255,255,.75)',cursor:'pointer',userSelect:'none',transition:'all .15s'}}>📖 Manual</span>
             </div>
           </div>
-          <div style={{fontSize:11,fontWeight:700,letterSpacing:'.12em',color:accentLight,marginBottom:12}}>TOOLS &amp; SYSTEMS — LAUNCHPAD</div>
-          <h1 style={{fontFamily:SG,fontWeight:700,fontSize:40,lineHeight:1.05,letterSpacing:'-.025em',margin:'0 0 14px',maxWidth:560}}>Everything the sales team runs on, one click away.</h1>
-          <p style={{fontSize:16,lineHeight:1.55,color:'rgba(255,255,255,.6)',margin:'0 0 26px',maxWidth:480}}>Search, filter, and jump straight into any platform in the stack.</p>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'.12em',color:accentLight,marginBottom:12}}>{heroEyebrow}</div>
+          <h1 style={{fontFamily:SG,fontWeight:700,fontSize:40,lineHeight:1.05,letterSpacing:'-.025em',margin:'0 0 14px',maxWidth:620}}>{heroHeadline}</h1>
+          <p style={{fontSize:16,lineHeight:1.55,color:'rgba(255,255,255,.6)',margin:'0 0 26px',maxWidth:540}}>{heroSub}</p>
           <div style={{position:'relative',maxWidth:440}}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth="2.2" strokeLinecap="round" style={{position:'absolute',left:16,top:'50%',transform:'translateY(-50%)'}}><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-            <input className="kbl-search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search tools…" style={{width:'100%',padding:'13px 16px 13px 46px',fontFamily:'inherit',fontSize:15,color:'#fff',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.14)',borderRadius:13,outline:'none'}}/>
+            <input className="kbl-search" value={query} onChange={e=>setQuery(e.target.value)} placeholder={searchPh} style={{width:'100%',padding:'13px 16px 13px 46px',fontFamily:'inherit',fontSize:15,color:'#fff',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.14)',borderRadius:13,outline:'none'}}/>
           </div>
         </div>
       </div>
       <div style={{maxWidth:1040,margin:'0 auto',padding:'28px 40px 80px'}}>
         <div style={{display:'flex',flexWrap:'wrap',gap:9,marginBottom:26}}>
-          {cats.map(c=>{ const on=c===cat; return (
-            <div key={c} className="kbl-chip" onClick={()=>setCat(c)} style={{padding:'8px 15px',borderRadius:999,fontSize:13,fontWeight:600,cursor:'pointer',color:on?'#fff':'#5b5868',background:on?accent:'#fff',border:`1px solid ${on?accent:'#e6e5ec'}`}}>{c}</div>
+          {chips.map(c=>{ const on=c===cat; const label = isManual && c!=='All' ? c.replace(/^\d+ · /,'') : c; return (
+            <div key={c} className="kbl-chip" onClick={()=>setCat(c)} style={{padding:'8px 15px',borderRadius:999,fontSize:13,fontWeight:600,cursor:'pointer',color:on?'#fff':'#5b5868',background:on?accent:'#fff',border:`1px solid ${on?accent:'#e6e5ec'}`}}>{label}</div>
           );})}
         </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16}}>
-          {shown.map((t,i)=>{ const cc=CAT_COLORS[t.category]||accent; return (
-            <a key={t.name} className="kbl-tile" href={t.primaryHref} target="_blank" rel="noopener noreferrer" aria-label={'Open '+t.name} style={{display:'flex',flexDirection:'column',textDecoration:'none',background:'#fff',border:'1px solid #ebeaf0',borderRadius:18,padding:20,animationDelay:(i*0.04).toFixed(2)+'s'}}>
-              <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:13}}>
-                <div style={{flex:'0 0 46px',width:46,height:46,borderRadius:13,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:SG,fontWeight:700,fontSize:18,color:'#fff',background:t.color,boxShadow:`0 7px 16px -6px ${t.color}`}}>{t.name[0].toUpperCase()}</div>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontFamily:SG,fontWeight:700,fontSize:16,color:'#1f1d2b',lineHeight:1.2}}>{t.name}</div>
-                  <div style={{fontSize:12,fontWeight:600,color:accent,marginTop:2}}>{t.tagline}</div>
+          {isManual
+            ? items.map((a,i)=>{ const cc=CHAPTER_COLORS[a.chapter]||accent; const m=a.chapter.match(/^(\d+)/); const initial=m?m[1]:(a.chapter[0]||'?'); const chapShort=a.chapter.replace(/^\d+ · /,''); return (
+                <div key={a.id} className="kbl-tile" onClick={()=>onSelect(a.id)} style={{display:'flex',flexDirection:'column',cursor:'pointer',background:'#fff',border:'1px solid #ebeaf0',borderRadius:18,padding:20,animationDelay:(i*0.04).toFixed(2)+'s'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:13}}>
+                    <div style={{flex:'0 0 46px',width:46,height:46,borderRadius:13,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:SG,fontWeight:700,fontSize:18,color:'#fff',background:cc,boxShadow:`0 7px 16px -6px ${cc}`}}>{initial}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontFamily:SG,fontWeight:700,fontSize:16,color:'#1f1d2b',lineHeight:1.2}}>{a.title}</div>
+                      <div style={{fontSize:12,fontWeight:600,color:cc,marginTop:2}}>{chapShort}</div>
+                    </div>
+                    <span style={{flex:'0 0 auto',width:30,height:30,borderRadius:9,background:hexA(cc,.12),display:'flex',alignItems:'center',justifyContent:'center',color:cc}}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                    </span>
+                  </div>
+                  <p style={{fontSize:13.5,lineHeight:1.55,color:'#6b6878',margin:'0 0 14px',flex:1}}>{getKbExcerpt(a.body)}</p>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingTop:13,borderTop:'1px solid #f0eff4'}}>
+                    <span style={{fontSize:12,fontWeight:600,color:'#9c99a8'}}>Read article →</span>
+                    <span style={{fontSize:10.5,fontWeight:700,letterSpacing:'.05em',padding:'3px 9px',borderRadius:999,color:cc,background:hexA(cc,.12)}}>Chapter {initial}</span>
+                  </div>
                 </div>
-                <span style={{flex:'0 0 auto',width:30,height:30,borderRadius:9,background:accentRing,display:'flex',alignItems:'center',justifyContent:'center',color:accent}}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
-                </span>
-              </div>
-              <p style={{fontSize:13.5,lineHeight:1.55,color:'#6b6878',margin:'0 0 14px',flex:1}}>{t.desc}</p>
-              {t.note && <div style={{display:'flex',alignItems:'flex-start',gap:7,fontSize:12,lineHeight:1.45,color:'#8a5a00',background:'#fdf6e3',border:'1px solid #f5e6bd',borderRadius:9,padding:'8px 11px',marginBottom:12}}><span>⚠️</span><span>{t.note}</span></div>}
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingTop:13,borderTop:'1px solid #f0eff4'}}>
-                <span style={{fontSize:12,fontWeight:600,color:'#9c99a8',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.domain}</span>
-                <span style={{fontSize:10.5,fontWeight:700,letterSpacing:'.05em',padding:'3px 9px',borderRadius:999,color:cc,background:hexA(cc,.12)}}>{t.category}</span>
-              </div>
-            </a>
-          );})}
+              );})
+            : items.map((t,i)=>{ const cc=CAT_COLORS[t.category]||accent; return (
+                <a key={t.name} className="kbl-tile" href={t.primaryHref} target="_blank" rel="noopener noreferrer" aria-label={'Open '+t.name} style={{display:'flex',flexDirection:'column',textDecoration:'none',background:'#fff',border:'1px solid #ebeaf0',borderRadius:18,padding:20,animationDelay:(i*0.04).toFixed(2)+'s'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:13}}>
+                    <div style={{flex:'0 0 46px',width:46,height:46,borderRadius:13,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:SG,fontWeight:700,fontSize:18,color:'#fff',background:t.color,boxShadow:`0 7px 16px -6px ${t.color}`}}>{t.name[0].toUpperCase()}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontFamily:SG,fontWeight:700,fontSize:16,color:'#1f1d2b',lineHeight:1.2}}>{t.name}</div>
+                      <div style={{fontSize:12,fontWeight:600,color:accent,marginTop:2}}>{t.tagline}</div>
+                    </div>
+                    <span style={{flex:'0 0 auto',width:30,height:30,borderRadius:9,background:accentRing,display:'flex',alignItems:'center',justifyContent:'center',color:accent}}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
+                    </span>
+                  </div>
+                  <p style={{fontSize:13.5,lineHeight:1.55,color:'#6b6878',margin:'0 0 14px',flex:1}}>{t.desc}</p>
+                  {t.note && <div style={{display:'flex',alignItems:'flex-start',gap:7,fontSize:12,lineHeight:1.45,color:'#8a5a00',background:'#fdf6e3',border:'1px solid #f5e6bd',borderRadius:9,padding:'8px 11px',marginBottom:12}}><span>⚠️</span><span>{t.note}</span></div>}
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingTop:13,borderTop:'1px solid #f0eff4'}}>
+                    <span style={{fontSize:12,fontWeight:600,color:'#9c99a8',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.domain}</span>
+                    <span style={{fontSize:10.5,fontWeight:700,letterSpacing:'.05em',padding:'3px 9px',borderRadius:999,color:cc,background:hexA(cc,.12)}}>{t.category}</span>
+                  </div>
+                </a>
+              );})}
         </div>
-        {shown.length===0 && <div style={{textAlign:'center',padding:'60px 20px',color:'#8a8794'}}>
-          <div style={{fontFamily:SG,fontWeight:700,fontSize:18,color:'#5b5868',marginBottom:6}}>No tools found</div>
+        {items.length===0 && <div style={{textAlign:'center',padding:'60px 20px',color:'#8a8794'}}>
+          <div style={{fontFamily:SG,fontWeight:700,fontSize:18,color:'#5b5868',marginBottom:6}}>{isManual?'No articles found':'No tools found'}</div>
           <div style={{fontSize:14}}>Try a different search or filter.</div>
         </div>}
       </div>
@@ -1499,62 +1577,19 @@ function renderKbBody(text){
   });
   flush(); return out;
 }
-function KnowledgeBaseView({kb,isAdmin,onAdd,onDelete}) {
-  const [view,setView]=useState('launchpad');   // 'launchpad' (Tools) | 'manual'
+function KnowledgeBaseView(){
   const tools=(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[]);
   const articles=(typeof KB_ARTICLES!=='undefined'?KB_ARTICLES:[]);
-  const [sel,setSel]=useState(articles[0]?articles[0].id:'');
-  const [q,setQ]=useState('');
-  const [adding,setAdding]=useState(false);
-  const [lt,setLt]=useState(''); const [lu,setLu]=useState('');
-  const ql=q.trim().toLowerCase();
-  const navArticles= ql ? articles.filter(a=>(a.title+' '+a.body).toLowerCase().includes(ql)) : articles;
-  const current=articles.find(a=>a.id===sel)||articles[0];
-  const chapters={}; navArticles.forEach(a=>{ (chapters[a.chapter]=chapters[a.chapter]||[]).push(a); });
-  function addLink(e){ e.preventDefault(); if(!lt.trim()||!lu.trim()) return; onAdd({title:lt,url:lu,category:'Quick Links',description:''}); setLt('');setLu('');setAdding(false); }
-  if(view==='launchpad') return <KbLaunchpad tools={tools} onManual={()=>setView('manual')}/>;
-  return (
-    <div className="home-content">
-      <div style={{display:'inline-flex',alignSelf:'flex-start',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:3,gap:2,marginBottom:6}}>
-        <span onClick={()=>setView('launchpad')} style={{padding:'6px 13px',borderRadius:7,fontSize:13,fontWeight:600,color:'var(--text-dim)',cursor:'pointer'}}>🚀 Tools</span>
-        <span style={{padding:'6px 13px',borderRadius:7,fontSize:13,fontWeight:600,background:'var(--accent)',color:'#fff'}}>📖 Manual</span>
-      </div>
-      <div style={{display:'flex',gap:16,alignItems:'flex-start'}}>
-        <div className="card" style={{flex:'0 0 250px',position:'sticky',top:0,maxHeight:'calc(100vh - 90px)',display:'flex',flexDirection:'column'}}>
-          <div style={{padding:12,borderBottom:'1px solid var(--border)'}}>
-            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Search the manual…" style={{width:'100%',padding:'8px 10px'}}/>
-          </div>
-          <div style={{padding:'4px 8px 10px',overflowY:'auto',flex:1}}>
-            {navArticles.length===0 && <div style={{padding:12,fontSize:13,color:'var(--text-dim)'}}>No sections match “{q}”.</div>}
-            {Object.keys(chapters).map(ch=>(
-              <div key={ch}>
-                <div style={{fontSize:10.5,fontWeight:700,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'.04em',padding:'12px 8px 4px'}}>{ch}</div>
-                {chapters[ch].map(a=>{ const on=current&&current.id===a.id; return (
-                  <div key={a.id} onClick={()=>{setSel(a.id);setQ('');}} style={{padding:'7px 10px',borderRadius:6,cursor:'pointer',fontSize:13,fontWeight:on?600:400,color:on?'var(--sidebar-text-active)':'var(--text)',background:on?'var(--sidebar-active)':'transparent'}}>{a.title}</div>
-                );})}
-              </div>
-            ))}
-            <div style={{fontSize:10.5,fontWeight:700,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'.04em',padding:'14px 8px 4px',display:'flex',alignItems:'center'}}>🔗 Quick Links{isAdmin&&<button onClick={()=>setAdding(s=>!s)} title="Add link" style={{marginLeft:'auto',background:'none',border:'none',cursor:'pointer',color:'var(--accent)',fontSize:13}}>{adding?'✕':'➕'}</button>}</div>
-            {isAdmin&&adding&&<form onSubmit={addLink} style={{padding:'2px 8px 6px',display:'flex',flexDirection:'column',gap:5}}>
-              <input value={lt} onChange={e=>setLt(e.target.value)} placeholder="Title" style={{fontSize:12,padding:'5px 8px'}}/>
-              <input value={lu} onChange={e=>setLu(e.target.value)} placeholder="https://…" style={{fontSize:12,padding:'5px 8px'}}/>
-              <button type="submit" className="btn btn-primary btn-sm" disabled={!lt.trim()||!lu.trim()}>Add</button>
-            </form>}
-            {kb.map(l=>(<div key={l.id} style={{display:'flex',alignItems:'center',gap:4,padding:'4px 8px'}}>
-              <a href={l.url} target="_blank" rel="noreferrer" style={{fontSize:12.5,color:'var(--accent)',textDecoration:'none',flex:1}}>{l.title} ↗</a>
-              {isAdmin&&<button onClick={()=>onDelete(l)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#DE350B',fontSize:11}}>🗑</button>}
-            </div>))}
-          </div>
-        </div>
-        <div className="card" style={{flex:1,minWidth:0}}>
-          <div className="card-header"><div className="card-title">📚 {current?current.title:'Knowledge Base'}</div></div>
-          <div className="card-body" style={{maxWidth:780}}>
-            {current ? renderKbBody(current.body) : <div style={{color:'var(--text-dim)'}}>No content.</div>}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  const [view,setView]=useState('tools');           // 'tools' | 'manual'
+  const [selectedId,setSelectedId]=useState(null);
+  const selected = selectedId ? articles.find(a=>a.id===selectedId) : null;
+  return <KbLaunchpad
+    tools={tools} articles={articles}
+    view={view} onView={v=>{ setView(v); setSelectedId(null); }}
+    selected={selected}
+    onSelect={id=>setSelectedId(id)}
+    onBack={()=>setSelectedId(null)}
+  />;
 }
 
 function HomeView({leads,config}) {
@@ -4761,7 +4796,7 @@ function App() {
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
-    if(tab==='knowledge') return <KnowledgeBaseView kb={kb} isAdmin={isAdmin} onAdd={addKb} onDelete={deleteKb}/>;
+    if(tab==='knowledge') return <KnowledgeBaseView/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config}/>;
     if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;

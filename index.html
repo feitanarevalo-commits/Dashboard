@@ -2820,10 +2820,28 @@ function CloseSearchView({
 // ─── KNOWLEDGE BASE ───────────────────────────────────────
 // The Sales Operations Manual (KB_ARTICLES) as a navigable, searchable site,
 // plus an admin-managed Quick Links list (kb_links in Supabase).
-// Tools & Systems "Launchpad" (from the Cowork v3 design handoff).
+// Extract a short clean excerpt from an article's markdown body.
+function getKbExcerpt(body, n) {
+  n = n || 160;
+  const lines = String(body || '').split('\n');
+  for (const raw of lines) {
+    const l = raw.trim();
+    if (!l) continue;
+    if (l[0] === '#' || l[0] === '>' || l[0] === '-' || l[0] === '☐') continue;
+    const plain = l.replace(/\*\*(.+?)\*\*/g, '$1');
+    return plain.length > n ? plain.slice(0, n).trim() + '…' : plain;
+  }
+  return '';
+}
+// Unified Knowledge Base UI — Tools launchpad + Manual articles (same design language).
 function KbLaunchpad({
   tools,
-  onManual
+  articles,
+  view,
+  onView,
+  selected,
+  onSelect,
+  onBack
 }) {
   // Accent options: Blue #2f6bf0/#7db0ff · Indigo #5b5bd6/#a6a6ff · Teal #0f9b8e/#67e8d5 · Violet #7c5cfc/#c4a6ff
   const accent = '#5b5bd6',
@@ -2841,14 +2859,139 @@ function KbLaunchpad({
     Platform: '#5b5bd6',
     Finance: '#e0552f'
   };
+  const CHAPTER_COLORS = {
+    '1 · Company Overview': '#5b5bd6',
+    '2 · Services': '#0f9b8e',
+    '3 · Sales Process': '#7c5cfc',
+    '4 · Tools & Systems': '#2f6bf0',
+    '5 · Commission': '#e0552f'
+  };
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState('All');
-  const all = tools || [];
-  const cats = ['All', ...Array.from(new Set(all.map(t => t.category)))];
-  const q = query.trim().toLowerCase();
-  const shown = all.filter(t => cat === 'All' || t.category === cat).filter(t => !q || (t.name + ' ' + t.tagline + ' ' + t.desc).toLowerCase().includes(q));
+  const isManual = view === 'manual';
   const SG = "'Space Grotesk',sans-serif";
+  const scrollRef = useRef(null);
+  // Reset filter + scroll when switching modes or opening/closing an article.
+  useEffect(() => {
+    setQuery('');
+    setCat('All');
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [view, selected && selected.id]);
+
+  // ─── Article reader ─────────────────────────────────────────
+  if (selected) {
+    const chapColor = CHAPTER_COLORS[selected.chapter] || accent;
+    return /*#__PURE__*/React.createElement("div", {
+      ref: scrollRef,
+      style: {
+        flex: 1,
+        minHeight: 0,
+        overflowY: 'auto',
+        fontFamily: "'Plus Jakarta Sans',system-ui,sans-serif",
+        color: '#1c1a26',
+        background: '#f4f4f8'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: 'relative',
+        overflow: 'hidden',
+        background: '#15131f',
+        color: '#fff',
+        padding: '28px 0 60px'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: 'absolute',
+        width: 560,
+        height: 380,
+        borderRadius: '50%',
+        top: -200,
+        right: -80,
+        background: `radial-gradient(circle, ${chapColor} 0%, transparent 70%)`,
+        filter: 'blur(80px)',
+        opacity: .45,
+        pointerEvents: 'none'
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: 'relative',
+        maxWidth: 840,
+        margin: '0 auto',
+        padding: '0 40px'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "kbl-back",
+      onClick: onBack,
+      style: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: 13,
+        fontWeight: 600,
+        color: 'rgba(255,255,255,.7)',
+        cursor: 'pointer',
+        marginBottom: 22,
+        userSelect: 'none'
+      }
+    }, "← Back to manual"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: '.12em',
+        color: accentLight,
+        marginBottom: 10
+      }
+    }, selected.chapter.replace(/^\d+ · /, '').toUpperCase()), /*#__PURE__*/React.createElement("h1", {
+      style: {
+        fontFamily: SG,
+        fontWeight: 700,
+        fontSize: 36,
+        lineHeight: 1.1,
+        letterSpacing: '-.02em',
+        margin: 0,
+        maxWidth: 680
+      }
+    }, selected.title))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        maxWidth: 840,
+        margin: '-28px auto 80px',
+        padding: '0 40px',
+        position: 'relative'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "kb-article",
+      style: {
+        background: '#fff',
+        borderRadius: 18,
+        border: '1px solid #ebeaf0',
+        padding: '44px 52px',
+        boxShadow: '0 18px 36px -18px rgba(20,18,40,.18)',
+        '--accent': accent,
+        '--border': '#ebeaf0',
+        '--bg': '#f7f7fd',
+        '--text': '#1f1d2b',
+        '--text-dim': '#6b6878'
+      }
+    }, renderKbBody(selected.body))));
+  }
+
+  // ─── List view (tools or manual) ───────────────────────────
+  let chips, items;
+  if (isManual) {
+    chips = ['All', ...Array.from(new Set((articles || []).map(a => a.chapter)))];
+    const q = query.trim().toLowerCase();
+    items = (articles || []).filter(a => cat === 'All' || a.chapter === cat).filter(a => !q || (a.title + ' ' + a.body).toLowerCase().includes(q));
+  } else {
+    chips = ['All', ...Array.from(new Set((tools || []).map(t => t.category)))];
+    const q = query.trim().toLowerCase();
+    items = (tools || []).filter(t => cat === 'All' || t.category === cat).filter(t => !q || (t.name + ' ' + t.tagline + ' ' + t.desc).toLowerCase().includes(q));
+  }
+  const heroEyebrow = isManual ? 'SALES OPERATIONS MANUAL' : 'TOOLS & SYSTEMS — LAUNCHPAD';
+  const heroHeadline = isManual ? 'Everything you need to know, in one place.' : 'Everything the sales team runs on, one click away.';
+  const heroSub = isManual ? 'The full Sales Operations Manual — company, services, the 18-step sales process, tools, and commissions.' : 'Search, filter, and jump straight into any platform in the stack.';
+  const searchPh = isManual ? 'Search the manual…' : 'Search tools…';
   return /*#__PURE__*/React.createElement("div", {
+    ref: scrollRef,
     style: {
       flex: 1,
       minHeight: 0,
@@ -2948,25 +3091,31 @@ function KbLaunchpad({
       gap: 2
     }
   }, /*#__PURE__*/React.createElement("span", {
+    onClick: () => onView('tools'),
     style: {
-      padding: '6px 13px',
+      padding: '7px 14px',
       borderRadius: 7,
       fontSize: 13,
       fontWeight: 600,
-      background: accent,
-      color: '#fff'
+      background: !isManual ? accent : 'transparent',
+      color: !isManual ? '#fff' : 'rgba(255,255,255,.75)',
+      cursor: 'pointer',
+      userSelect: 'none',
+      transition: 'all .15s'
     }
   }, "🚀 Tools"), /*#__PURE__*/React.createElement("span", {
-    onClick: onManual,
+    onClick: () => onView('manual'),
     style: {
-      padding: '6px 13px',
+      padding: '7px 14px',
       borderRadius: 7,
       fontSize: 13,
       fontWeight: 600,
-      color: 'rgba(255,255,255,.75)',
-      cursor: 'pointer'
-    },
-    title: "Open the full Sales Operations Manual"
+      background: isManual ? accent : 'transparent',
+      color: isManual ? '#fff' : 'rgba(255,255,255,.75)',
+      cursor: 'pointer',
+      userSelect: 'none',
+      transition: 'all .15s'
+    }
   }, "📖 Manual"))), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
@@ -2975,7 +3124,7 @@ function KbLaunchpad({
       color: accentLight,
       marginBottom: 12
     }
-  }, "TOOLS & SYSTEMS — LAUNCHPAD"), /*#__PURE__*/React.createElement("h1", {
+  }, heroEyebrow), /*#__PURE__*/React.createElement("h1", {
     style: {
       fontFamily: SG,
       fontWeight: 700,
@@ -2983,17 +3132,17 @@ function KbLaunchpad({
       lineHeight: 1.05,
       letterSpacing: '-.025em',
       margin: '0 0 14px',
-      maxWidth: 560
+      maxWidth: 620
     }
-  }, "Everything the sales team runs on, one click away."), /*#__PURE__*/React.createElement("p", {
+  }, heroHeadline), /*#__PURE__*/React.createElement("p", {
     style: {
       fontSize: 16,
       lineHeight: 1.55,
       color: 'rgba(255,255,255,.6)',
       margin: '0 0 26px',
-      maxWidth: 480
+      maxWidth: 540
     }
-  }, "Search, filter, and jump straight into any platform in the stack."), /*#__PURE__*/React.createElement("div", {
+  }, heroSub), /*#__PURE__*/React.createElement("div", {
     style: {
       position: 'relative',
       maxWidth: 440
@@ -3025,7 +3174,7 @@ function KbLaunchpad({
     className: "kbl-search",
     value: query,
     onChange: e => setQuery(e.target.value),
-    placeholder: "Search tools…",
+    placeholder: searchPh,
     style: {
       width: '100%',
       padding: '13px 16px 13px 46px',
@@ -3050,8 +3199,9 @@ function KbLaunchpad({
       gap: 9,
       marginBottom: 26
     }
-  }, cats.map(c => {
+  }, chips.map(c => {
     const on = c === cat;
+    const label = isManual && c !== 'All' ? c.replace(/^\d+ · /, '') : c;
     return /*#__PURE__*/React.createElement("div", {
       key: c,
       className: "kbl-chip",
@@ -3066,14 +3216,132 @@ function KbLaunchpad({
         background: on ? accent : '#fff',
         border: `1px solid ${on ? accent : '#e6e5ec'}`
       }
-    }, c);
+    }, label);
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))',
       gap: 16
     }
-  }, shown.map((t, i) => {
+  }, isManual ? items.map((a, i) => {
+    const cc = CHAPTER_COLORS[a.chapter] || accent;
+    const m = a.chapter.match(/^(\d+)/);
+    const initial = m ? m[1] : a.chapter[0] || '?';
+    const chapShort = a.chapter.replace(/^\d+ · /, '');
+    return /*#__PURE__*/React.createElement("div", {
+      key: a.id,
+      className: "kbl-tile",
+      onClick: () => onSelect(a.id),
+      style: {
+        display: 'flex',
+        flexDirection: 'column',
+        cursor: 'pointer',
+        background: '#fff',
+        border: '1px solid #ebeaf0',
+        borderRadius: 18,
+        padding: 20,
+        animationDelay: (i * 0.04).toFixed(2) + 's'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        marginBottom: 13
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: '0 0 46px',
+        width: 46,
+        height: 46,
+        borderRadius: 13,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: SG,
+        fontWeight: 700,
+        fontSize: 18,
+        color: '#fff',
+        background: cc,
+        boxShadow: `0 7px 16px -6px ${cc}`
+      }
+    }, initial), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1,
+        minWidth: 0
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: SG,
+        fontWeight: 700,
+        fontSize: 16,
+        color: '#1f1d2b',
+        lineHeight: 1.2
+      }
+    }, a.title), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        fontWeight: 600,
+        color: cc,
+        marginTop: 2
+      }
+    }, chapShort)), /*#__PURE__*/React.createElement("span", {
+      style: {
+        flex: '0 0 auto',
+        width: 30,
+        height: 30,
+        borderRadius: 9,
+        background: hexA(cc, .12),
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: cc
+      }
+    }, /*#__PURE__*/React.createElement("svg", {
+      width: "15",
+      height: "15",
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: "2.4",
+      strokeLinecap: "round",
+      strokeLinejoin: "round"
+    }, /*#__PURE__*/React.createElement("polyline", {
+      points: "9 18 15 12 9 6"
+    })))), /*#__PURE__*/React.createElement("p", {
+      style: {
+        fontSize: 13.5,
+        lineHeight: 1.55,
+        color: '#6b6878',
+        margin: '0 0 14px',
+        flex: 1
+      }
+    }, getKbExcerpt(a.body)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingTop: 13,
+        borderTop: '1px solid #f0eff4'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        fontWeight: 600,
+        color: '#9c99a8'
+      }
+    }, "Read article →"), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10.5,
+        fontWeight: 700,
+        letterSpacing: '.05em',
+        padding: '3px 9px',
+        borderRadius: 999,
+        color: cc,
+        background: hexA(cc, .12)
+      }
+    }, "Chapter ", initial)));
+  }) : items.map((t, i) => {
     const cc = CAT_COLORS[t.category] || accent;
     return /*#__PURE__*/React.createElement("a", {
       key: t.name,
@@ -3213,7 +3481,7 @@ function KbLaunchpad({
         background: hexA(cc, .12)
       }
     }, t.category)));
-  })), shown.length === 0 && /*#__PURE__*/React.createElement("div", {
+  })), items.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'center',
       padding: '60px 20px',
@@ -3227,7 +3495,7 @@ function KbLaunchpad({
       color: '#5b5868',
       marginBottom: 6
     }
-  }, "No tools found"), /*#__PURE__*/React.createElement("div", {
+  }, isManual ? 'No articles found' : 'No tools found'), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 14
     }
@@ -3356,244 +3624,24 @@ function renderKbBody(text) {
   flush();
   return out;
 }
-function KnowledgeBaseView({
-  kb,
-  isAdmin,
-  onAdd,
-  onDelete
-}) {
-  const [view, setView] = useState('launchpad'); // 'launchpad' (Tools) | 'manual'
+function KnowledgeBaseView() {
   const tools = typeof KB_TOOLS !== 'undefined' ? KB_TOOLS : [];
   const articles = typeof KB_ARTICLES !== 'undefined' ? KB_ARTICLES : [];
-  const [sel, setSel] = useState(articles[0] ? articles[0].id : '');
-  const [q, setQ] = useState('');
-  const [adding, setAdding] = useState(false);
-  const [lt, setLt] = useState('');
-  const [lu, setLu] = useState('');
-  const ql = q.trim().toLowerCase();
-  const navArticles = ql ? articles.filter(a => (a.title + ' ' + a.body).toLowerCase().includes(ql)) : articles;
-  const current = articles.find(a => a.id === sel) || articles[0];
-  const chapters = {};
-  navArticles.forEach(a => {
-    (chapters[a.chapter] = chapters[a.chapter] || []).push(a);
-  });
-  function addLink(e) {
-    e.preventDefault();
-    if (!lt.trim() || !lu.trim()) return;
-    onAdd({
-      title: lt,
-      url: lu,
-      category: 'Quick Links',
-      description: ''
-    });
-    setLt('');
-    setLu('');
-    setAdding(false);
-  }
-  if (view === 'launchpad') return /*#__PURE__*/React.createElement(KbLaunchpad, {
+  const [view, setView] = useState('tools'); // 'tools' | 'manual'
+  const [selectedId, setSelectedId] = useState(null);
+  const selected = selectedId ? articles.find(a => a.id === selectedId) : null;
+  return /*#__PURE__*/React.createElement(KbLaunchpad, {
     tools: tools,
-    onManual: () => setView('manual')
+    articles: articles,
+    view: view,
+    onView: v => {
+      setView(v);
+      setSelectedId(null);
+    },
+    selected: selected,
+    onSelect: id => setSelectedId(id),
+    onBack: () => setSelectedId(null)
   });
-  return /*#__PURE__*/React.createElement("div", {
-    className: "home-content"
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'inline-flex',
-      alignSelf: 'flex-start',
-      background: 'var(--bg)',
-      border: '1px solid var(--border)',
-      borderRadius: 10,
-      padding: 3,
-      gap: 2,
-      marginBottom: 6
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    onClick: () => setView('launchpad'),
-    style: {
-      padding: '6px 13px',
-      borderRadius: 7,
-      fontSize: 13,
-      fontWeight: 600,
-      color: 'var(--text-dim)',
-      cursor: 'pointer'
-    }
-  }, "🚀 Tools"), /*#__PURE__*/React.createElement("span", {
-    style: {
-      padding: '6px 13px',
-      borderRadius: 7,
-      fontSize: 13,
-      fontWeight: 600,
-      background: 'var(--accent)',
-      color: '#fff'
-    }
-  }, "📖 Manual")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: 16,
-      alignItems: 'flex-start'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card",
-    style: {
-      flex: '0 0 250px',
-      position: 'sticky',
-      top: 0,
-      maxHeight: 'calc(100vh - 90px)',
-      display: 'flex',
-      flexDirection: 'column'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: 12,
-      borderBottom: '1px solid var(--border)'
-    }
-  }, /*#__PURE__*/React.createElement("input", {
-    value: q,
-    onChange: e => setQ(e.target.value),
-    placeholder: "🔍 Search the manual…",
-    style: {
-      width: '100%',
-      padding: '8px 10px'
-    }
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: '4px 8px 10px',
-      overflowY: 'auto',
-      flex: 1
-    }
-  }, navArticles.length === 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: 12,
-      fontSize: 13,
-      color: 'var(--text-dim)'
-    }
-  }, "No sections match “", q, "”."), Object.keys(chapters).map(ch => /*#__PURE__*/React.createElement("div", {
-    key: ch
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10.5,
-      fontWeight: 700,
-      color: 'var(--text-dim)',
-      textTransform: 'uppercase',
-      letterSpacing: '.04em',
-      padding: '12px 8px 4px'
-    }
-  }, ch), chapters[ch].map(a => {
-    const on = current && current.id === a.id;
-    return /*#__PURE__*/React.createElement("div", {
-      key: a.id,
-      onClick: () => {
-        setSel(a.id);
-        setQ('');
-      },
-      style: {
-        padding: '7px 10px',
-        borderRadius: 6,
-        cursor: 'pointer',
-        fontSize: 13,
-        fontWeight: on ? 600 : 400,
-        color: on ? 'var(--sidebar-text-active)' : 'var(--text)',
-        background: on ? 'var(--sidebar-active)' : 'transparent'
-      }
-    }, a.title);
-  }))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10.5,
-      fontWeight: 700,
-      color: 'var(--text-dim)',
-      textTransform: 'uppercase',
-      letterSpacing: '.04em',
-      padding: '14px 8px 4px',
-      display: 'flex',
-      alignItems: 'center'
-    }
-  }, "🔗 Quick Links", isAdmin && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setAdding(s => !s),
-    title: "Add link",
-    style: {
-      marginLeft: 'auto',
-      background: 'none',
-      border: 'none',
-      cursor: 'pointer',
-      color: 'var(--accent)',
-      fontSize: 13
-    }
-  }, adding ? '✕' : '➕')), isAdmin && adding && /*#__PURE__*/React.createElement("form", {
-    onSubmit: addLink,
-    style: {
-      padding: '2px 8px 6px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 5
-    }
-  }, /*#__PURE__*/React.createElement("input", {
-    value: lt,
-    onChange: e => setLt(e.target.value),
-    placeholder: "Title",
-    style: {
-      fontSize: 12,
-      padding: '5px 8px'
-    }
-  }), /*#__PURE__*/React.createElement("input", {
-    value: lu,
-    onChange: e => setLu(e.target.value),
-    placeholder: "https://…",
-    style: {
-      fontSize: 12,
-      padding: '5px 8px'
-    }
-  }), /*#__PURE__*/React.createElement("button", {
-    type: "submit",
-    className: "btn btn-primary btn-sm",
-    disabled: !lt.trim() || !lu.trim()
-  }, "Add")), kb.map(l => /*#__PURE__*/React.createElement("div", {
-    key: l.id,
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 4,
-      padding: '4px 8px'
-    }
-  }, /*#__PURE__*/React.createElement("a", {
-    href: l.url,
-    target: "_blank",
-    rel: "noreferrer",
-    style: {
-      fontSize: 12.5,
-      color: 'var(--accent)',
-      textDecoration: 'none',
-      flex: 1
-    }
-  }, l.title, " ↗"), isAdmin && /*#__PURE__*/React.createElement("button", {
-    onClick: () => onDelete(l),
-    title: "Remove",
-    style: {
-      background: 'none',
-      border: 'none',
-      cursor: 'pointer',
-      color: '#DE350B',
-      fontSize: 11
-    }
-  }, "🗑"))))), /*#__PURE__*/React.createElement("div", {
-    className: "card",
-    style: {
-      flex: 1,
-      minWidth: 0
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-header"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-title"
-  }, "📚 ", current ? current.title : 'Knowledge Base')), /*#__PURE__*/React.createElement("div", {
-    className: "card-body",
-    style: {
-      maxWidth: 780
-    }
-  }, current ? renderKbBody(current.body) : /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: 'var(--text-dim)'
-    }
-  }, "No content.")))));
 }
 function HomeView({
   leads,
@@ -10887,12 +10935,7 @@ function App() {
       onDecide: decideLeave,
       onDelete: deleteLeave
     });
-    if (tab === 'knowledge') return /*#__PURE__*/React.createElement(KnowledgeBaseView, {
-      kb: kb,
-      isAdmin: isAdmin,
-      onAdd: addKb,
-      onDelete: deleteKb
-    });
+    if (tab === 'knowledge') return /*#__PURE__*/React.createElement(KnowledgeBaseView, null);
     if (tab === 'attendance') return isAdmin ? /*#__PURE__*/React.createElement(AttendanceView, {
       sessions: sessions,
       config: config
