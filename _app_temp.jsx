@@ -4610,12 +4610,6 @@ function App() {
           })}
           <div style={{flex:1}}/>
           <div className="sidebar-footer">
-            {isAdmin && <div className="nav-item settings" title="Load from Close" onClick={()=>closeSyncing?null:loadFromClose()}>
-              <span className="nav-icon">☁</span>{closeSyncing?'Syncing…':'Load from Close'}
-            </div>}
-            {isAdmin && <div className="nav-item settings" title="Save to Close" onClick={()=>closeSyncing?null:saveToClose()}>
-              <span className="nav-icon">⬆</span>Save to Close
-            </div>}
             {isAdmin && <div className="nav-item settings" title="Settings & Customize" onClick={()=>setShowSettings(true)}>
               <span className="nav-icon">⚙</span>Settings &amp; Customize
             </div>}

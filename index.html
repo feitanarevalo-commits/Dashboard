@@ -10103,18 +10103,6 @@ function App() {
     className: "sidebar-footer"
   }, isAdmin && /*#__PURE__*/React.createElement("div", {
     className: "nav-item settings",
-    title: "Load from Close",
-    onClick: () => closeSyncing ? null : loadFromClose()
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "nav-icon"
-  }, "☁"), closeSyncing ? 'Syncing…' : 'Load from Close'), isAdmin && /*#__PURE__*/React.createElement("div", {
-    className: "nav-item settings",
-    title: "Save to Close",
-    onClick: () => closeSyncing ? null : saveToClose()
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "nav-icon"
-  }, "⬆"), "Save to Close"), isAdmin && /*#__PURE__*/React.createElement("div", {
-    className: "nav-item settings",
     title: "Settings & Customize",
     onClick: () => setShowSettings(true)
   }, /*#__PURE__*/React.createElement("span", {
