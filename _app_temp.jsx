@@ -4949,7 +4949,6 @@ function App() {
       {/* TOPBAR */}
       <div className="topbar">
         <div className="topbar-brand">
-          <div className="logo">E</div>
           <div>
             <div>Enfinity</div>
             <div className="tagline">Sales Dashboard</div>
