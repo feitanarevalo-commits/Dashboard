@@ -2345,18 +2345,19 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const dayContacted=dayLeads.filter(l=>l.tags.includes('Contacted')).length;
   const dayPotentialTotal=dayLeads.filter(l=>l.tags.includes('Potential')&&!l.tags.includes('Contacted')).length;
 
+  const repColor=(config.repColors||{})[rep]||'#5b5bd6';
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
-      <div className="rep-view-header no-print">
-        <RepAvatar rep={rep} config={config} size={42} online bgOverride="var(--card)"/>
-        <div>
-          <div style={{fontWeight:700,fontSize:15}}>{rep}'s Dashboard</div>
-          <div style={{fontSize:11,color:'var(--text-dim)'}}>
-            {getProfile(rep).title ? <span style={{fontWeight:600,color:'var(--text)'}}>{getProfile(rep).title} · </span> : null}
+      <div className="rep-view-header no-print" style={{'--rep-color':repColor}}>
+        <RepAvatar rep={rep} config={config} size={46} online bgOverride={repColor}/>
+        <div style={{minWidth:0}}>
+          <div className="rep-view-title">{rep}'s Dashboard</div>
+          <div className="rep-view-sub">
+            {getProfile(rep).title ? <><b>{getProfile(rep).title}</b> · </> : null}
             {total} lead{total!==1?'s':''} · {active} active
           </div>
         </div>
-        <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
+        <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',justifyContent:'flex-end'}}>
           <button className="btn btn-primary btn-sm" disabled={!fresh}
             onClick={()=>importToClose(rep,freshPotential)}
             title={fresh?`Send ${rep}'s ${fresh} Fresh Potential lead(s) to Close.io (already-imported leads are skipped)`:(potential?'All Potential leads are already imported to Close':'No Potential leads to send yet')}>
@@ -2379,32 +2380,32 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
           <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button>
         </div>
       </div>
-      <div style={{display:'flex',gap:12,padding:'16px 24px',flexShrink:0,borderBottom:'1px solid var(--border)',background:'var(--card)'}}>
-        <div className="stat-card accent" style={{flex:1}}><div className="stat-label">Total</div><div className="stat-value">{total}</div></div>
-        <div className="stat-card green" style={{flex:1}}><div className="stat-label">Potential</div><div className="stat-value">{potential}</div></div>
-        <div className="stat-card" style={{flex:1}} title="Fresh Potential leads not yet on Close — the import queue"><div className="stat-label">Fresh (to import)</div><div className="stat-value">{fresh}</div></div>
-        <div className="stat-card" style={{flex:1}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
-        <div className="stat-card orange" style={{flex:1}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
+      <div className="rep-stats-row" style={{display:'flex',gap:12,padding:'18px 32px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>
+        <div className="stat-card accent" style={{flex:1,minWidth:138}}><div className="stat-label">Total</div><div className="stat-value">{total}</div></div>
+        <div className="stat-card green" style={{flex:1,minWidth:138}}><div className="stat-label">Potential</div><div className="stat-value">{potential}</div></div>
+        <div className="stat-card" style={{flex:1,minWidth:138}} title="Fresh Potential leads not yet on Close — the import queue"><div className="stat-label">Fresh (to import)</div><div className="stat-value">{fresh}</div></div>
+        <div className="stat-card" style={{flex:1,minWidth:138}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
+        <div className="stat-card orange" style={{flex:1,minWidth:138}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
       </div>
-      <div className="no-print" style={{display:'flex',gap:12,padding:'12px 24px',flexShrink:0,borderBottom:'1px solid var(--border)',background:'var(--card)',alignItems:'center',flexWrap:'wrap'}}>
-        <div style={{display:'flex',flexDirection:'column',gap:2,marginRight:4}}>
-          <span style={{fontWeight:700,fontSize:13}}>📅 Daily Quota</span>
+      <div className="rep-quota-row no-print" style={{display:'flex',gap:12,padding:'0 32px 18px',flexShrink:0,background:'var(--bg)',alignItems:'center',flexWrap:'wrap'}}>
+        <div style={{display:'flex',flexDirection:'column',gap:2,marginRight:6,padding:'10px 14px',background:'#fff',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)'}}>
+          <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'-.01em'}}>📅 Daily Quota</span>
           <span style={{fontSize:10,color:'var(--text-dim)'}}>open potentials per campaign</span>
         </div>
         <input type="date" value={quotaDay} max={todayStr} onChange={e=>setQuotaDay(e.target.value||todayStr)}
-          style={{padding:'5px 8px',border:'1px solid var(--border)',borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)'}}/>
+          style={{padding:'8px 12px',border:'1px solid var(--border)',borderRadius:10,fontSize:12,background:'#fff',color:'var(--text)',fontFamily:'inherit'}}/>
         <button className="btn btn-ghost btn-sm" onClick={()=>setQuotaDay(todayStr)} disabled={quotaDay===todayStr}>Today</button>
         {(config.campaigns||[]).map(c=>(
-          <div key={c.id} className="stat-card" style={{flex:'0 0 auto',minWidth:118,borderLeft:`3px solid ${c.color}`}}>
+          <div key={c.id} className="stat-card" style={{flex:'0 0 auto',minWidth:128,borderLeft:`3px solid ${c.color}`,padding:'14px 16px'}}>
             <div className="stat-label">{c.label} Potentials</div>
             <div className="stat-value" style={{color:c.color}}>{campPotential(c.id)}</div>
           </div>
         ))}
-        <div className="stat-card" style={{flex:'0 0 auto',minWidth:118}}>
+        <div className="stat-card" style={{flex:'0 0 auto',minWidth:128,padding:'14px 16px'}}>
           <div className="stat-label">Open Total</div>
           <div className="stat-value">{dayPotentialTotal}</div>
         </div>
-        <div className="stat-card" style={{flex:'0 0 auto',minWidth:118}}>
+        <div className="stat-card" style={{flex:'0 0 auto',minWidth:128,padding:'14px 16px'}}>
           <div className="stat-label">Contacted {quotaDay===todayStr?'Today':'That Day'}</div>
           <div className="stat-value" style={{color:'var(--accent)'}}>{dayContacted}</div>
         </div>
