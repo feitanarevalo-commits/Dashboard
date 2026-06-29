@@ -817,6 +817,14 @@ html[data-dark] textarea::placeholder { color: var(--text-light); }
 .phc-row{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);padding:3px 0;word-break:break-all;}
 .phc-row span{width:16px;text-align:center;opacity:.8;flex-shrink:0;}
 .phc-empty{font-size:12px;color:var(--text-dim);padding:2px 0 4px;}
+/* Knowledge Base "Launchpad" (v3 design) */
+@keyframes kbTileIn { from { opacity:0; transform:translateY(12px) scale(.98); } to { opacity:1; transform:translateY(0) scale(1); } }
+.kbl-tile { animation:kbTileIn .4s ease both; transition:box-shadow .16s ease, border-color .16s ease, transform .16s ease; }
+.kbl-tile:hover { box-shadow:0 18px 36px -18px rgba(20,18,40,.24); border-color:#dcdae6 !important; transform:translateY(-3px); }
+.kbl-chip { transition:all .14s ease; }
+.kbl-chip:hover { border-color:#2f6bf0 !important; }
+.kbl-search::placeholder { color:rgba(255,255,255,.45); }
+.kbl-search:focus { border-color:#2f6bf0 !important; background:rgba(255,255,255,.12) !important; box-shadow:0 0 0 4px rgba(47,107,240,.12); }
 .phc-links{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
 .phc-link{font-size:11.5px;font-weight:600;color:var(--accent);text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .phc-link:hover{background:var(--accent);color:#fff;border-color:var(--accent);}

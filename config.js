@@ -530,3 +530,19 @@ Complete when: dashboard activated + first upload submitted to VVV. The $25 is e
 ## General Rules
 Commissions are only for completed sales meeting all requirements. Reps must actively monitor & follow up (pending signups, contracts, activations, Tipalti, KYC, CID/MSN reviews, Microsoft decisions, CMS acceptance, VVV activations & first uploads) until completion. **Disputes → escalate to Management.**` },
 ];
+
+// ── KB TOOLS LAUNCHPAD ─────────────────────────────────────
+// Tiles for the Knowledge Base "Tools & Systems" launchpad. Edit freely.
+// Each: name, color (brand hex), tagline, category, desc, primaryHref, domain, optional note.
+var KB_TOOLS = [
+  { name:'Infludata',          color:'#2f6bf0', tagline:'lead generation & research', category:'Research', desc:'Creator discovery, audience analysis, channel research, qualification, sourcing.', primaryHref:'https://app.infludata.com/search', domain:'app.infludata.com' },
+  { name:'SocialBlade',        color:'#b91c1c', tagline:'channel analytics',           category:'Research', desc:'Channel growth tracking, monthly view analysis, VVV qualification review.', primaryHref:'https://socialblade.com/', domain:'socialblade.com' },
+  { name:'Google Sheets',      color:'#0f9d58', tagline:'lead database & monitoring',  category:'Data',     desc:'Lead storage, assignment, duplicate checking, monitoring, tracking, reporting.', primaryHref:'https://sheets.google.com', domain:'sheets.google.com' },
+  { name:'ZeroBounce',         color:'#f4a000', tagline:'email validation',            category:'Data',     desc:'Email verification, bounce prevention, quality control.', note:'Only validated emails go into the database.', primaryHref:'https://www.zerobounce.net/members/signin', domain:'zerobounce.net' },
+  { name:'Close CRM',          color:'#1f6f6b', tagline:'primary CRM',                 category:'CRM',      desc:'Lead management, email, tasks, pipeline, inbox, activity logging.', primaryHref:'https://app.close.com/tasks/inbox/', domain:'app.close.com' },
+  { name:'SmartReach',         color:'#7c3aed', tagline:'outreach',                    category:'Outreach', desc:'Campaign management, automated follow-ups, scheduling, sequencing, performance.', primaryHref:'https://app.smartreach.io/', domain:'app.smartreach.io' },
+  { name:'Gmail',              color:'#ea4335', tagline:'creator communication',       category:'Outreach', desc:'Outreach, follow-ups, creator support, internal communication.', primaryHref:'https://mail.google.com/', domain:'mail.google.com' },
+  { name:'Enfinity Dashboard', color:'#2f6bf0', tagline:'creator platform',            category:'Platform', desc:'Onboarding, activation, revenue tracking, performance, service management.', note:'VVV dashboard: staff.veryviralvideos.com · login support@veryviralvideos.com · password 🔒 ask an admin.', primaryHref:'https://app.enfinity.com/', domain:'app.enfinity.com' },
+  { name:'Dropbox Sign',       color:'#0061ff', tagline:'contracts & e-sign',          category:'Platform', desc:'Send, track & manage creator agreements. Never modify contract terms without management approval.', primaryHref:'https://app.hellosign.com/', domain:'app.hellosign.com' },
+  { name:'Tipalti',            color:'#e0552f', tagline:'payments',                    category:'Finance',  desc:'Creator and partner payouts, invoicing, tax forms, payment reconciliation.', primaryHref:'https://hub.tipalti.com/login/login-user-name', domain:'hub.tipalti.com' },
+];
