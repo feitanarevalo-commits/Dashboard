@@ -138,6 +138,13 @@ h1, h2, h3, h4, h5, h6, .display { font-family: 'Space Grotesk', 'Plus Jakarta S
 .webhook-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); display: inline-block; animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
 .topbar-badge { font-size: 11px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); border-radius: 999px; padding: 4px 10px; color: rgba(255,255,255,.78); display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+/* Topbar buttons inherit the dark-band treatment */
+.topbar .btn-outline { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.14); color: #fff; }
+.topbar .btn-outline:hover:not(:disabled) { background: rgba(91,91,214,.32); border-color: rgba(166,166,255,.5); color: #fff; }
+.topbar .btn-ghost { color: rgba(255,255,255,.7); }
+.topbar .btn-ghost:hover { background: rgba(255,255,255,.08); color: #fff; }
+.topbar .dark-mode-btn { background: rgba(255,255,255,.08) !important; border-color: rgba(255,255,255,.14) !important; color: #fff !important; }
+.topbar .dark-mode-btn:hover { background: rgba(91,91,214,.32) !important; border-color: rgba(166,166,255,.5) !important; }
 
 /* ── LAYOUT ── */
 .app-body { display: flex; flex: 1; overflow: hidden; }
