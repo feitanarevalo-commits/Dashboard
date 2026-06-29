@@ -1399,7 +1399,8 @@ function CloseSearchView({config}) {
 // plus an admin-managed Quick Links list (kb_links in Supabase).
 // Tools & Systems "Launchpad" (from the Cowork v3 design handoff).
 function KbLaunchpad({tools,onManual}) {
-  const accent='#2f6bf0', accentLight='#7db0ff';
+  // Accent options: Blue #2f6bf0/#7db0ff · Indigo #5b5bd6/#a6a6ff · Teal #0f9b8e/#67e8d5 · Violet #7c5cfc/#c4a6ff
+  const accent='#5b5bd6', accentLight='#a6a6ff';
   const hexA=(hex,a)=>{ const n=parseInt(hex.slice(1),16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
   const accentRing=hexA(accent,.12);
   const CAT_COLORS={Research:'#2f6bf0',Data:'#0f9d58',CRM:'#1f6f6b',Outreach:'#7c3aed',Platform:'#5b5bd6',Finance:'#e0552f'};
