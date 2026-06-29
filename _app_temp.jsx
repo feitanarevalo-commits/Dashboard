@@ -1394,6 +1394,53 @@ function CloseSearchView({config}) {
   );
 }
 
+// ─── KNOWLEDGE BASE ───────────────────────────────────────
+// Shared link library (guides, docs, references). Everyone views; admins add/remove.
+function KnowledgeBaseView({kb,isAdmin,onAdd,onDelete}) {
+  const [title,setTitle]=useState('');
+  const [url,setUrl]=useState('');
+  const [category,setCategory]=useState('');
+  const [desc,setDesc]=useState('');
+  const [showForm,setShowForm]=useState(false);
+  function submit(e){ e.preventDefault(); if(!title.trim()||!url.trim()) return; onAdd({title,url,category:category||'General',description:desc}); setTitle('');setUrl('');setCategory('');setDesc(''); setShowForm(false); }
+  const cats={}; kb.forEach(l=>{ const c=l.category||'General'; (cats[c]=cats[c]||[]).push(l); });
+  const catNames=Object.keys(cats).sort();
+  return (
+    <div className="home-content">
+      <div className="card">
+        <div className="card-header" style={{display:'flex',alignItems:'center',gap:10}}>
+          <div className="card-title">📚 Knowledge Base <span style={{fontWeight:400,color:'var(--text-dim)',fontSize:12}}>· {kb.length} link{kb.length!==1?'s':''}</span></div>
+          {isAdmin && <button className="btn btn-primary btn-sm" style={{marginLeft:'auto'}} onClick={()=>setShowForm(s=>!s)}>{showForm?'✕ Cancel':'➕ Add Link'}</button>}
+        </div>
+        {isAdmin && showForm && <div className="card-body" style={{borderTop:'1px solid var(--border)'}}>
+          <form onSubmit={submit} style={{display:'flex',flexWrap:'wrap',gap:10,alignItems:'flex-end'}}>
+            <div style={{display:'flex',flexDirection:'column',gap:4,flex:'1 1 200px'}}><label className="form-label">Title *</label><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Scraper guide"/></div>
+            <div style={{display:'flex',flexDirection:'column',gap:4,flex:'1 1 240px'}}><label className="form-label">URL *</label><input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://…"/></div>
+            <div style={{display:'flex',flexDirection:'column',gap:4,flex:'0 0 160px'}}><label className="form-label">Category</label><input value={category} onChange={e=>setCategory(e.target.value)} placeholder="General" list="kb-cats"/><datalist id="kb-cats">{catNames.map(c=><option key={c} value={c}/>)}</datalist></div>
+            <div style={{display:'flex',flexDirection:'column',gap:4,flex:'1 1 100%'}}><label className="form-label">Description</label><input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Short description (optional)"/></div>
+            <button type="submit" className="btn btn-primary" disabled={!title.trim()||!url.trim()}>Add Link</button>
+          </form>
+        </div>}
+      </div>
+      {kb.length===0 && <div className="card"><div className="card-body" style={{textAlign:'center',color:'var(--text-dim)',padding:'28px'}}>No knowledge base links yet.{isAdmin?' Click “➕ Add Link” to add one.':''}</div></div>}
+      {catNames.map(c=>(
+        <div className="card" key={c}>
+          <div className="card-header"><div className="card-title" style={{fontSize:14}}>{c}</div></div>
+          <div className="card-body" style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
+            {cats[c].map(l=>(
+              <div key={l.id} style={{border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px',display:'flex',flexDirection:'column',gap:6,position:'relative'}}>
+                <a href={l.url} target="_blank" rel="noreferrer" style={{fontWeight:700,fontSize:14,color:'var(--accent)',textDecoration:'none',paddingRight:isAdmin?22:0}}>{l.title} ↗</a>
+                {l.description && <div style={{fontSize:12.5,color:'var(--text-dim)',lineHeight:1.5}}>{l.description}</div>}
+                {isAdmin && <button title="Remove link" style={{position:'absolute',top:8,right:8,background:'none',border:'none',cursor:'pointer',color:'#DE350B',fontSize:13}} onClick={()=>onDelete(l)}>🗑</button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function HomeView({leads,config}) {
   const [period,setPeriod]=useState('monthly');
   const [repFilter,setRepFilter]=useState('');     // '' = all reps, else a single rep
@@ -1781,6 +1828,10 @@ function loadLeavesFromSupabase(){
 function loadSessionsFromSupabase(){
   if(!SB) return Promise.resolve([]);
   return SB.from('sessions').select('*').order('login_at',{ascending:false}).limit(1000).then(({data,error})=>(error||!data)?[]:data).catch(()=>[]);
+}
+function loadKbFromSupabase(){
+  if(!SB) return Promise.resolve([]);
+  return SB.from('kb_links').select('*').order('created_at',{ascending:true}).then(({data,error})=>(error||!data)?[]:data).catch(()=>[]);
 }
 
 // ── Replies / interest feed (🔔) ──────────────────────────
@@ -4058,6 +4109,19 @@ function App() {
   const [sessions,setSessions]=useState([]);
   const sessionIdRef=useRef(null);
   useEffect(()=>{ if(SB) loadSessionsFromSupabase().then(setSessions); },[]);
+  const [kb,setKb]=useState([]);
+  useEffect(()=>{ if(SB) loadKbFromSupabase().then(setKb); },[]);
+  function addKb(link){
+    if(!SB){ addToast('Backend unavailable','error'); return; }
+    const row={ title:(link.title||'').trim(), description:(link.description||'').trim(), url:(link.url||'').trim(), category:(link.category||'General').trim()||'General' };
+    if(!row.title||!row.url) return;
+    if(!/^https?:\/\//i.test(row.url)) row.url='https://'+row.url;
+    SB.from('kb_links').insert(row).select().then(({data,error})=>{ if(error){ addToast('Could not add link: '+error.message,'error'); return; } const saved=(data&&data[0])||row; setKb(k=>[...k,saved]); addToast('Knowledge base link added','success'); });
+  }
+  function deleteKb(item){
+    if(!SB) return; if(!window.confirm(`Remove “${item.title}” from the knowledge base?`)) return;
+    SB.from('kb_links').delete().eq('id',item.id).then(({error})=>{ if(error){ addToast('Delete failed','error'); return; } setKb(k=>k.filter(x=>x.id!==item.id)); addToast('Link removed','info'); });
+  }
   // Auto attendance: a login session is created when a user signs in (resumed on
   // reload within 30 min), last_seen is heartbeat-updated while the tab is open,
   // and logout_at is set on sign-out / tab close. No manual buttons.
@@ -4565,6 +4629,7 @@ function App() {
     {id:'agency',icon:'▦',label:'Agency'},
     {id:'close-data',icon:'☁',label:'Search Close DB'},
     {id:'leaves',icon:'🌴',label:'Leaves'},
+    {id:'knowledge',icon:'📚',label:'Knowledge Base'},
     {id:'attendance',icon:'⏱',label:'Attendance'},
   ];
   const NAV_FILTER=[
@@ -4580,6 +4645,7 @@ function App() {
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
+    if(tab==='knowledge') return <KnowledgeBaseView kb={kb} isAdmin={isAdmin} onAdd={addKb} onDelete={deleteKb}/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config}/>;
     if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;
@@ -4707,7 +4773,7 @@ function App() {
             <span className="sct-icon">{navCollapsed?'»':'«'}</span><span className="sct-label">Collapse</span>
           </div>
           <div className="sidebar-section-label">Main</div>
-          {NAV_MAIN.filter(n=>n.id==='attendance'?isAdmin:(n.id==='leaves'?config.tabs.leaves!==false:config.tabs[n.id])).map(n=>(
+          {NAV_MAIN.filter(n=>n.id==='attendance'?isAdmin:((n.id==='leaves'||n.id==='knowledge')?config.tabs[n.id]!==false:config.tabs[n.id])).map(n=>(
             <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
             </div>

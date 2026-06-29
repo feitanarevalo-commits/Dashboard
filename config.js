@@ -49,7 +49,7 @@ var DEFAULT_CONFIG = {
   tabs: {
     home: true, scraper: true, history: true,
     'prev-scraped': true, 'lead-mgmt': true, 'google-import': true, agency: true, 'close-data': true,
-    leaves: true,
+    leaves: true, knowledge: true,
     pending: true, contacted: true,
     recycle: true, recent: true, duplicates: true, msn: true, vvv: true,
   },

@@ -2816,6 +2816,210 @@ function CloseSearchView({
     }
   }, "Open ↗") : null))))))));
 }
+
+// ─── KNOWLEDGE BASE ───────────────────────────────────────
+// Shared link library (guides, docs, references). Everyone views; admins add/remove.
+function KnowledgeBaseView({
+  kb,
+  isAdmin,
+  onAdd,
+  onDelete
+}) {
+  const [title, setTitle] = useState('');
+  const [url, setUrl] = useState('');
+  const [category, setCategory] = useState('');
+  const [desc, setDesc] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  function submit(e) {
+    e.preventDefault();
+    if (!title.trim() || !url.trim()) return;
+    onAdd({
+      title,
+      url,
+      category: category || 'General',
+      description: desc
+    });
+    setTitle('');
+    setUrl('');
+    setCategory('');
+    setDesc('');
+    setShowForm(false);
+  }
+  const cats = {};
+  kb.forEach(l => {
+    const c = l.category || 'General';
+    (cats[c] = cats[c] || []).push(l);
+  });
+  const catNames = Object.keys(cats).sort();
+  return /*#__PURE__*/React.createElement("div", {
+    className: "home-content"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header",
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title"
+  }, "📚 Knowledge Base ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 400,
+      color: 'var(--text-dim)',
+      fontSize: 12
+    }
+  }, "· ", kb.length, " link", kb.length !== 1 ? 's' : '')), isAdmin && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    style: {
+      marginLeft: 'auto'
+    },
+    onClick: () => setShowForm(s => !s)
+  }, showForm ? '✕ Cancel' : '➕ Add Link')), isAdmin && showForm && /*#__PURE__*/React.createElement("div", {
+    className: "card-body",
+    style: {
+      borderTop: '1px solid var(--border)'
+    }
+  }, /*#__PURE__*/React.createElement("form", {
+    onSubmit: submit,
+    style: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 10,
+      alignItems: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4,
+      flex: '1 1 200px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Title *"), /*#__PURE__*/React.createElement("input", {
+    value: title,
+    onChange: e => setTitle(e.target.value),
+    placeholder: "e.g. Scraper guide"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4,
+      flex: '1 1 240px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "URL *"), /*#__PURE__*/React.createElement("input", {
+    value: url,
+    onChange: e => setUrl(e.target.value),
+    placeholder: "https://…"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4,
+      flex: '0 0 160px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Category"), /*#__PURE__*/React.createElement("input", {
+    value: category,
+    onChange: e => setCategory(e.target.value),
+    placeholder: "General",
+    list: "kb-cats"
+  }), /*#__PURE__*/React.createElement("datalist", {
+    id: "kb-cats"
+  }, catNames.map(c => /*#__PURE__*/React.createElement("option", {
+    key: c,
+    value: c
+  })))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4,
+      flex: '1 1 100%'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "form-label"
+  }, "Description"), /*#__PURE__*/React.createElement("input", {
+    value: desc,
+    onChange: e => setDesc(e.target.value),
+    placeholder: "Short description (optional)"
+  })), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    className: "btn btn-primary",
+    disabled: !title.trim() || !url.trim()
+  }, "Add Link")))), kb.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-body",
+    style: {
+      textAlign: 'center',
+      color: 'var(--text-dim)',
+      padding: '28px'
+    }
+  }, "No knowledge base links yet.", isAdmin ? ' Click “➕ Add Link” to add one.' : '')), catNames.map(c => /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    key: c
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-header"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-title",
+    style: {
+      fontSize: 14
+    }
+  }, c)), /*#__PURE__*/React.createElement("div", {
+    className: "card-body",
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))',
+      gap: 12
+    }
+  }, cats[c].map(l => /*#__PURE__*/React.createElement("div", {
+    key: l.id,
+    style: {
+      border: '1px solid var(--border)',
+      borderRadius: 10,
+      padding: '12px 14px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6,
+      position: 'relative'
+    }
+  }, /*#__PURE__*/React.createElement("a", {
+    href: l.url,
+    target: "_blank",
+    rel: "noreferrer",
+    style: {
+      fontWeight: 700,
+      fontSize: 14,
+      color: 'var(--accent)',
+      textDecoration: 'none',
+      paddingRight: isAdmin ? 22 : 0
+    }
+  }, l.title, " ↗"), l.description && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: 'var(--text-dim)',
+      lineHeight: 1.5
+    }
+  }, l.description), isAdmin && /*#__PURE__*/React.createElement("button", {
+    title: "Remove link",
+    style: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      background: 'none',
+      border: 'none',
+      cursor: 'pointer',
+      color: '#DE350B',
+      fontSize: 13
+    },
+    onClick: () => onDelete(l)
+  }, "🗑")))))));
+}
 function HomeView({
   leads,
   config
@@ -3545,6 +3749,15 @@ function loadSessionsFromSupabase() {
   return SB.from('sessions').select('*').order('login_at', {
     ascending: false
   }).limit(1000).then(({
+    data,
+    error
+  }) => error || !data ? [] : data).catch(() => []);
+}
+function loadKbFromSupabase() {
+  if (!SB) return Promise.resolve([]);
+  return SB.from('kb_links').select('*').order('created_at', {
+    ascending: true
+  }).then(({
     data,
     error
   }) => error || !data ? [] : data).catch(() => []);
@@ -9038,6 +9251,50 @@ function App() {
   useEffect(() => {
     if (SB) loadSessionsFromSupabase().then(setSessions);
   }, []);
+  const [kb, setKb] = useState([]);
+  useEffect(() => {
+    if (SB) loadKbFromSupabase().then(setKb);
+  }, []);
+  function addKb(link) {
+    if (!SB) {
+      addToast('Backend unavailable', 'error');
+      return;
+    }
+    const row = {
+      title: (link.title || '').trim(),
+      description: (link.description || '').trim(),
+      url: (link.url || '').trim(),
+      category: (link.category || 'General').trim() || 'General'
+    };
+    if (!row.title || !row.url) return;
+    if (!/^https?:\/\//i.test(row.url)) row.url = 'https://' + row.url;
+    SB.from('kb_links').insert(row).select().then(({
+      data,
+      error
+    }) => {
+      if (error) {
+        addToast('Could not add link: ' + error.message, 'error');
+        return;
+      }
+      const saved = data && data[0] || row;
+      setKb(k => [...k, saved]);
+      addToast('Knowledge base link added', 'success');
+    });
+  }
+  function deleteKb(item) {
+    if (!SB) return;
+    if (!window.confirm(`Remove “${item.title}” from the knowledge base?`)) return;
+    SB.from('kb_links').delete().eq('id', item.id).then(({
+      error
+    }) => {
+      if (error) {
+        addToast('Delete failed', 'error');
+        return;
+      }
+      setKb(k => k.filter(x => x.id !== item.id));
+      addToast('Link removed', 'info');
+    });
+  }
   // Auto attendance: a login session is created when a user signs in (resumed on
   // reload within 30 min), last_seen is heartbeat-updated while the tab is open,
   // and logout_at is set on sign-out / tab close. No manual buttons.
@@ -9978,6 +10235,10 @@ function App() {
     icon: '🌴',
     label: 'Leaves'
   }, {
+    id: 'knowledge',
+    icon: '📚',
+    label: 'Knowledge Base'
+  }, {
     id: 'attendance',
     icon: '⏱',
     label: 'Attendance'
@@ -10050,6 +10311,12 @@ function App() {
       onFile: fileLeave,
       onDecide: decideLeave,
       onDelete: deleteLeave
+    });
+    if (tab === 'knowledge') return /*#__PURE__*/React.createElement(KnowledgeBaseView, {
+      kb: kb,
+      isAdmin: isAdmin,
+      onAdd: addKb,
+      onDelete: deleteKb
     });
     if (tab === 'attendance') return isAdmin ? /*#__PURE__*/React.createElement(AttendanceView, {
       sessions: sessions,
@@ -10434,7 +10701,7 @@ function App() {
     className: "sct-label"
   }, "Collapse")), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
-  }, "Main"), NAV_MAIN.filter(n => n.id === 'attendance' ? isAdmin : n.id === 'leaves' ? config.tabs.leaves !== false : config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
+  }, "Main"), NAV_MAIN.filter(n => n.id === 'attendance' ? isAdmin : n.id === 'leaves' || n.id === 'knowledge' ? config.tabs[n.id] !== false : config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
     key: n.id,
     title: n.label,
     className: `nav-item ${tab === n.id && !showRepSelect ? 'active' : ''}`,
