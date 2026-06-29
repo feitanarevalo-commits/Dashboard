@@ -2388,12 +2388,12 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
         <div className="stat-card orange" style={{flex:1,minWidth:138}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
       </div>
       <div className="rep-quota-row no-print" style={{display:'flex',gap:12,padding:'0 32px 18px',flexShrink:0,background:'var(--bg)',alignItems:'center',flexWrap:'wrap'}}>
-        <div style={{display:'flex',flexDirection:'column',gap:2,marginRight:6,padding:'10px 14px',background:'#fff',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)'}}>
+        <div style={{display:'flex',flexDirection:'column',gap:2,marginRight:6,padding:'10px 14px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',color:'var(--text)'}}>
           <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'-.01em'}}>📅 Daily Quota</span>
           <span style={{fontSize:10,color:'var(--text-dim)'}}>open potentials per campaign</span>
         </div>
         <input type="date" value={quotaDay} max={todayStr} onChange={e=>setQuotaDay(e.target.value||todayStr)}
-          style={{padding:'8px 12px',border:'1px solid var(--border)',borderRadius:10,fontSize:12,background:'#fff',color:'var(--text)',fontFamily:'inherit'}}/>
+          style={{padding:'8px 12px',border:'1px solid var(--border)',borderRadius:10,fontSize:12,background:'var(--card)',color:'var(--text)',fontFamily:'inherit'}}/>
         <button className="btn btn-ghost btn-sm" onClick={()=>setQuotaDay(todayStr)} disabled={quotaDay===todayStr}>Today</button>
         {(config.campaigns||[]).map(c=>(
           <div key={c.id} className="stat-card" style={{flex:'0 0 auto',minWidth:128,borderLeft:`3px solid ${c.color}`,padding:'14px 16px'}}>
