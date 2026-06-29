@@ -1543,13 +1543,13 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
           </div>
           <div style={{fontSize:11,fontWeight:700,letterSpacing:'.12em',color:accentLight,marginBottom:12}}>{heroEyebrow}</div>
           <h1 style={{fontFamily:SG,fontWeight:700,fontSize:40,lineHeight:1.05,letterSpacing:'-.025em',margin:'0 0 14px',maxWidth:620}}>{heroHeadline}</h1>
-          <p style={{fontSize:16,lineHeight:1.55,color:'rgba(255,255,255,.6)',margin:'0 0 22px',maxWidth:540}}>{heroSub}</p>
-          {isManual && isAdmin && <div style={{marginBottom:24}}>
-            <button onClick={()=>onAddArticle&&onAddArticle()} style={{display:'inline-flex',alignItems:'center',gap:8,padding:'10px 18px',borderRadius:11,fontSize:14,fontWeight:600,background:accent,color:'#fff',border:'none',cursor:'pointer',boxShadow:`0 8px 22px -10px ${accent}`,fontFamily:'inherit'}}>➕ Add Article</button>
-          </div>}
-          <div style={{position:'relative',maxWidth:440}}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth="2.2" strokeLinecap="round" style={{position:'absolute',left:16,top:'50%',transform:'translateY(-50%)'}}><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-            <input className="kbl-search" value={query} onChange={e=>setQuery(e.target.value)} placeholder={searchPh} style={{width:'100%',padding:'13px 16px 13px 46px',fontFamily:'inherit',fontSize:15,color:'#fff',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.14)',borderRadius:13,outline:'none'}}/>
+          <p style={{fontSize:16,lineHeight:1.55,color:'rgba(255,255,255,.6)',margin:'0 0 26px',maxWidth:540}}>{heroSub}</p>
+          <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+            <div style={{position:'relative',flex:'1 1 320px',maxWidth:440}}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth="2.2" strokeLinecap="round" style={{position:'absolute',left:16,top:'50%',transform:'translateY(-50%)'}}><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+              <input className="kbl-search" value={query} onChange={e=>setQuery(e.target.value)} placeholder={searchPh} style={{width:'100%',padding:'13px 16px 13px 46px',fontFamily:'inherit',fontSize:15,color:'#fff',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.14)',borderRadius:13,outline:'none'}}/>
+            </div>
+            {isManual && isAdmin && <button onClick={()=>onAddArticle&&onAddArticle()} title="Add a new article" style={{display:'inline-flex',alignItems:'center',gap:7,padding:'13px 18px',borderRadius:13,fontSize:14,fontWeight:600,background:accent,color:'#fff',border:'none',cursor:'pointer',boxShadow:`0 8px 22px -10px ${accent}`,fontFamily:'inherit',whiteSpace:'nowrap'}}>➕ Add Article</button>}
           </div>
         </div>
       </div>
