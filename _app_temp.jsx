@@ -1912,7 +1912,58 @@ function MyCloseLeads({rep,config,onClose}){
   );
 }
 
-function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssign,onBack,onImportClose,onImportSmartReach}) {
+// ─── ADD LEAD (manual single-lead entry) ──────────────────
+// A rep pastes channel info from YouTube/etc. and it's added under their name.
+function AddLeadModal({rep,config,onAdd,onClose}) {
+  const [name,setName]=useState('');
+  const [url,setUrl]=useState('');
+  const [platform,setPlatform]=useState((typeof PLATFORMS!=='undefined'&&PLATFORMS[0])||'YouTube');
+  const [niche,setNiche]=useState('');
+  const [followers,setFollowers]=useState('');
+  const [emails,setEmails]=useState('');
+  function submit(e){ e.preventDefault(); const n=name.trim(); if(!n) return;
+    onAdd({
+      id: Date.now()+Math.floor(Math.random()*1e6),
+      channelName:n, url:url.trim(), platform, niche:niche.trim(), followers:followers.trim(),
+      emails: emails.split(/[,;\s]+/).map(x=>x.trim()).filter(Boolean),
+      tags:[], campaigns:[], assignedTo:rep, dateAssigned:new Date().toISOString().split('T')[0],
+      lastContactDate:null, channels:[n], addedAt:new Date().toISOString(), source:'manual',
+    });
+    onClose();
+  }
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:480}}>
+        <div className="modal-header">
+          <div><h2>➕ Add Lead</h2><p style={{color:'var(--text-dim)',fontSize:13,marginTop:3}}>Manually add a lead under <b>{rep}</b></p></div>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
+        </div>
+        <form onSubmit={submit} style={{display:'flex',flexDirection:'column',gap:12}}>
+          <div className="form-group"><label className="form-label">Channel Name *</label>
+            <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Bites with Lily" autoFocus/></div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            <div className="form-group"><label className="form-label">Platform</label>
+              <select value={platform} onChange={e=>setPlatform(e.target.value)} style={{width:'100%'}}>{(typeof PLATFORMS!=='undefined'?PLATFORMS:['YouTube']).map(p=><option key={p}>{p}</option>)}</select></div>
+            <div className="form-group"><label className="form-label">Followers / Subs</label>
+              <input value={followers} onChange={e=>setFollowers(e.target.value)} placeholder="e.g. 120K"/></div>
+          </div>
+          <div className="form-group"><label className="form-label">Channel URL</label>
+            <input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://youtube.com/@…"/></div>
+          <div className="form-group"><label className="form-label">Niche / Category</label>
+            <input value={niche} onChange={e=>setNiche(e.target.value)} placeholder="e.g. Cooking"/></div>
+          <div className="form-group"><label className="form-label">Email(s)</label>
+            <input value={emails} onChange={e=>setEmails(e.target.value)} placeholder="comma or space separated"/></div>
+          <div className="modal-footer"><div/><div className="modal-footer-right">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={!name.trim()}>Add Lead</button>
+          </div></div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssign,onBack,onImportClose,onImportSmartReach,onAddLead}) {
   function importToClose(r,ls){
     if(onImportClose) onImportClose(r,ls);
   }
@@ -1950,6 +2001,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const todayStr=ymdLocal(new Date());
   const [quotaDay,setQuotaDay]=useState(todayStr);
   const [showClose,setShowClose]=useState(false);
+  const [showAdd,setShowAdd]=useState(false);
   const dayLeads=myLeads.filter(l=>leadDayStr(l)===quotaDay);
   const campPotential=(campId)=>dayLeads.filter(l=>l.tags.includes('Potential')&&!l.tags.includes('Contacted')&&(l.campaigns||[]).includes(campId)).length;
   const dayContacted=dayLeads.filter(l=>l.tags.includes('Contacted')).length;
@@ -1972,6 +2024,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             title={fresh?`Send ${rep}'s ${fresh} Fresh Potential lead(s) to Close.io (already-imported leads are skipped)`:(potential?'All Potential leads are already imported to Close':'No Potential leads to send yet')}>
             ⬆ Send {fresh} to Close.io
           </button>
+          <button className="btn btn-outline btn-sm" onClick={()=>setShowAdd(true)}
+            title={`Manually add a lead under ${rep}`}>➕ Add Lead</button>
           <button className="btn btn-outline btn-sm" onClick={()=>setShowClose(true)}
             title={`View ${rep}'s leads in Close.io (assigned to them)`}>📁 Close Leads</button>
           <div className="export-group">
@@ -2026,6 +2080,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
         filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
       />
       {showClose && <MyCloseLeads rep={rep} config={config} onClose={()=>setShowClose(false)}/>}
+      {showAdd && <AddLeadModal rep={rep} config={config} onAdd={onAddLead} onClose={()=>setShowAdd(false)}/>}
     </div>
   );
 }
@@ -4066,6 +4121,13 @@ function App() {
   function logH(icon,text){setHistory(h=>[{id:Date.now(),icon,text,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:true},...h]);}
   function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
   function bulkDelete(ids){ if(!ids||!ids.length) return; const set=new Set(ids); setLeads(ls=>ls.filter(l=>!set.has(l.id))); deleteLeadsFromSupabase(ids); logH('🗑',`Bulk: ${ids.length} lead(s) deleted`); addToast(`${ids.length} lead(s) deleted`,'error'); }
+  function addLead(lead){
+    const k=leadKey(lead)+'|'+(lead.assignedTo||'');
+    if(leads.some(l=>leadKey(l)+'|'+(l.assignedTo||'')===k)){ addToast(`"${lead.channelName}" is already in ${lead.assignedTo}'s list`,'info'); return; }
+    setLeads(ls=>[lead,...ls]);
+    logH('➕',`Lead added manually: ${lead.channelName} → ${lead.assignedTo}`);
+    addToast(`✓ "${lead.channelName}" added to ${lead.assignedTo}`,'success');
+  }
   function clearAllLeads(){ const n=leads.length; setLeads([]); leadsSyncRef.current={}; clearAllLeadsFromSupabase(); logH('🗑',`Cleared ALL leads (${n})`); addToast(`Cleared all ${n} lead(s)`,'error'); }
   // Fire-and-forget mirror to the leaves Google Sheet. Uses no-cors + text/plain
   // so it works with a Google Apps Script web app (which can't answer CORS
@@ -4483,7 +4545,7 @@ function App() {
 
   function renderMain(){
     if(showRepSelect) return <RepSelectScreen leads={vLeads} config={config} activeRep={activeRep} onSelect={r=>{if(r){setActiveRep(r);setTab('rep-home');}setShowRepSelect(false);}}/>;
-    if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach}/>;
+    if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config}/>;
