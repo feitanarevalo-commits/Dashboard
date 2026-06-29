@@ -5073,8 +5073,8 @@ function App() {
             })}
           </>}
           <div className="nav-divider"/>
-          <div className="sidebar-section-label">Sales Reps</div>
-          {(config.salesReps||[]).map(r=>{
+          <div className="sidebar-section-label">{isAdmin?'Sales Reps':'My Profile'}</div>
+          {(config.salesReps||[]).filter(r=>isAdmin||r===currentUser.name).map(r=>{
             // Active (non-contacted) leads — the rep's remaining work queue.
             const cnt=vLeads.filter(l=>l.assignedTo===r && !l.tags.includes('Contacted')).length;
             return(

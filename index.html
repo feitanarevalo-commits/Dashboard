@@ -11726,7 +11726,7 @@ function App() {
     className: "nav-divider"
   }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
-  }, "Sales Reps"), (config.salesReps || []).map(r => {
+  }, isAdmin ? 'Sales Reps' : 'My Profile'), (config.salesReps || []).filter(r => isAdmin || r === currentUser.name).map(r => {
     // Active (non-contacted) leads — the rep's remaining work queue.
     const cnt = vLeads.filter(l => l.assignedTo === r && !l.tags.includes('Contacted')).length;
     return /*#__PURE__*/React.createElement("div", {
