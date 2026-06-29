@@ -1397,6 +1397,55 @@ function CloseSearchView({config}) {
 // ─── KNOWLEDGE BASE ───────────────────────────────────────
 // The Sales Operations Manual (KB_ARTICLES) as a navigable, searchable site,
 // plus an admin-managed Quick Links list (kb_links in Supabase).
+// Admin: edit or add a knowledge-base article.
+function ArticleEditModal({article,allArticles,onSave,onClose}){
+  const isNew = !article || !article.id;
+  const [title,setTitle]=useState(article?article.title:'');
+  const [chapter,setChapter]=useState(article?article.chapter:'');
+  const [body,setBody]=useState(article?article.body:'');
+  const chapters=[...new Set((allArticles||[]).map(a=>a.chapter))].sort();
+  function submit(e){
+    e&&e.preventDefault();
+    const t=title.trim(), c=chapter.trim();
+    if(!t||!c) return;
+    const id = isNew ? 'kb_'+Date.now().toString(36)+Math.floor(Math.random()*1000).toString(36) : article.id;
+    onSave({ id, title:t, chapter:c, body });
+  }
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:760,width:'92vw',maxHeight:'90vh',display:'flex',flexDirection:'column'}}>
+        <div className="modal-header">
+          <div><h2>{isNew?'➕ New Article':'✏️ Edit Article'}</h2>{!isNew && <p style={{color:'var(--text-dim)',fontSize:13,marginTop:3}}>{article.title}</p>}</div>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
+        </div>
+        <form onSubmit={submit} style={{display:'flex',flexDirection:'column',gap:14,overflow:'auto'}}>
+          <div className="form-group">
+            <label className="form-label">Title *</label>
+            <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Email Templates" autoFocus required/>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Chapter *</label>
+            <input value={chapter} onChange={e=>setChapter(e.target.value)} placeholder="e.g. 3 · Sales Process" list="kb-chapters-list" required/>
+            <datalist id="kb-chapters-list">{chapters.map(c=><option key={c} value={c}/>)}</datalist>
+            <div style={{fontSize:11,color:'var(--text-light)',marginTop:5,lineHeight:1.4}}>Use an existing chapter or create a new one. Suggested format: <code>N · Chapter Name</code> (the leading number becomes the tile monogram).</div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Body (markdown)</label>
+            <textarea value={body} onChange={e=>setBody(e.target.value)} placeholder={"## Section Title\nIntro paragraph. **Bold** and links like https://example.com auto-render.\n\n### Subsection\n- bullet point\n- another bullet\n\n☐ Checklist item\n☐ Another item\n\n> A highlighted note or callout."} style={{width:'100%',minHeight:300,fontFamily:'ui-monospace,Menlo,Consolas,monospace',fontSize:13,lineHeight:1.55,padding:'10px 12px',resize:'vertical'}}/>
+            <div style={{fontSize:11,color:'var(--text-light)',marginTop:5,lineHeight:1.5}}>Markdown supported: <code>## Heading</code>, <code>### Subhead</code>, <code>- bullet</code>, <code>☐ checklist</code>, <code>**bold**</code>, <code>&gt; note</code>, links auto-detected.</div>
+          </div>
+          <div className="modal-footer">
+            <div/>
+            <div className="modal-footer-right">
+              <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={!title.trim()||!chapter.trim()}>{isNew?'Add Article':'Save Changes'}</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 // Extract a short clean excerpt from an article's markdown body.
 function getKbExcerpt(body, n){
   n=n||160;
@@ -1411,7 +1460,7 @@ function getKbExcerpt(body, n){
   return '';
 }
 // Unified Knowledge Base UI — Tools launchpad + Manual articles (same design language).
-function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack}) {
+function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmin,onAddArticle,onEditArticle,onDeleteArticle}) {
   // Accent options: Blue #2f6bf0/#7db0ff · Indigo #5b5bd6/#a6a6ff · Teal #0f9b8e/#67e8d5 · Violet #7c5cfc/#c4a6ff
   const accent='#5b5bd6', accentLight='#a6a6ff';
   const hexA=(hex,a)=>{ const n=parseInt(hex.slice(1),16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
@@ -1439,7 +1488,13 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack}) {
         <div style={{position:'relative',overflow:'hidden',background:'#15131f',color:'#fff',padding:'28px 0 60px'}}>
           <div style={{position:'absolute',width:560,height:380,borderRadius:'50%',top:-200,right:-80,background:`radial-gradient(circle, ${chapColor} 0%, transparent 70%)`,filter:'blur(80px)',opacity:.45,pointerEvents:'none'}}/>
           <div style={{position:'relative',maxWidth:840,margin:'0 auto',padding:'0 40px'}}>
-            <span className="kbl-back" onClick={onBack} style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:13,fontWeight:600,color:'rgba(255,255,255,.7)',cursor:'pointer',marginBottom:22,userSelect:'none'}}>← Back to manual</span>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:22}}>
+              <span className="kbl-back" onClick={onBack} style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:13,fontWeight:600,color:'rgba(255,255,255,.7)',cursor:'pointer',userSelect:'none'}}>← Back to manual</span>
+              {isAdmin && <div style={{display:'flex',gap:8}}>
+                <button onClick={()=>onEditArticle&&onEditArticle(selected)} style={{padding:'7px 13px',borderRadius:8,fontSize:13,fontWeight:600,background:accent,color:'#fff',border:'none',cursor:'pointer'}}>✏️ Edit</button>
+                <button onClick={()=>onDeleteArticle&&onDeleteArticle(selected.id)} style={{padding:'7px 13px',borderRadius:8,fontSize:13,fontWeight:600,background:'rgba(255,255,255,.1)',color:'rgba(255,255,255,.85)',border:'1px solid rgba(255,255,255,.18)',cursor:'pointer'}}>🗑 Delete</button>
+              </div>}
+            </div>
             <div style={{fontSize:11,fontWeight:700,letterSpacing:'.12em',color:accentLight,marginBottom:10}}>{selected.chapter.replace(/^\d+ · /,'').toUpperCase()}</div>
             <h1 style={{fontFamily:SG,fontWeight:700,fontSize:36,lineHeight:1.1,letterSpacing:'-.02em',margin:0,maxWidth:680}}>{selected.title}</h1>
           </div>
@@ -1488,7 +1543,10 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack}) {
           </div>
           <div style={{fontSize:11,fontWeight:700,letterSpacing:'.12em',color:accentLight,marginBottom:12}}>{heroEyebrow}</div>
           <h1 style={{fontFamily:SG,fontWeight:700,fontSize:40,lineHeight:1.05,letterSpacing:'-.025em',margin:'0 0 14px',maxWidth:620}}>{heroHeadline}</h1>
-          <p style={{fontSize:16,lineHeight:1.55,color:'rgba(255,255,255,.6)',margin:'0 0 26px',maxWidth:540}}>{heroSub}</p>
+          <p style={{fontSize:16,lineHeight:1.55,color:'rgba(255,255,255,.6)',margin:'0 0 22px',maxWidth:540}}>{heroSub}</p>
+          {isManual && isAdmin && <div style={{marginBottom:24}}>
+            <button onClick={()=>onAddArticle&&onAddArticle()} style={{display:'inline-flex',alignItems:'center',gap:8,padding:'10px 18px',borderRadius:11,fontSize:14,fontWeight:600,background:accent,color:'#fff',border:'none',cursor:'pointer',boxShadow:`0 8px 22px -10px ${accent}`,fontFamily:'inherit'}}>➕ Add Article</button>
+          </div>}
           <div style={{position:'relative',maxWidth:440}}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth="2.2" strokeLinecap="round" style={{position:'absolute',left:16,top:'50%',transform:'translateY(-50%)'}}><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
             <input className="kbl-search" value={query} onChange={e=>setQuery(e.target.value)} placeholder={searchPh} style={{width:'100%',padding:'13px 16px 13px 46px',fontFamily:'inherit',fontSize:15,color:'#fff',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.14)',borderRadius:13,outline:'none'}}/>
@@ -1504,7 +1562,8 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack}) {
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16}}>
           {isManual
             ? items.map((a,i)=>{ const cc=CHAPTER_COLORS[a.chapter]||accent; const m=a.chapter.match(/^(\d+)/); const initial=m?m[1]:(a.chapter[0]||'?'); const chapShort=a.chapter.replace(/^\d+ · /,''); return (
-                <div key={a.id} className="kbl-tile" onClick={()=>onSelect(a.id)} style={{display:'flex',flexDirection:'column',cursor:'pointer',background:'#fff',border:'1px solid #ebeaf0',borderRadius:18,padding:20,animationDelay:(i*0.04).toFixed(2)+'s'}}>
+                <div key={a.id} className="kbl-tile" onClick={()=>onSelect(a.id)} style={{display:'flex',flexDirection:'column',cursor:'pointer',background:'#fff',border:'1px solid #ebeaf0',borderRadius:18,padding:20,animationDelay:(i*0.04).toFixed(2)+'s',position:'relative'}}>
+                  {isAdmin && <button onClick={e=>{e.stopPropagation(); onEditArticle&&onEditArticle(a);}} title="Edit article" style={{position:'absolute',top:12,right:12,width:28,height:28,borderRadius:8,border:'1px solid #ebeaf0',background:'#fff',color:'#6b6878',fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,zIndex:1}} className="kbl-tile-edit">✏️</button>}
                   <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:13}}>
                     <div style={{flex:'0 0 46px',width:46,height:46,borderRadius:13,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:SG,fontWeight:700,fontSize:18,color:'#fff',background:cc,boxShadow:`0 7px 16px -6px ${cc}`}}>{initial}</div>
                     <div style={{flex:1,minWidth:0}}>
@@ -1577,19 +1636,31 @@ function renderKbBody(text){
   });
   flush(); return out;
 }
-function KnowledgeBaseView(){
+function KnowledgeBaseView({articles,isAdmin,onSave,onDelete}){
   const tools=(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[]);
-  const articles=(typeof KB_ARTICLES!=='undefined'?KB_ARTICLES:[]);
   const [view,setView]=useState('tools');           // 'tools' | 'manual'
   const [selectedId,setSelectedId]=useState(null);
-  const selected = selectedId ? articles.find(a=>a.id===selectedId) : null;
-  return <KbLaunchpad
-    tools={tools} articles={articles}
-    view={view} onView={v=>{ setView(v); setSelectedId(null); }}
-    selected={selected}
-    onSelect={id=>setSelectedId(id)}
-    onBack={()=>setSelectedId(null)}
-  />;
+  const [editing,setEditing]=useState(null);        // null | 'new' | article object
+  const selected = selectedId ? (articles||[]).find(a=>a.id===selectedId) : null;
+  return <>
+    <KbLaunchpad
+      tools={tools} articles={articles||[]}
+      view={view} onView={v=>{ setView(v); setSelectedId(null); }}
+      selected={selected}
+      onSelect={id=>setSelectedId(id)}
+      onBack={()=>setSelectedId(null)}
+      isAdmin={isAdmin}
+      onAddArticle={()=>setEditing('new')}
+      onEditArticle={a=>setEditing(a)}
+      onDeleteArticle={id=>{ onDelete(id); setSelectedId(null); }}
+    />
+    {editing && <ArticleEditModal
+      article={editing==='new'?null:editing}
+      allArticles={articles||[]}
+      onSave={a=>{ onSave(a); setEditing(null); if(editing==='new') setSelectedId(a.id); }}
+      onClose={()=>setEditing(null)}
+    />}
+  </>;
 }
 
 function HomeView({leads,config}) {
@@ -1983,6 +2054,27 @@ function loadSessionsFromSupabase(){
 function loadKbFromSupabase(){
   if(!SB) return Promise.resolve([]);
   return SB.from('kb_links').select('*').order('created_at',{ascending:true}).then(({data,error})=>(error||!data)?[]:data).catch(()=>[]);
+}
+// Knowledge-base ARTICLES — Supabase source of truth, seeded from config.KB_ARTICLES on first run.
+function loadOrSeedKbArticles(){
+  if(!SB) return Promise.resolve(typeof KB_ARTICLES!=='undefined'?KB_ARTICLES:[]);
+  return SB.from('kb_articles').select('*').order('sort_order',{ascending:true}).then(({data,error})=>{
+    if(error||!data) return typeof KB_ARTICLES!=='undefined'?KB_ARTICLES:[];
+    if(data.length>0) return data;
+    const seed=typeof KB_ARTICLES!=='undefined'?KB_ARTICLES:[];
+    if(!seed.length) return [];
+    const rows=seed.map((a,i)=>({id:a.id,chapter:a.chapter,title:a.title,body:a.body,sort_order:i,updated_at:new Date().toISOString()}));
+    return SB.from('kb_articles').upsert(rows,{onConflict:'id'}).then(()=>seed).catch(()=>seed);
+  }).catch(()=>typeof KB_ARTICLES!=='undefined'?KB_ARTICLES:[]);
+}
+function upsertKbArticleToSupabase(a){
+  if(!SB) return Promise.resolve({ok:true});
+  const row={id:a.id,chapter:a.chapter,title:a.title,body:a.body,sort_order:a.sort_order||0,updated_at:new Date().toISOString()};
+  return SB.from('kb_articles').upsert(row,{onConflict:'id'}).then(({error})=>({ok:!error,error}));
+}
+function deleteKbArticleFromSupabase(id){
+  if(!SB) return Promise.resolve({ok:true});
+  return SB.from('kb_articles').delete().eq('id',String(id)).then(({error})=>({ok:!error,error}));
 }
 
 // ── Replies / interest feed (🔔) ──────────────────────────
@@ -4273,6 +4365,23 @@ function App() {
     if(!SB) return; if(!window.confirm(`Remove “${item.title}” from the knowledge base?`)) return;
     SB.from('kb_links').delete().eq('id',item.id).then(({error})=>{ if(error){ addToast('Delete failed','error'); return; } setKb(k=>k.filter(x=>x.id!==item.id)); addToast('Link removed','info'); });
   }
+  // Knowledge-base ARTICLES (live in Supabase; admins can edit/add/delete).
+  const [kbArticles,setKbArticles]=useState([]);
+  useEffect(()=>{ loadOrSeedKbArticles().then(setKbArticles); },[]);
+  function saveArticle(a){
+    if(!isAdmin){ addToast('Only admins can edit articles','error'); return; }
+    const isNew=!kbArticles.some(x=>x.id===a.id);
+    const row={ ...a, sort_order: isNew?kbArticles.length:(kbArticles.find(x=>x.id===a.id)||{}).sort_order||0 };
+    setKbArticles(arr=> isNew ? [...arr, row] : arr.map(x=>x.id===a.id?{...x,...row}:x));
+    upsertKbArticleToSupabase(row).then(r=>{ if(!r.ok) addToast('Save failed','error'); else addToast(isNew?'Article added':'Article saved','success'); });
+  }
+  function deleteArticle(id){
+    if(!isAdmin){ addToast('Only admins can delete articles','error'); return; }
+    const a=kbArticles.find(x=>x.id===id); if(!a) return;
+    if(!window.confirm(`Delete the article “${a.title}”? This cannot be undone.`)) return;
+    setKbArticles(arr=>arr.filter(x=>x.id!==id));
+    deleteKbArticleFromSupabase(id).then(r=>{ if(!r.ok) addToast('Delete failed','error'); else addToast('Article deleted','info'); });
+  }
   // Auto attendance: a login session is created when a user signs in (resumed on
   // reload within 30 min), last_seen is heartbeat-updated while the tab is open,
   // and logout_at is set on sign-out / tab close. No manual buttons.
@@ -4796,7 +4905,7 @@ function App() {
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
-    if(tab==='knowledge') return <KnowledgeBaseView/>;
+    if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle}/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config}/>;
     if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;
