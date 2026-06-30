@@ -3450,10 +3450,10 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
     setLocal(l=>{
       const users=Array.isArray(l.users)?l.users:[];
       // Add to salesReps AND create a login user with the chosen role and a
-      // default password 'enfinity' so the rep can log in immediately.
+      // default password 'Enfinity26' so the rep can log in immediately.
       // Admins can reset their password via the Reset Teammate's Password tool.
       const hasUser = users.some(u=>u.name===n);
-      const nextUsers = hasUser ? users : [...users, { name:n, role:newRepRole, password:'enfinity' }];
+      const nextUsers = hasUser ? users : [...users, { name:n, role:newRepRole, password:'Enfinity26' }];
       return { ...l, salesReps:[...l.salesReps, n], users: nextUsers };
     });
     setNewRep(''); setNewRepRole('employee');
@@ -3586,7 +3586,7 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
                 </select>
                 <button className="btn btn-outline btn-xs" onClick={addRep}>+ Add</button>
               </div>
-              <div style={{fontSize:10.5,color:'var(--text-light)',marginTop:8,lineHeight:1.5}}>New reps get the default password <b>enfinity</b> — they can change it after first login, or an admin can use “Reset Teammate's Password”.</div>
+              <div style={{fontSize:10.5,color:'var(--text-light)',marginTop:8,lineHeight:1.5}}>New reps get the default password <b>Enfinity26</b> — they can change it after first login, or an admin can use “Reset Teammate's Password”.</div>
             </div>
           </div>
           <div className="drawer-section">

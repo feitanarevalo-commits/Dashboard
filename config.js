@@ -174,15 +174,15 @@ var DEFAULT_CONFIG = {
   //   read them. It is NOT bank-grade security. Change the defaults below.
   //   Admins are: Robert, Chai, Rein, Jon, Jake, Czarina.
   users: [
-    { name: 'Robert',  role: 'admin',    password: 'enfinity' },
-    { name: 'Chai',    role: 'admin',    password: 'enfinity' },
-    { name: 'Rein',    role: 'admin',    password: 'enfinity' },
-    { name: 'Jon',     role: 'admin',    password: 'enfinity' },
-    { name: 'Jake',    role: 'admin',    password: 'enfinity' },
-    { name: 'Czarina', role: 'admin',    password: 'enfinity' },
-    { name: 'Pen',     role: 'employee', password: 'enfinity' },
-    { name: 'Chase',   role: 'employee', password: 'enfinity' },
-    { name: 'Mikka',   role: 'employee', password: 'enfinity' },
+    { name: 'Robert',  role: 'admin',    password: 'Enfinity26' },
+    { name: 'Chai',    role: 'admin',    password: 'Enfinity26' },
+    { name: 'Rein',    role: 'admin',    password: 'Enfinity26' },
+    { name: 'Jon',     role: 'admin',    password: 'Enfinity26' },
+    { name: 'Jake',    role: 'admin',    password: 'Enfinity26' },
+    { name: 'Czarina', role: 'admin',    password: 'Enfinity26' },
+    { name: 'Pen',     role: 'employee', password: 'Enfinity26' },
+    { name: 'Chase',   role: 'employee', password: 'Enfinity26' },
+    { name: 'Mikka',   role: 'employee', password: 'Enfinity26' },
   ],
 
   // Tags shown in the Settings drawer "Status Tags" section

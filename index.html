@@ -7802,13 +7802,13 @@ function SettingsDrawer({
     setLocal(l => {
       const users = Array.isArray(l.users) ? l.users : [];
       // Add to salesReps AND create a login user with the chosen role and a
-      // default password 'enfinity' so the rep can log in immediately.
+      // default password 'Enfinity26' so the rep can log in immediately.
       // Admins can reset their password via the Reset Teammate's Password tool.
       const hasUser = users.some(u => u.name === n);
       const nextUsers = hasUser ? users : [...users, {
         name: n,
         role: newRepRole,
-        password: 'enfinity'
+        password: 'Enfinity26'
       }];
       return {
         ...l,
@@ -8247,7 +8247,7 @@ function SettingsDrawer({
       marginTop: 8,
       lineHeight: 1.5
     }
-  }, "New reps get the default password ", /*#__PURE__*/React.createElement("b", null, "enfinity"), " — they can change it after first login, or an admin can use “Reset Teammate's Password”."))), /*#__PURE__*/React.createElement("div", {
+  }, "New reps get the default password ", /*#__PURE__*/React.createElement("b", null, "Enfinity26"), " — they can change it after first login, or an admin can use “Reset Teammate's Password”."))), /*#__PURE__*/React.createElement("div", {
     className: "drawer-section"
   }, /*#__PURE__*/React.createElement("div", {
     className: "drawer-section-title"
