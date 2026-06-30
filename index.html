@@ -7269,21 +7269,52 @@ function ScraperView({
       // followers", unknowns pass through (no filter to apply).
       const br = FOLLOWER_BRACKETS.find(b => b.v === minF) || FOLLOWER_BRACKETS[0];
       const isAnyBracket = !br.v;
-      const kept = mapped.filter(l => {
+      // Bucket each scraped channel so we can show a breakdown if everything
+      // gets filtered out (the most common confusion is "all 21 were unknown").
+      const buckets = {
+        kept: [],
+        unknown: [],
+        below: [],
+        above: []
+      };
+      mapped.forEach(l => {
         const f = parseFollowers(l.followers);
-        if (isAnyBracket) return true;
-        if (!f) return false;
-        return f >= br.min && f < br.max;
+        if (isAnyBracket) {
+          buckets.kept.push(l);
+          return;
+        }
+        if (!f) {
+          buckets.unknown.push(l);
+          return;
+        }
+        if (f < br.min) {
+          buckets.below.push(l);
+        } else if (f >= br.max) {
+          buckets.above.push(l);
+        } else {
+          buckets.kept.push(l);
+        }
       });
+      const kept = buckets.kept;
       const skipped = mapped.length - kept.length;
+      const skipParts = [];
+      if (buckets.unknown.length) skipParts.push(`${buckets.unknown.length} unknown subs`);
+      if (buckets.below.length) skipParts.push(`${buckets.below.length} below ${br.label.split(' – ')[0] || br.label}`);
+      if (buckets.above.length) skipParts.push(`${buckets.above.length} above ${br.label.split(' – ')[1] || br.label}`);
+      try {
+        if (skipped) console.log('[Enfinity scraper] bracket filter dropped:', skipParts, '| sample unknown:', buckets.unknown[0]?.channelName, '| sample below:', buckets.below[0]?.channelName, buckets.below[0]?.followers, '| sample above:', buckets.above[0]?.channelName, buckets.above[0]?.followers);
+      } catch (e) {}
       // Drop channels already in the Close CRM (the ~628k org) so we only ever
       // surface FRESH leads. Dedup by YouTube channel id / email via close-check.
       // If the check is unavailable/fails, don't block — show everything.
       const checkWh = (config.closeCheckWebhook || '').trim();
       const finish = (fresh, onClose) => {
         if (onResults) onResults(fresh);
-        const extra = (skipped ? ` · ${skipped} outside ${br.label}` : '') + (onClose ? ` · ${onClose} already on Close` : '');
-        addToast(fresh.length ? `✓ ${fresh.length} fresh lead(s) scraped` + extra : onClose ? `All scraped channels are already on Close (${onClose})` : skipped ? `All ${skipped} result(s) were outside ${br.label}` : 'Scraper ran but returned 0 profiles', 'success');
+        const skipDetail = skipParts.length ? skipParts.join(', ') : `outside ${br.label}`;
+        const extra = (skipped ? ` · ${skipDetail}` : '') + (onClose ? ` · ${onClose} already on Close` : '');
+        let emptyMsg;
+        if (onClose) emptyMsg = `All scraped channels are already on Close (${onClose})`;else if (skipped && buckets.unknown.length === skipped) emptyMsg = `All ${skipped} channels came back with unknown subscriber counts (channels.list isn't enriching). Check your API key's Application Restrictions in Google Cloud Console — set them to "None" for server-side use.`;else if (skipped) emptyMsg = `No matches for ${br.label} (${skipDetail}). Try a wider bracket or a different keyword.`;else emptyMsg = 'Scraper ran but returned 0 profiles';
+        addToast(fresh.length ? `✓ ${fresh.length} fresh lead(s) scraped` + extra : emptyMsg, 'success');
       };
       if (checkWh && kept.length) {
         fetch(checkWh, {
