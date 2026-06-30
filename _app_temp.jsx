@@ -5128,9 +5128,12 @@ function App() {
   })();
 
   const recentCutoff=new Date();recentCutoff.setDate(recentCutoff.getDate()-7);
+  // A lead is "Pending Qualification" if it carries that status tag OR it's the
+  // original workflow case (assigned to a rep but not yet sorted into a campaign).
+  const isPendingLead = l => (l.tags||[]).includes('Pending Qualification') || (l.assignedTo && (l.campaigns||[]).length===0);
   const counts={
     potential:vLeads.filter(l=>l.tags.includes('Potential')).length,
-    pending:vLeads.filter(l=>l.assignedTo&&(l.campaigns||[]).length===0).length,
+    pending:vLeads.filter(isPendingLead).length,
     contacted:vLeads.filter(l=>l.tags.includes('Contacted')).length,
     recycle:vLeads.filter(l=>l.tags.includes('For Recycle')).length,
     recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff).length,
@@ -5169,7 +5172,7 @@ function App() {
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
     if(tab==='lead-mgmt') return <LeadMgmtView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} addToast={addToast} config={config}/>;
-    if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&(l.campaigns||[]).length===0)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
+    if(tab==='pending') return <LeadsTable leads={vLeads.filter(isPendingLead)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap}/>;
     if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;

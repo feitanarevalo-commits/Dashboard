@@ -11645,9 +11645,12 @@ function App() {
   }();
   const recentCutoff = new Date();
   recentCutoff.setDate(recentCutoff.getDate() - 7);
+  // A lead is "Pending Qualification" if it carries that status tag OR it's the
+  // original workflow case (assigned to a rep but not yet sorted into a campaign).
+  const isPendingLead = l => (l.tags || []).includes('Pending Qualification') || l.assignedTo && (l.campaigns || []).length === 0;
   const counts = {
     potential: vLeads.filter(l => l.tags.includes('Potential')).length,
-    pending: vLeads.filter(l => l.assignedTo && (l.campaigns || []).length === 0).length,
+    pending: vLeads.filter(isPendingLead).length,
     contacted: vLeads.filter(l => l.tags.includes('Contacted')).length,
     recycle: vLeads.filter(l => l.tags.includes('For Recycle')).length,
     recent: vLeads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff).length,
@@ -11824,7 +11827,7 @@ function App() {
       config: config
     });
     if (tab === 'pending') return /*#__PURE__*/React.createElement(LeadsTable, {
-      leads: vLeads.filter(l => l.assignedTo && (l.campaigns || []).length === 0),
+      leads: vLeads.filter(isPendingLead),
       onEdit: saveL,
       onDelete: delL,
       onBulkDelete: bulkDelete,
