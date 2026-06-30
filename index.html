@@ -7501,6 +7501,11 @@ function ScraperView({
     key: l,
     value: l
   }, l === 'All' ? 'All Languages' : l))));
+
+  // A rep sees only the channels THEY scraped; admins see the whole queue.
+  const myName = currentUser && currentUser.name;
+  const seeAll = isAdminUser(currentUser);
+  const queue = leads.filter(l => !hasStatusTag(l) && leadOrigin(l) !== 'Imported' && (seeAll || l.scrapedBy === myName));
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -7509,7 +7514,7 @@ function ScraperView({
       minHeight: 0
     }
   }, /*#__PURE__*/React.createElement(LeadsTable, {
-    leads: leads.filter(l => !hasStatusTag(l) && leadOrigin(l) !== 'Imported'),
+    leads: queue,
     onEdit: onSave,
     onDelete: onDelete,
     onBulkDelete: onBulkDelete,
@@ -11070,6 +11075,7 @@ function App() {
   }
   function addDiscovered(items) {
     const arr = Array.isArray(items) ? items : [];
+    const myName = currentUser && currentUser.name || '';
     setLeads(existing => {
       // De-dupe by channel (ID > URL > name), both within the batch and vs existing leads.
       const seen = new Set(existing.map(leadKey).filter(Boolean));
@@ -11078,7 +11084,11 @@ function App() {
         const k = leadKey(l);
         if (k && seen.has(k)) return; // same channel already in the list
         if (k) seen.add(k);
-        fresh.push(l);
+        // Stamp who scraped it so the Scraper queue can be scoped per rep.
+        fresh.push({
+          ...l,
+          scrapedBy: l.scrapedBy || myName
+        });
       });
       const dropped = arr.length - fresh.length;
       logH('🔎', `Discovery: ${fresh.length} unique channel(s) added${dropped > 0 ? ` · ${dropped} duplicate(s) skipped` : ''}`);

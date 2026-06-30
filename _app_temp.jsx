@@ -3352,9 +3352,13 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
     </>
   );
 
+  // A rep sees only the channels THEY scraped; admins see the whole queue.
+  const myName=currentUser&&currentUser.name;
+  const seeAll=isAdminUser(currentUser);
+  const queue=leads.filter(l=>!hasStatusTag(l) && leadOrigin(l)!=='Imported' && (seeAll || l.scrapedBy===myName));
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
-      <LeadsTable leads={leads.filter(l=>!hasStatusTag(l) && leadOrigin(l)!=='Imported')} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
+      <LeadsTable leads={queue} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin toolbarStart={runBtn} toolbarAfterSearch={scraperFilters}
         searchValue={keyword} onSearchChange={setKeyword} searchFilters={false} searchPlaceholder="Search query (sent to scraper)…"
         config={config} feats={feats} campColorMap={campColorMap} filename="scraper_queue" printTitle="Scraper Queue"/>
@@ -4772,6 +4776,7 @@ function App() {
 
   function addDiscovered(items){
     const arr=Array.isArray(items)?items:[];
+    const myName=(currentUser&&currentUser.name)||'';
     setLeads(existing=>{
       // De-dupe by channel (ID > URL > name), both within the batch and vs existing leads.
       const seen=new Set(existing.map(leadKey).filter(Boolean));
@@ -4780,7 +4785,8 @@ function App() {
         const k=leadKey(l);
         if(k && seen.has(k)) return;     // same channel already in the list
         if(k) seen.add(k);
-        fresh.push(l);
+        // Stamp who scraped it so the Scraper queue can be scoped per rep.
+        fresh.push({...l, scrapedBy: l.scrapedBy||myName});
       });
       const dropped=arr.length-fresh.length;
       logH('🔎',`Discovery: ${fresh.length} unique channel(s) added${dropped>0?` · ${dropped} duplicate(s) skipped`:''}`);
