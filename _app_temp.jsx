@@ -3185,17 +3185,17 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
     const regionCode=REGION_CODES[language]||'';
     let extraQuery='';
     if(relevanceLanguage){
-      // A chosen language uses relevance ordering + region so results stay
-      // in-language (order=date would flood with high-upload regions instead).
+      // A chosen language stays in-language via relevanceLanguage + region.
       extraQuery+='&relevanceLanguage='+relevanceLanguage;
       if(regionCode) extraQuery+='&regionCode='+regionCode;
-    } else {
-      // No language → newest-first for freshness.
-      extraQuery+='&order=date';
     }
-    // Active channels only: a matching upload within the last 3 months.
-    const since=new Date(); since.setMonth(since.getMonth()-3);
-    extraQuery+='&publishedAfter='+encodeURIComponent(since.toISOString());
+    // IMPORTANT: do NOT add publishedAfter or order=date for channel searches.
+    // For type=channel, publishedAfter filters on the channel's CREATION date
+    // (not recent uploads), so it was restricting results to channels created
+    // in the last 3 months — i.e. brand-new, tiny channels with ~0 subs. And
+    // order=date surfaces the newest (smallest) channels. Default relevance
+    // ordering returns the most relevant, typically ESTABLISHED channels, so
+    // the follower brackets actually have channels to match.
     if(pageToken) extraQuery+='&pageToken='+encodeURIComponent(pageToken);
     // Use the rep's own YouTube API key so each rep has their own 10k/day quota.
     // Lookup order: localStorage (set by the rep themselves on this page) → config
