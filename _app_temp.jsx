@@ -2089,6 +2089,24 @@ function deleteKbArticleFromSupabase(id){
   return SB.from('kb_articles').delete().eq('id',String(id)).then(({error})=>({ok:!error,error}));
 }
 
+// ── Per-rep YouTube API keys (shared across all browsers) ─────────────────
+// Stored in Supabase so a key set by the admin in Customize is visible to the
+// rep on THEIR machine. Without this, keys lived only in the admin's in-memory
+// React state and never reached anyone else.
+function loadRepApiKeysFromSupabase(){
+  if(!SB) return Promise.resolve({});
+  return SB.from('rep_api_keys').select('rep_name,api_key').then(({data,error})=>{
+    if(error||!data) return {};
+    const map={}; data.forEach(r=>{ if(r.api_key) map[r.rep_name]=r.api_key; }); return map;
+  }).catch(()=>({}));
+}
+function saveRepApiKeysToSupabase(keys){
+  if(!SB) return Promise.resolve({ok:true});
+  const rows=Object.keys(keys||{}).map(name=>({rep_name:name,api_key:String(keys[name]||''),updated_at:new Date().toISOString()}));
+  if(!rows.length) return Promise.resolve({ok:true});
+  return SB.from('rep_api_keys').upsert(rows,{onConflict:'rep_name'}).then(({error})=>({ok:!error,error}));
+}
+
 // ── Replies / interest feed (🔔) ──────────────────────────
 // One per reply from SmartReach (prospect replied / category) or Close (inbound
 // email). Scoped to a rep so each person sees only their own.
@@ -4664,7 +4682,13 @@ function App() {
       postLeaveSheet({ event:'decision', ...(saved||{id,...patch}) });
     });
   }
-  function applyConfig(cfg){setConfig(cfg);if(!cfg.tabs[tab])setTab('home');}
+  function applyConfig(cfg){
+    setConfig(cfg);
+    if(!cfg.tabs[tab])setTab('home');
+    // Push per-rep YouTube API keys to Supabase so every rep's browser sees the
+    // key the admin set for them (otherwise they stay in admin's session only).
+    try{ saveRepApiKeysToSupabase(cfg.repApiKeys||{}); }catch(e){}
+  }
   function importLeads(newLeads){
     setLeads(existing=>{
       // Dedupe per (channel + rep): skip a lead only if the SAME rep already has
@@ -4901,6 +4925,9 @@ function App() {
   // Load shared profiles from Supabase once on start, then re-render so avatars
   // / titles / birthdays reflect the team-wide data.
   useEffect(()=>{ loadProfilesFromSupabase().then(()=>setProfileTick(t=>t+1)); },[]);
+  // Per-rep YouTube API keys are shared via Supabase — merge them into config on
+  // load so a rep on their own browser picks up the key the admin set for them.
+  useEffect(()=>{ loadRepApiKeysFromSupabase().then(map=>{ if(map&&Object.keys(map).length) setConfig(c=>({...c,repApiKeys:{...(c.repApiKeys||{}),...map}})); }); },[]);
 
   function importToClose(rep,repLeads){
     const CLOSE_WEBHOOK=(config.closeWebhook||'').trim();
