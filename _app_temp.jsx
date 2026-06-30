@@ -1682,9 +1682,12 @@ function KnowledgeBaseView({articles,isAdmin,onSave,onDelete}){
   </>;
 }
 
-function HomeView({leads,config}) {
+function HomeView({leads,config,currentUser}) {
+  // Non-admins only ever see THEIR OWN metrics: the rep filter is locked to them
+  // and the picker is hidden. Admins keep the full all-reps view + picker.
+  const lockedRep = (currentUser && currentUser.role!=='admin') ? currentUser.name : null;
   const [period,setPeriod]=useState('monthly');
-  const [repFilter,setRepFilter]=useState('');     // '' = all reps, else a single rep
+  const [repFilter,setRepFilter]=useState(lockedRep||'');     // '' = all reps, else a single rep
   const [cStart,setCStart]=useState('');           // custom date range (overrides period)
   const [cEnd,setCEnd]=useState('');
   const custom=!!(cStart&&cEnd);
@@ -1781,11 +1784,13 @@ function HomeView({leads,config}) {
                 <button key={p.id} className={`period-btn${period===p.id?' active':''}`} onClick={()=>{setPeriod(p.id);setCStart('');setCEnd('');}}>{p.label}</button>
               ))}
             </div>
-            <select value={repFilter} onChange={e=>setRepFilter(e.target.value)} title="Filter KPIs by sales rep"
-              style={{padding:'7px 12px',fontSize:13,fontFamily:'inherit'}}>
-              <option value="">👥 All reps</option>
-              {(config.salesReps||[]).map(r=><option key={r} value={r}>{r}</option>)}
-            </select>
+            {lockedRep
+              ? <span title="You see your own metrics" style={{padding:'7px 12px',fontSize:13,fontWeight:600,borderRadius:8,background:'rgba(255,255,255,.12)',color:'#fff'}}>👤 Your metrics</span>
+              : <select value={repFilter} onChange={e=>setRepFilter(e.target.value)} title="Filter KPIs by sales rep"
+                  style={{padding:'7px 12px',fontSize:13,fontFamily:'inherit'}}>
+                  <option value="">👥 All reps</option>
+                  {(config.salesReps||[]).map(r=><option key={r} value={r}>{r}</option>)}
+                </select>}
             <div style={{display:'flex',alignItems:'center',gap:6}} title="Custom date range (overrides the period preset)">
               <input type="date" value={cStart} max={cEnd||undefined} onChange={e=>setCStart(e.target.value)}
                 style={{padding:'6px 10px',fontSize:12,fontFamily:'inherit'}}/>
@@ -5111,10 +5116,10 @@ function App() {
   function renderMain(){
     if(showRepSelect) return <RepSelectScreen leads={vLeads} config={config} activeRep={activeRep} onSelect={r=>{if(r){setActiveRep(r);setTab('rep-home');}setShowRepSelect(false);}}/>;
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead}/>;
-    if(tab==='home') return <HomeView leads={vLeads} config={config}/>;
+    if(tab==='home') return <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
     if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle}/>;
-    if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config}/>;
+    if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
     if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;

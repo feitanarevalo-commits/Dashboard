@@ -3944,10 +3944,14 @@ function KnowledgeBaseView({
 }
 function HomeView({
   leads,
-  config
+  config,
+  currentUser
 }) {
+  // Non-admins only ever see THEIR OWN metrics: the rep filter is locked to them
+  // and the picker is hidden. Admins keep the full all-reps view + picker.
+  const lockedRep = currentUser && currentUser.role !== 'admin' ? currentUser.name : null;
   const [period, setPeriod] = useState('monthly');
-  const [repFilter, setRepFilter] = useState(''); // '' = all reps, else a single rep
+  const [repFilter, setRepFilter] = useState(lockedRep || ''); // '' = all reps, else a single rep
   const [cStart, setCStart] = useState(''); // custom date range (overrides period)
   const [cEnd, setCEnd] = useState('');
   const custom = !!(cStart && cEnd);
@@ -4091,7 +4095,17 @@ function HomeView({
       setCStart('');
       setCEnd('');
     }
-  }, p.label))), /*#__PURE__*/React.createElement("select", {
+  }, p.label))), lockedRep ? /*#__PURE__*/React.createElement("span", {
+    title: "You see your own metrics",
+    style: {
+      padding: '7px 12px',
+      fontSize: 13,
+      fontWeight: 600,
+      borderRadius: 8,
+      background: 'rgba(255,255,255,.12)',
+      color: '#fff'
+    }
+  }, "👤 Your metrics") : /*#__PURE__*/React.createElement("select", {
     value: repFilter,
     onChange: e => setRepFilter(e.target.value),
     title: "Filter KPIs by sales rep",
@@ -11662,7 +11676,8 @@ function App() {
     });
     if (tab === 'home') return /*#__PURE__*/React.createElement(HomeView, {
       leads: vLeads,
-      config: config
+      config: config,
+      currentUser: currentUser
     });
     if (tab === 'leaves') return /*#__PURE__*/React.createElement(LeavesView, {
       leaves: leaves,
@@ -11683,7 +11698,8 @@ function App() {
       config: config
     }) : /*#__PURE__*/React.createElement(HomeView, {
       leads: vLeads,
-      config: config
+      config: config,
+      currentUser: currentUser
     });
     if (tab === 'scraper') return /*#__PURE__*/React.createElement(ScraperView, {
       leads: vLeads,
