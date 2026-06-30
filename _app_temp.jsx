@@ -2693,7 +2693,14 @@ function GoogleImportView({onImport,addToast}) {
     }
     if(!text){
       console.error('All fetch strategies failed:',errors);
-      addToast('Could not load sheet. Ensure it is shared as "Anyone with link can view" and try again.','error');
+      // Detect the most common failure (private sheet → 401/403/redirect to login) and
+      // give a clear, actionable message instead of the generic "could not load".
+      const allErr=errors.join(' · ');
+      const isPrivate = /HTTP (401|403|429)|signin|Sign in|loginredirect|Empty body/i.test(allErr);
+      const msg = isPrivate
+        ? 'Sheet is private. In Google Sheets: File → Share → Anyone with the link → Viewer. Then try again.'
+        : `Could not load sheet (${errors.length} attempts failed). First error: ${errors[0]||'unknown'}. Check that the URL is correct and the sheet is shared "Anyone with link can view".`;
+      addToast(msg,'error');
       setLoading(false);return;
     }
     try{
@@ -3179,7 +3186,16 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
     setLoading(true);
     addToast('Running scraper…','info');
     fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-      .then(r=>r.text().then(t=>{ if(!r.ok) throw new Error('HTTP '+r.status+(t&&t.trim()?' — '+t.replace(/\s+/g,' ').slice(0,140):'')); return {t, nextToken:(r.headers.get('X-Next-Page-Token')||'')}; }))
+      .then(r=>r.text().then(t=>{
+        // Surface YouTube quota errors with the clean message from the Edge Function.
+        if(!r.ok){
+          let parsed=null; try{ parsed=JSON.parse(t); }catch(e){}
+          if(parsed && parsed.quotaExceeded){ throw new Error(parsed.error||'YouTube API quota exceeded'); }
+          if(parsed && parsed.error){ throw new Error(String(parsed.error).slice(0,300)); }
+          throw new Error('HTTP '+r.status+(t&&t.trim()?' — '+t.replace(/\s+/g,' ').slice(0,140):''));
+        }
+        return {t, nextToken:(r.headers.get('X-Next-Page-Token')||'')};
+      }))
       .then(({t:text, nextToken})=>{
         if(!text || !text.trim()){
           addToast('Scraper returned an empty response — in n8n set Respond to Webhook → "Respond With: All Incoming Items" and connect it after Get dataset items','error');
@@ -3622,6 +3638,27 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
                         {photo&&<button className="btn btn-danger btn-xs" onClick={()=>setPhoto('')}>Remove</button>}
                       </div>
                     </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="drawer-section">
+            <div className="drawer-section-title">Per-Rep YouTube API Keys <span style={{fontSize:9,opacity:.6}}>Scraper quota</span></div>
+            <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:10,lineHeight:1.5}}>
+              Each Google Cloud project gets its own <b>10,000 units/day</b> (~100 scraper searches). Give every rep their own key here so the team doesn't share one quota bucket. Blank = falls back to the shared default.
+              <div style={{marginTop:6}}>
+                <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer" style={{color:'var(--accent)'}}>console.cloud.google.com</a> → new project → enable “YouTube Data API v3” → Credentials → Create API key → paste below.
+              </div>
+            </div>
+            <div className="edit-list">
+              {local.salesReps.map(r=>{
+                const k=(local.repApiKeys||{})[r]||'';
+                return (
+                  <div className="edit-row" key={r}>
+                    <div style={{width:88,fontSize:12,fontWeight:600,color:'var(--text)',flexShrink:0}}>{r}</div>
+                    <input value={k} onChange={e=>setLocal(l=>({...l,repApiKeys:{...(l.repApiKeys||{}),[r]:e.target.value}}))} placeholder="AIza…   (paste rep's YouTube Data API key)" style={{flex:1,fontFamily:'monospace',fontSize:11.5}}/>
+                    <span style={{fontSize:10,color:k?'var(--success)':'var(--text-light)',whiteSpace:'nowrap'}} title={k?'Personal key set':'Falls back to shared key'}>{k?'✓ personal':'shared'}</span>
                   </div>
                 );
               })}
