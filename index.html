@@ -7389,101 +7389,9 @@ function ScraperView({
     disabled: loading,
     title: "Run the scraper for the selected filters"
   }, loading ? '⏳ Scraping…' : '▶ Run Scraper');
-  // Personal YouTube API key (per-rep, per-browser). Stored in localStorage so
-  // any rep can set their own key without admin access to Settings.
-  const myKeyLS = (() => {
-    try {
-      return localStorage.getItem('ytKey_' + (currentUser && currentUser.name || '')) || '';
-    } catch (e) {
-      return '';
-    }
-  })();
-  const [myYtKey, setMyYtKey] = useState(myKeyLS);
-  const [showKeyEdit, setShowKeyEdit] = useState(false);
-  const adminKey = (config.repApiKeys || {})[currentUser && currentUser.name] || '';
-  const hasPersonalKey = !!(myYtKey || adminKey);
-  function saveMyKey() {
-    const k = (myYtKey || '').trim();
-    try {
-      if (k) localStorage.setItem('ytKey_' + (currentUser && currentUser.name || ''), k);else localStorage.removeItem('ytKey_' + (currentUser && currentUser.name || ''));
-    } catch (e) {}
-    setShowKeyEdit(false);
-    addToast(k ? 'YouTube API key saved on this device' : 'Personal API key removed', 'success');
-  }
-  const keyBanner = /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10,
-      padding: '10px 16px',
-      background: 'var(--card)',
-      border: '1px solid var(--border)',
-      borderRadius: 'var(--radius-lg)',
-      margin: '12px 24px 0',
-      flexWrap: 'wrap'
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 13,
-      fontWeight: 600
-    }
-  }, "🔑 YouTube API key"), hasPersonalKey ? /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 11,
-      fontWeight: 700,
-      padding: '3px 8px',
-      borderRadius: 999,
-      background: 'var(--success-light)',
-      color: 'var(--success)'
-    }
-  }, "✓ Personal") : /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 11,
-      fontWeight: 700,
-      padding: '3px 8px',
-      borderRadius: 999,
-      background: 'var(--warn-light)',
-      color: 'var(--warn)'
-    }
-  }, "⚠ Shared (limited quota)"), !hasPersonalKey && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      color: 'var(--text-dim)'
-    }
-  }, "You're sharing one 10k/day key with the whole team. ", /*#__PURE__*/React.createElement("a", {
-    href: "https://console.cloud.google.com",
-    target: "_blank",
-    rel: "noreferrer",
-    style: {
-      color: 'var(--accent)'
-    }
-  }, "Create your own key"), " then paste it here."), showKeyEdit ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("input", {
-    value: myYtKey,
-    onChange: e => setMyYtKey(e.target.value),
-    placeholder: "AIza…   paste your key",
-    style: {
-      flex: 1,
-      minWidth: 240,
-      fontFamily: 'monospace',
-      fontSize: 12,
-      marginLeft: 'auto'
-    }
-  }), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-primary btn-sm",
-    onClick: saveMyKey
-  }, "Save"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost btn-sm",
-    onClick: () => {
-      setShowKeyEdit(false);
-      setMyYtKey(myKeyLS);
-    }
-  }, "Cancel")) : /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-outline btn-sm",
-    style: {
-      marginLeft: 'auto'
-    },
-    onClick: () => setShowKeyEdit(true)
-  }, hasPersonalKey ? '✎ Change my key' : '➕ Set my key'));
+  // YouTube API keys are managed centrally by the admin (Customize → Per-Rep
+  // YouTube API Keys, persisted to Supabase). Reps never see a key prompt — the
+  // key is loaded into config.repApiKeys on startup and used by scrape() silently.
   const scraperFilters = /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("select", {
     value: platform,
     onChange: e => setPlatform(e.target.value),
@@ -7514,7 +7422,7 @@ function ScraperView({
       flex: 1,
       minHeight: 0
     }
-  }, keyBanner, /*#__PURE__*/React.createElement(LeadsTable, {
+  }, /*#__PURE__*/React.createElement(LeadsTable, {
     leads: leads.filter(l => !hasStatusTag(l) && leadOrigin(l) !== 'Imported'),
     onEdit: onSave,
     onDelete: onDelete,
