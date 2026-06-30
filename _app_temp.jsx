@@ -3570,6 +3570,7 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
                     <input value={r} onChange={e=>editRep(i,e.target.value)} style={{flex:1}}/>
                     <select value={role} onChange={e=>{ const v=e.target.value; setLocal(l=>({...l,users:(l.users||[]).map(u=>u.name===r?{...u,role:v}:u)})); }} style={{fontSize:11,padding:'5px 7px'}}>
                       <option value="employee">Sales</option>
+                      <option value="leadgen">Leadgen</option>
                       <option value="admin">Admin</option>
                     </select>
                     <button className="btn btn-danger btn-xs" onClick={()=>remRep(r)}>✕</button>
@@ -3580,6 +3581,7 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
                 <input placeholder="Add sales rep..." value={newRep} onChange={e=>setNewRep(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addRep()} style={{flex:1}}/>
                 <select value={newRepRole} onChange={e=>setNewRepRole(e.target.value)} style={{fontSize:11,padding:'5px 7px'}} title="Role">
                   <option value="employee">Sales</option>
+                  <option value="leadgen">Leadgen</option>
                   <option value="admin">Admin</option>
                 </select>
                 <button className="btn btn-outline btn-xs" onClick={addRep}>+ Add</button>
@@ -3835,7 +3837,7 @@ function LoginScreen({config,onLogin}) {
                 </div>
                 <div className="lg-m-as">Signing in as</div>
                 <div className="lg-m-name">{selected.name}</div>
-                <span className={`lg-badge ${selected.role==='admin'?'admin':'sales'}`}>{selected.role==='admin'?'ADMIN':'SALES'}</span>
+                <span className={`lg-badge ${selected.role==='admin'?'admin':(selected.role==='leadgen'?'leadgen':'sales')}`}>{selected.role==='admin'?'ADMIN':(selected.role==='leadgen'?'LEADGEN':'SALES')}</span>
                 <input ref={pwRef} type="password" className="lg-pw" placeholder="Enter your password" value={pw}
                   onChange={e=>{setPw(e.target.value);setErr('');}} disabled={status==='loading'} autoFocus/>
                 {err && <div className="lg-err">{err}</div>}
@@ -5050,6 +5052,7 @@ function App() {
               <RepAvatar rep={currentUser.name} config={config} size={26} online bgOverride="var(--card)"/>
               <div className="topbar-rep-name">{currentUser.name}</div>
               {isAdmin && <span className="role-chip">ADMIN</span>}
+              {currentUser.role==='leadgen' && <span className="role-chip leadgen">LEADGEN</span>}
             </div>
             {(()=>{ const pr=getProfile(currentUser.name); const d=daysUntilBirthday(pr.birthday); return (
               <div className="profile-hovercard">

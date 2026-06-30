@@ -8206,6 +8206,8 @@ function SettingsDrawer({
     }, /*#__PURE__*/React.createElement("option", {
       value: "employee"
     }, "Sales"), /*#__PURE__*/React.createElement("option", {
+      value: "leadgen"
+    }, "Leadgen"), /*#__PURE__*/React.createElement("option", {
       value: "admin"
     }, "Admin")), /*#__PURE__*/React.createElement("button", {
       className: "btn btn-danger btn-xs",
@@ -8232,6 +8234,8 @@ function SettingsDrawer({
   }, /*#__PURE__*/React.createElement("option", {
     value: "employee"
   }, "Sales"), /*#__PURE__*/React.createElement("option", {
+    value: "leadgen"
+  }, "Leadgen"), /*#__PURE__*/React.createElement("option", {
     value: "admin"
   }, "Admin")), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-xs",
@@ -8849,8 +8853,8 @@ function LoginScreen({
   }, "Signing in as"), /*#__PURE__*/React.createElement("div", {
     className: "lg-m-name"
   }, selected.name), /*#__PURE__*/React.createElement("span", {
-    className: `lg-badge ${selected.role === 'admin' ? 'admin' : 'sales'}`
-  }, selected.role === 'admin' ? 'ADMIN' : 'SALES'), /*#__PURE__*/React.createElement("input", {
+    className: `lg-badge ${selected.role === 'admin' ? 'admin' : selected.role === 'leadgen' ? 'leadgen' : 'sales'}`
+  }, selected.role === 'admin' ? 'ADMIN' : selected.role === 'leadgen' ? 'LEADGEN' : 'SALES'), /*#__PURE__*/React.createElement("input", {
     ref: pwRef,
     type: "password",
     className: "lg-pw",
@@ -11677,7 +11681,9 @@ function App() {
     className: "topbar-rep-name"
   }, currentUser.name), isAdmin && /*#__PURE__*/React.createElement("span", {
     className: "role-chip"
-  }, "ADMIN")), (() => {
+  }, "ADMIN"), currentUser.role === 'leadgen' && /*#__PURE__*/React.createElement("span", {
+    className: "role-chip leadgen"
+  }, "LEADGEN")), (() => {
     const pr = getProfile(currentUser.name);
     const d = daysUntilBirthday(pr.birthday);
     return /*#__PURE__*/React.createElement("div", {
