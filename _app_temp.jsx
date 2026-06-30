@@ -3197,8 +3197,9 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
           if(parsed && parsed.error){ throw new Error(String(parsed.error).slice(0,300)); }
           throw new Error('HTTP '+r.status+(t&&t.trim()?' — '+t.replace(/\s+/g,' ').slice(0,140):''));
         }
-        return {t, nextToken:(r.headers.get('X-Next-Page-Token')||'')};
+        return {t, nextToken:(r.headers.get('X-Next-Page-Token')||''), warning:(r.headers.get('X-Scrape-Warning')||'')};
       }))
+      .then(o=>{ if(o.warning) addToast('⚠ '+o.warning,'info'); return o; })
       .then(({t:text, nextToken})=>{
         if(!text || !text.trim()){
           addToast('Scraper returned an empty response — in n8n set Respond to Webhook → "Respond With: All Incoming Items" and connect it after Get dataset items','error');

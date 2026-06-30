@@ -7228,9 +7228,13 @@ function ScraperView({
       }
       return {
         t,
-        nextToken: r.headers.get('X-Next-Page-Token') || ''
+        nextToken: r.headers.get('X-Next-Page-Token') || '',
+        warning: r.headers.get('X-Scrape-Warning') || ''
       };
-    })).then(({
+    })).then(o => {
+      if (o.warning) addToast('⚠ ' + o.warning, 'info');
+      return o;
+    }).then(({
       t: text,
       nextToken
     }) => {
