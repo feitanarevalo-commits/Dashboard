@@ -4646,12 +4646,38 @@ function App() {
   function logH(icon,text){setHistory(h=>[{id:Date.now(),icon,text,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:true},...h]);}
   function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
   function bulkDelete(ids){ if(!ids||!ids.length) return; const set=new Set(ids); setLeads(ls=>ls.filter(l=>!set.has(l.id))); deleteLeadsFromSupabase(ids); logH('🗑',`Bulk: ${ids.length} lead(s) deleted`); addToast(`${ids.length} lead(s) deleted`,'error'); }
+  // Auto-flag leads that already exist in the real Close DB. Runs in the
+  // background after an import or manual add (the scraper already drops Close
+  // dupes up-front). Matches are tagged "Existing Leads" so a rep SEES that the
+  // lead is already in Close instead of unknowingly re-working it. Matches by
+  // YouTube channel id / email via the close-check Edge Function.
+  function checkAndTagFromClose(leadsToCheck, sourceLabel){
+    const checkWh=(config.closeCheckWebhook||'').trim();
+    const checkable=(leadsToCheck||[]).filter(l=>l && (l.channelId||l.url||(Array.isArray(l.emails)&&l.emails.length)));
+    if(!checkWh || !checkable.length) return;
+    const CAP=400;                                  // protect Close from huge bursts
+    const batch=checkable.slice(0,CAP);
+    addToast(`Checking ${batch.length}${checkable.length>CAP?' of '+checkable.length:''} ${sourceLabel} lead(s) against Close…`,'info');
+    fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads:batch.map((l,i)=>({key:i,channelId:l.channelId,url:l.url,emails:l.emails}))})})
+      .then(r=>r.json())
+      .then(resp=>{
+        if(!resp||resp.ok===false) return;
+        const ex=new Set(resp.existing||[]);
+        const matchedKeys=new Set(batch.filter((l,i)=>ex.has(i)).map(leadKey).filter(Boolean));
+        if(!matchedKeys.size){ addToast(`✓ None of the ${sourceLabel} lead(s) are in Close — all fresh`,'success'); return; }
+        setLeads(existing=>existing.map(l=> (matchedKeys.has(leadKey(l)) && !(l.tags||[]).includes('Existing Leads')) ? {...l,tags:[...(l.tags||[]),'Existing Leads']} : l));
+        logH('☁',`Close dedup: ${matchedKeys.size} ${sourceLabel} lead(s) already in Close — tagged "Existing Leads"`);
+        addToast(`⚠ ${matchedKeys.size} ${sourceLabel} lead(s) already in Close — tagged "Existing Leads"`,'info');
+      })
+      .catch(()=>{});
+  }
   function addLead(lead){
     const k=leadKey(lead)+'|'+(lead.assignedTo||'');
     if(leads.some(l=>leadKey(l)+'|'+(l.assignedTo||'')===k)){ addToast(`"${lead.channelName}" is already in ${lead.assignedTo}'s list`,'info'); return; }
     setLeads(ls=>[lead,...ls]);
     logH('➕',`Lead added manually: ${lead.channelName} → ${lead.assignedTo}`);
     addToast(`✓ "${lead.channelName}" added to ${lead.assignedTo}`,'success');
+    checkAndTagFromClose([lead],'manually-added');
   }
   function clearAllLeads(){ const n=leads.length; setLeads([]); leadsSyncRef.current={}; clearAllLeadsFromSupabase(); logH('🗑',`Cleared ALL leads (${n})`); addToast(`Cleared all ${n} lead(s)`,'error'); }
   // Fire-and-forget mirror to the leaves Google Sheet. Uses no-cors + text/plain
@@ -4716,6 +4742,7 @@ function App() {
     });
     autoFileAgencies(newLeads);   // any rows with an "agency" column drop into that Agency folder
     setTab('lead-mgmt');
+    checkAndTagFromClose(newLeads,'imported');   // flag any that already exist in Close
   }
 
   // Agency Sheets import: add the parsed leads to the global pool (deduped per
@@ -4732,6 +4759,7 @@ function App() {
     const keys=[...new Set(arr.map(leadKey).filter(Boolean))];
     setAgencies(a=>a.map(f=>f.id===folderId?{...f,leadKeys:[...new Set([...(f.leadKeys||[]),...keys])]}:f));
     logH('🏢',`Agency import: ${arr.length} lead(s) added to a folder`);
+    checkAndTagFromClose(arr,'agency-imported');   // flag any that already exist in Close
     return keys.length;
   }
 
