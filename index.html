@@ -7410,16 +7410,18 @@ function ScraperView({
       console.log('[Enfinity scraper] pages:', pagesFetched, 'items:', totalItems, '| kept:', kept.length, '| dropped:', skipParts, '| sample below:', buckets.below[0]?.channelName, buckets.below[0]?.followers, '| sample above:', buckets.above[0]?.channelName, buckets.above[0]?.followers);
     } catch (e) {}
 
-    // Drop channels already in the Close CRM so we only surface FRESH leads.
+    // Flag channels already in the Close CRM. We KEEP them in the results (so
+    // reps still see them) and tag them "Existing Leads" instead of dropping.
     const checkWh = (config.closeCheckWebhook || '').trim();
-    const finish = (fresh, onClose) => {
-      if (onResults) onResults(fresh);
+    const finish = (results, inClose) => {
+      if (onResults) onResults(results);
       const skipDetail = skipParts.length ? skipParts.join(', ') : `outside ${br.label}`;
-      const extra = (skipped ? ` · ${skipDetail}` : '') + (onClose ? ` · ${onClose} already on Close` : '');
+      const closeNote = inClose ? ` · ${inClose} already in Close (tagged)` : '';
+      const extra = (skipped ? ` · ${skipDetail}` : '') + closeNote;
       let emptyMsg;
-      if (onClose) emptyMsg = `All ${onClose} matching channels are already on Close — run again to page deeper for new ones.`;else if (skipped && buckets.unknown.length === skipped) emptyMsg = `All ${skipped} channels came back with unknown subscriber counts (channels.list isn't enriching). Check your API key's Application Restrictions in Google Cloud Console — set them to "None" for server-side use.`;else if (skipped) emptyMsg = `No matches for ${br.label} across ${pagesFetched} page(s) (${skipDetail}). Try a wider bracket, a different keyword, or run again to page deeper.`;else emptyMsg = 'Scraper ran but returned 0 profiles';
-      const okMsg = `✓ ${fresh.length} fresh lead(s) scraped` + (rangeLabel ? ` (${rangeLabel})` : '') + extra;
-      addToast(fresh.length ? okMsg : emptyMsg, 'success');
+      if (skipped && buckets.unknown.length === skipped) emptyMsg = `All ${skipped} channels came back with unknown subscriber counts (channels.list isn't enriching). Check your API key's Application Restrictions in Google Cloud Console — set them to "None" for server-side use.`;else if (skipped) emptyMsg = `No matches for ${br.label} across ${pagesFetched} page(s) (${skipDetail}). Try a wider bracket, a different keyword, or run again to page deeper.`;else emptyMsg = 'Scraper ran but returned 0 profiles';
+      const okMsg = `✓ ${results.length} lead(s) scraped` + (rangeLabel ? ` (${rangeLabel})` : '') + extra;
+      addToast(results.length ? okMsg : emptyMsg, 'success');
     };
     if (checkWh && kept.length) {
       try {
@@ -7439,8 +7441,12 @@ function ScraperView({
         });
         const resp = await cr.json();
         const ex = new Set(resp && resp.existing || []);
-        const fresh = kept.filter((l, i) => !ex.has(i));
-        finish(fresh, kept.length - fresh.length);
+        // Tag the in-Close channels rather than dropping them.
+        const tagged = kept.map((l, i) => ex.has(i) ? {
+          ...l,
+          tags: [...(l.tags || []), 'Existing Leads']
+        } : l);
+        finish(tagged, ex.size);
       } catch (e) {
         finish(kept, 0);
       }
