@@ -1350,6 +1350,18 @@ function AttendanceView({sessions,config}) {
 // ─── CLOSE DATABASE SEARCH ────────────────────────────────
 // Live free-text search of the real Close org (~628k leads) to check whether a
 // lead already exists. Replaces the old (now-empty) "loaded from Close" view.
+// Compact date + "Nd ago" for Close conversation timestamps.
+function fmtCloseDate(iso){
+  if(!iso) return '';
+  const d=new Date(iso); if(isNaN(d)) return '';
+  const days=Math.round((Date.now()-d.getTime())/864e5);
+  const ds=d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'2-digit'});
+  return ds+(days>=0?` · ${days===0?'today':days===1?'1d ago':days+'d ago'}`:'');
+}
+// Statuses that mean "don't re-pitch" — highlighted red in the Close search.
+function isNegCloseStatus(s){
+  return /not\s*interested|unqualified|not\s*qualif|do\s*not\s*contact|lost|bad\s*fit|dead|reject|declin/i.test(String(s||''));
+}
 function CloseSearchView({config}) {
   const [q,setQ]=useState('');
   const [leads,setLeads]=useState([]);
@@ -1381,12 +1393,19 @@ function CloseSearchView({config}) {
         <div className="card-body" style={{padding:0,overflowX:'auto'}}>
           {!loading && leads.length===0 && <div style={{padding:'28px 24px',textAlign:'center',color:'var(--text-dim)',fontSize:13,lineHeight:1.6}}>No leads in Close match “{q}”.<br/><span style={{fontSize:12}}>That likely means it's a <b>fresh lead</b> — not in your Close database yet.</span></div>}
           {leads.length>0 && <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-            <thead><tr><th style={th}>Lead / Channel</th><th style={th}>Followers</th><th style={th}>Niche</th><th style={th}>Status</th><th style={th}>Assigned</th><th style={th}></th></tr></thead>
-            <tbody>{leads.map(l=>(<tr key={l.id}>
-              <td style={td}>{l.channelName||l.name}{l.url?<a href={l.url} target="_blank" rel="noreferrer" title={l.url} style={{marginLeft:6,fontSize:11,textDecoration:'none'}}>↗</a>:null}</td>
-              <td style={td}>{l.followers||'—'}</td><td style={td}>{l.niche||'—'}</td><td style={td}>{l.status||'—'}</td><td style={td}>{l.assignedTo||'—'}</td>
-              <td style={td}>{l.closeUrl?<a href={l.closeUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{fontSize:11}}>Open ↗</a>:null}</td>
-            </tr>))}</tbody>
+            <thead><tr><th style={th}>Lead / Channel</th><th style={th}>Followers</th><th style={th}>Niche</th><th style={th}>Status</th><th style={th}>Last Contacted</th><th style={th}>Handled By</th><th style={th}>Assigned</th><th style={th}></th></tr></thead>
+            <tbody>{leads.map(l=>{
+              const neg=isNegCloseStatus(l.status);
+              return (<tr key={l.id}>
+                <td style={td}>{l.channelName||l.name}{l.url?<a href={l.url} target="_blank" rel="noreferrer" title={l.url} style={{marginLeft:6,fontSize:11,textDecoration:'none'}}>↗</a>:null}</td>
+                <td style={td}>{l.followers||'—'}</td><td style={td}>{l.niche||'—'}</td>
+                <td style={td}>{l.status?<span style={{padding:'2px 8px',borderRadius:999,fontSize:11,fontWeight:600,whiteSpace:'nowrap',background:neg?'#FFEBE6':'var(--accent-light)',color:neg?'#DE350B':'var(--accent)'}}>{neg?'⚠ ':''}{l.status}</span>:'—'}</td>
+                <td style={td}>{l.lastContacted?<div><div style={{whiteSpace:'nowrap'}}>{fmtCloseDate(l.lastContacted)}{l.lastContactType?<span style={{color:'var(--text-dim)'}}> · {l.lastContactType}</span>:''}</div>{l.leadReplied?<div style={{fontSize:11,color:'var(--success)',whiteSpace:'nowrap'}}>↩ lead replied {fmtCloseDate(l.leadReplied)}</div>:null}</div>:<span style={{color:'var(--text-light)'}}>never</span>}</td>
+                <td style={td}>{l.handledBy||'—'}</td>
+                <td style={td}>{l.assignedTo||'—'}</td>
+                <td style={td}>{l.closeUrl?<a href={l.closeUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{fontSize:11}}>Open ↗</a>:null}</td>
+              </tr>);
+            })}</tbody>
           </table>}
         </div>
       </div>}
