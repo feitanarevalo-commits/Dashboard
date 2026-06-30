@@ -3222,9 +3222,12 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
         try{ console.log('[Enfinity scraper] received',items.length,'items. First item:',items[0]); }catch(e){}
         const mapped=items.map((it,i)=>mapDiscoveryResult(it,platform==='All'?null:platform,i));
         // Keep only channels INSIDE the selected follower bracket (a band, not
-        // just a minimum). Unknown counts pass through (can't be bracketed).
+        // just a minimum). When a SPECIFIC bracket is selected, unknown/0
+        // followers are DROPPED — they don't match the criteria. With "Any
+        // followers", unknowns pass through (no filter to apply).
         const br=FOLLOWER_BRACKETS.find(b=>b.v===minF)||FOLLOWER_BRACKETS[0];
-        const kept = mapped.filter(l=>{ const f=parseFollowers(l.followers); return !f || (f>=br.min && f<br.max); });
+        const isAnyBracket = !br.v;
+        const kept = mapped.filter(l=>{ const f=parseFollowers(l.followers); if(isAnyBracket) return true; if(!f) return false; return f>=br.min && f<br.max; });
         const skipped = mapped.length - kept.length;
         // Drop channels already in the Close CRM (the ~628k org) so we only ever
         // surface FRESH leads. Dedup by YouTube channel id / email via close-check.
