@@ -3179,9 +3179,12 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
     const since=new Date(); since.setMonth(since.getMonth()-3);
     extraQuery+='&publishedAfter='+encodeURIComponent(since.toISOString());
     if(pageToken) extraQuery+='&pageToken='+encodeURIComponent(pageToken);
-    // Use the logged-in rep's own YouTube API key if they have one (so each rep
-    // has their own 10k/day quota); otherwise Make falls back to the shared key.
-    const apiKey=(config.repApiKeys||{})[currentUser&&currentUser.name]||'';
+    // Use the rep's own YouTube API key so each rep has their own 10k/day quota.
+    // Lookup order: localStorage (set by the rep themselves on this page) → config
+    // (admin-managed) → blank (Edge Function falls back to the shared key).
+    let apiKey='';
+    try{ apiKey=localStorage.getItem('ytKey_'+(currentUser&&currentUser.name||''))||''; }catch(e){}
+    if(!apiKey) apiKey=(config.repApiKeys||{})[currentUser&&currentUser.name]||'';
     const payload={ type:'search', platform, keyword:kw, interest:'', language, relevanceLanguage, order:'date', pageToken, extraQuery, apiKey, minFollowers:parseFollowers(minF), maxFollowers:null, sortBy:'date', limit:50 };
     setLoading(true);
     addToast('Running scraper…','info');
@@ -3254,6 +3257,35 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
       {loading?'⏳ Scraping…':'▶ Run Scraper'}
     </button>
   );
+  // Personal YouTube API key (per-rep, per-browser). Stored in localStorage so
+  // any rep can set their own key without admin access to Settings.
+  const myKeyLS = (()=>{ try{ return localStorage.getItem('ytKey_'+(currentUser&&currentUser.name||''))||''; }catch(e){ return ''; } })();
+  const [myYtKey,setMyYtKey]=useState(myKeyLS);
+  const [showKeyEdit,setShowKeyEdit]=useState(false);
+  const adminKey = (config.repApiKeys||{})[currentUser&&currentUser.name]||'';
+  const hasPersonalKey = !!(myYtKey || adminKey);
+  function saveMyKey(){
+    const k=(myYtKey||'').trim();
+    try{ if(k) localStorage.setItem('ytKey_'+(currentUser&&currentUser.name||''),k); else localStorage.removeItem('ytKey_'+(currentUser&&currentUser.name||'')); }catch(e){}
+    setShowKeyEdit(false);
+    addToast(k?'YouTube API key saved on this device':'Personal API key removed','success');
+  }
+  const keyBanner = (
+    <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 16px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',margin:'12px 24px 0',flexWrap:'wrap'}}>
+      <span style={{fontSize:13,fontWeight:600}}>🔑 YouTube API key</span>
+      {hasPersonalKey
+        ? <span style={{fontSize:11,fontWeight:700,padding:'3px 8px',borderRadius:999,background:'var(--success-light)',color:'var(--success)'}}>✓ Personal</span>
+        : <span style={{fontSize:11,fontWeight:700,padding:'3px 8px',borderRadius:999,background:'var(--warn-light)',color:'var(--warn)'}}>⚠ Shared (limited quota)</span>}
+      {!hasPersonalKey && <span style={{fontSize:12,color:'var(--text-dim)'}}>You're sharing one 10k/day key with the whole team. <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer" style={{color:'var(--accent)'}}>Create your own key</a> then paste it here.</span>}
+      {showKeyEdit
+        ? <>
+            <input value={myYtKey} onChange={e=>setMyYtKey(e.target.value)} placeholder="AIza…   paste your key" style={{flex:1,minWidth:240,fontFamily:'monospace',fontSize:12,marginLeft:'auto'}}/>
+            <button className="btn btn-primary btn-sm" onClick={saveMyKey}>Save</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>{setShowKeyEdit(false);setMyYtKey(myKeyLS);}}>Cancel</button>
+          </>
+        : <button className="btn btn-outline btn-sm" style={{marginLeft:'auto'}} onClick={()=>setShowKeyEdit(true)}>{hasPersonalKey?'✎ Change my key':'➕ Set my key'}</button>}
+    </div>
+  );
   const scraperFilters=(
     <>
       <select value={platform} onChange={e=>setPlatform(e.target.value)} title="Platform">
@@ -3270,10 +3302,13 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
   );
 
   return (
-    <LeadsTable leads={leads.filter(l=>!hasStatusTag(l) && leadOrigin(l)!=='Imported')} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
-      showAssigned showCampaign showOrigin toolbarStart={runBtn} toolbarAfterSearch={scraperFilters}
-      searchValue={keyword} onSearchChange={setKeyword} searchFilters={false} searchPlaceholder="Search query (sent to scraper)…"
-      config={config} feats={feats} campColorMap={campColorMap} filename="scraper_queue" printTitle="Scraper Queue"/>
+    <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
+      {keyBanner}
+      <LeadsTable leads={leads.filter(l=>!hasStatusTag(l) && leadOrigin(l)!=='Imported')} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
+        showAssigned showCampaign showOrigin toolbarStart={runBtn} toolbarAfterSearch={scraperFilters}
+        searchValue={keyword} onSearchChange={setKeyword} searchFilters={false} searchPlaceholder="Search query (sent to scraper)…"
+        config={config} feats={feats} campColorMap={campColorMap} filename="scraper_queue" printTitle="Scraper Queue"/>
+    </div>
   );
 }
 
