@@ -3444,9 +3444,35 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   const [newTag,setNewTag]=useState('');
   const [newCamp,setNewCamp]=useState({label:'',color:'#1366D6'});
   function set(path,val){setLocal(prev=>{const n=JSON.parse(JSON.stringify(prev));const parts=path.split('.');let o=n;for(let i=0;i<parts.length-1;i++)o=o[parts[i]];o[parts[parts.length-1]]=val;return n;});}
-  function addRep(){const n=newRep.trim();if(!n||local.salesReps.includes(n))return;setLocal(l=>({...l,salesReps:[...l.salesReps,n]}));setNewRep('');}
-  function remRep(r){setLocal(l=>({...l,salesReps:l.salesReps.filter(x=>x!==r)}));}
-  function editRep(i,v){setLocal(l=>{const a=[...l.salesReps];a[i]=v;return{...l,salesReps:a};});}
+  const [newRepRole,setNewRepRole]=useState('employee');
+  function addRep(){
+    const n=newRep.trim(); if(!n||local.salesReps.includes(n)) return;
+    setLocal(l=>{
+      const users=Array.isArray(l.users)?l.users:[];
+      // Add to salesReps AND create a login user with the chosen role and a
+      // default password 'enfinity' so the rep can log in immediately.
+      // Admins can reset their password via the Reset Teammate's Password tool.
+      const hasUser = users.some(u=>u.name===n);
+      const nextUsers = hasUser ? users : [...users, { name:n, role:newRepRole, password:'enfinity' }];
+      return { ...l, salesReps:[...l.salesReps, n], users: nextUsers };
+    });
+    setNewRep(''); setNewRepRole('employee');
+  }
+  function remRep(r){
+    setLocal(l=>{
+      const users=Array.isArray(l.users)?l.users:[];
+      return { ...l, salesReps:l.salesReps.filter(x=>x!==r), users: users.filter(u=>u.name!==r) };
+    });
+  }
+  function editRep(i,v){
+    setLocal(l=>{
+      const oldName=l.salesReps[i]; const a=[...l.salesReps]; a[i]=v;
+      const users=Array.isArray(l.users)?l.users:[];
+      // Rename the matching user too (if one exists) so login still works.
+      const nextUsers = users.map(u=>u.name===oldName?{...u,name:v}:u);
+      return { ...l, salesReps:a, users: nextUsers };
+    });
+  }
   function addTag(){const n=newTag.trim();if(!n||local.statusTags.includes(n))return;setLocal(l=>({...l,statusTags:[...l.statusTags,n]}));setNewTag('');}
   function remTag(t){setLocal(l=>({...l,statusTags:l.statusTags.filter(x=>x!==t)}));}
   function addCamp(){const lab=newCamp.label.trim().toUpperCase();if(!lab)return;setLocal(l=>({...l,campaigns:[...l.campaigns,{id:lab,label:lab,color:newCamp.color}]}));setNewCamp({label:'',color:'#1366D6'});}
@@ -3536,16 +3562,29 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
           <div className="drawer-section">
             <div className="drawer-section-title">Sales Reps</div>
             <div className="edit-list">
-              {local.salesReps.map((r,i)=>(
-                <div className="edit-row" key={i}>
-                  <input value={r} onChange={e=>editRep(i,e.target.value)} style={{flex:1}}/>
-                  <button className="btn btn-danger btn-xs" onClick={()=>remRep(r)}>✕</button>
-                </div>
-              ))}
+              {local.salesReps.map((r,i)=>{
+                const user=(local.users||[]).find(u=>u.name===r);
+                const role=user?user.role:'employee';
+                return (
+                  <div className="edit-row" key={i}>
+                    <input value={r} onChange={e=>editRep(i,e.target.value)} style={{flex:1}}/>
+                    <select value={role} onChange={e=>{ const v=e.target.value; setLocal(l=>({...l,users:(l.users||[]).map(u=>u.name===r?{...u,role:v}:u)})); }} style={{fontSize:11,padding:'5px 7px'}}>
+                      <option value="employee">Sales</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                    <button className="btn btn-danger btn-xs" onClick={()=>remRep(r)}>✕</button>
+                  </div>
+                );
+              })}
               <div className="edit-row">
                 <input placeholder="Add sales rep..." value={newRep} onChange={e=>setNewRep(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addRep()} style={{flex:1}}/>
+                <select value={newRepRole} onChange={e=>setNewRepRole(e.target.value)} style={{fontSize:11,padding:'5px 7px'}} title="Role">
+                  <option value="employee">Sales</option>
+                  <option value="admin">Admin</option>
+                </select>
                 <button className="btn btn-outline btn-xs" onClick={addRep}>+ Add</button>
               </div>
+              <div style={{fontSize:10.5,color:'var(--text-light)',marginTop:8,lineHeight:1.5}}>New reps get the default password <b>enfinity</b> — they can change it after first login, or an admin can use “Reset Teammate's Password”.</div>
             </div>
           </div>
           <div className="drawer-section">

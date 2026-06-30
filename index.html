@@ -7795,28 +7795,55 @@ function SettingsDrawer({
       return n;
     });
   }
+  const [newRepRole, setNewRepRole] = useState('employee');
   function addRep() {
     const n = newRep.trim();
     if (!n || local.salesReps.includes(n)) return;
-    setLocal(l => ({
-      ...l,
-      salesReps: [...l.salesReps, n]
-    }));
+    setLocal(l => {
+      const users = Array.isArray(l.users) ? l.users : [];
+      // Add to salesReps AND create a login user with the chosen role and a
+      // default password 'enfinity' so the rep can log in immediately.
+      // Admins can reset their password via the Reset Teammate's Password tool.
+      const hasUser = users.some(u => u.name === n);
+      const nextUsers = hasUser ? users : [...users, {
+        name: n,
+        role: newRepRole,
+        password: 'enfinity'
+      }];
+      return {
+        ...l,
+        salesReps: [...l.salesReps, n],
+        users: nextUsers
+      };
+    });
     setNewRep('');
+    setNewRepRole('employee');
   }
   function remRep(r) {
-    setLocal(l => ({
-      ...l,
-      salesReps: l.salesReps.filter(x => x !== r)
-    }));
+    setLocal(l => {
+      const users = Array.isArray(l.users) ? l.users : [];
+      return {
+        ...l,
+        salesReps: l.salesReps.filter(x => x !== r),
+        users: users.filter(u => u.name !== r)
+      };
+    });
   }
   function editRep(i, v) {
     setLocal(l => {
+      const oldName = l.salesReps[i];
       const a = [...l.salesReps];
       a[i] = v;
+      const users = Array.isArray(l.users) ? l.users : [];
+      // Rename the matching user too (if one exists) so login still works.
+      const nextUsers = users.map(u => u.name === oldName ? {
+        ...u,
+        name: v
+      } : u);
       return {
         ...l,
-        salesReps: a
+        salesReps: a,
+        users: nextUsers
       };
     });
   }
@@ -8148,19 +8175,43 @@ function SettingsDrawer({
     className: "drawer-section-title"
   }, "Sales Reps"), /*#__PURE__*/React.createElement("div", {
     className: "edit-list"
-  }, local.salesReps.map((r, i) => /*#__PURE__*/React.createElement("div", {
-    className: "edit-row",
-    key: i
-  }, /*#__PURE__*/React.createElement("input", {
-    value: r,
-    onChange: e => editRep(i, e.target.value),
-    style: {
-      flex: 1
-    }
-  }), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-danger btn-xs",
-    onClick: () => remRep(r)
-  }, "✕"))), /*#__PURE__*/React.createElement("div", {
+  }, local.salesReps.map((r, i) => {
+    const user = (local.users || []).find(u => u.name === r);
+    const role = user ? user.role : 'employee';
+    return /*#__PURE__*/React.createElement("div", {
+      className: "edit-row",
+      key: i
+    }, /*#__PURE__*/React.createElement("input", {
+      value: r,
+      onChange: e => editRep(i, e.target.value),
+      style: {
+        flex: 1
+      }
+    }), /*#__PURE__*/React.createElement("select", {
+      value: role,
+      onChange: e => {
+        const v = e.target.value;
+        setLocal(l => ({
+          ...l,
+          users: (l.users || []).map(u => u.name === r ? {
+            ...u,
+            role: v
+          } : u)
+        }));
+      },
+      style: {
+        fontSize: 11,
+        padding: '5px 7px'
+      }
+    }, /*#__PURE__*/React.createElement("option", {
+      value: "employee"
+    }, "Sales"), /*#__PURE__*/React.createElement("option", {
+      value: "admin"
+    }, "Admin")), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-danger btn-xs",
+      onClick: () => remRep(r)
+    }, "✕"));
+  }), /*#__PURE__*/React.createElement("div", {
     className: "edit-row"
   }, /*#__PURE__*/React.createElement("input", {
     placeholder: "Add sales rep...",
@@ -8170,10 +8221,29 @@ function SettingsDrawer({
     style: {
       flex: 1
     }
-  }), /*#__PURE__*/React.createElement("button", {
+  }), /*#__PURE__*/React.createElement("select", {
+    value: newRepRole,
+    onChange: e => setNewRepRole(e.target.value),
+    style: {
+      fontSize: 11,
+      padding: '5px 7px'
+    },
+    title: "Role"
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "employee"
+  }, "Sales"), /*#__PURE__*/React.createElement("option", {
+    value: "admin"
+  }, "Admin")), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-xs",
     onClick: addRep
-  }, "+ Add")))), /*#__PURE__*/React.createElement("div", {
+  }, "+ Add")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10.5,
+      color: 'var(--text-light)',
+      marginTop: 8,
+      lineHeight: 1.5
+    }
+  }, "New reps get the default password ", /*#__PURE__*/React.createElement("b", null, "enfinity"), " — they can change it after first login, or an admin can use “Reset Teammate's Password”."))), /*#__PURE__*/React.createElement("div", {
     className: "drawer-section"
   }, /*#__PURE__*/React.createElement("div", {
     className: "drawer-section-title"
