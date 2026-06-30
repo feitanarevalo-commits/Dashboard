@@ -11979,9 +11979,18 @@ function App() {
     style: {
       cursor: 'pointer'
     },
-    onClick: () => setShowProfile(true),
+    title: "Open my dashboard",
+    onClick: () => {
+      setShowRepSelect(false);
+      setActiveRep(currentUser.name);
+      setTab('rep-home');
+    },
     onKeyDown: e => {
-      if (e.key === 'Enter') setShowProfile(true);
+      if (e.key === 'Enter') {
+        setShowRepSelect(false);
+        setActiveRep(currentUser.name);
+        setTab('rep-home');
+      }
     }
   }, /*#__PURE__*/React.createElement(RepAvatar, {
     rep: currentUser.name,
@@ -12011,7 +12020,7 @@ function App() {
       className: "phc-name"
     }, currentUser.name), /*#__PURE__*/React.createElement("div", {
       className: "phc-role"
-    }, currentUser.role === 'admin' ? 'ADMIN' : 'SALES', pr.title ? ` · ${pr.title}` : ''))), pr.email && /*#__PURE__*/React.createElement("div", {
+    }, currentUser.role === 'admin' ? 'ADMIN' : currentUser.role === 'leadgen' ? 'LEADGEN' : 'SALES', pr.title ? ` · ${pr.title}` : ''))), pr.email && /*#__PURE__*/React.createElement("div", {
       className: "phc-row"
     }, /*#__PURE__*/React.createElement("span", null, "✉"), pr.email), pr.birthday && /*#__PURE__*/React.createElement("div", {
       className: "phc-row"
@@ -12024,12 +12033,25 @@ function App() {
       target: "_blank",
       rel: "noreferrer",
       title: l.url
-    }, "🔗 ", l.label || l.url))), !pr.title && !pr.email && !pr.birthday && !(pr.links || []).length && /*#__PURE__*/React.createElement("div", {
-      className: "phc-empty"
-    }, "No details added yet."), /*#__PURE__*/React.createElement("div", {
-      className: "phc-edit",
+    }, "🔗 ", l.label || l.url))), /*#__PURE__*/React.createElement("div", {
+      className: "phc-actions"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "phc-action",
+      onClick: () => {
+        setShowRepSelect(false);
+        setActiveRep(currentUser.name);
+        setTab('rep-home');
+      }
+    }, /*#__PURE__*/React.createElement("span", null, "📊"), "My Dashboard"), /*#__PURE__*/React.createElement("div", {
+      className: "phc-action",
       onClick: () => setShowProfile(true)
-    }, "✎ Edit profile"));
+    }, /*#__PURE__*/React.createElement("span", null, "✎"), "Edit Profile"), /*#__PURE__*/React.createElement("div", {
+      className: "phc-action",
+      onClick: () => setShowChangePw(true)
+    }, /*#__PURE__*/React.createElement("span", null, "🔑"), "Change Password"), /*#__PURE__*/React.createElement("div", {
+      className: "phc-action danger",
+      onClick: logout
+    }, /*#__PURE__*/React.createElement("span", null, "⎋"), "Logout")));
   })()), /*#__PURE__*/React.createElement("button", {
     className: `btn btn-outline btn-sm dark-mode-btn`,
     onClick: () => setDarkMode(d => !d),
@@ -12110,11 +12132,11 @@ function App() {
     }, "●"), c.label, /*#__PURE__*/React.createElement("span", {
       className: "nav-badge"
     }, cnt));
-  })), /*#__PURE__*/React.createElement("div", {
+  })), isAdmin && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "nav-divider"
   }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
-  }, isAdmin ? 'Sales Reps' : 'My Profile'), (config.salesReps || []).filter(r => isAdmin || r === currentUser.name).map(r => {
+  }, "Sales Reps"), (config.salesReps || []).map(r => {
     // Active (non-contacted) leads — the rep's remaining work queue.
     const cnt = vLeads.filter(l => l.assignedTo === r && !l.tags.includes('Contacted')).length;
     return /*#__PURE__*/React.createElement("div", {
@@ -12140,7 +12162,7 @@ function App() {
     })), r, /*#__PURE__*/React.createElement("span", {
       className: "nav-badge"
     }, cnt));
-  }), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1
     }

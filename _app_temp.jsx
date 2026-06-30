@@ -5202,7 +5202,9 @@ function App() {
           })()}
           <div className="profile-pill-wrap">
             <div className="topbar-user-pill" role="button" tabIndex={0} style={{cursor:'pointer'}}
-              onClick={()=>setShowProfile(true)} onKeyDown={e=>{if(e.key==='Enter')setShowProfile(true);}}>
+              title="Open my dashboard"
+              onClick={()=>{setShowRepSelect(false);setActiveRep(currentUser.name);setTab('rep-home');}}
+              onKeyDown={e=>{if(e.key==='Enter'){setShowRepSelect(false);setActiveRep(currentUser.name);setTab('rep-home');}}}>
               <RepAvatar rep={currentUser.name} config={config} size={26} online bgOverride="var(--card)"/>
               <div className="topbar-rep-name">{currentUser.name}</div>
               {isAdmin && <span className="role-chip">ADMIN</span>}
@@ -5214,14 +5216,18 @@ function App() {
                   <RepAvatar rep={currentUser.name} config={config} size={44} bgOverride="var(--card)"/>
                   <div>
                     <div className="phc-name">{currentUser.name}</div>
-                    <div className="phc-role">{currentUser.role==='admin'?'ADMIN':'SALES'}{pr.title?` · ${pr.title}`:''}</div>
+                    <div className="phc-role">{currentUser.role==='admin'?'ADMIN':(currentUser.role==='leadgen'?'LEADGEN':'SALES')}{pr.title?` · ${pr.title}`:''}</div>
                   </div>
                 </div>
                 {pr.email && <div className="phc-row"><span>✉</span>{pr.email}</div>}
                 {pr.birthday && <div className="phc-row"><span>🎂</span>{fmtBirthday(pr.birthday)}{d===0?' · today!':(d!=null&&d<=30?` · in ${d}d`:'')}</div>}
                 {(pr.links||[]).length>0 && <div className="phc-links">{pr.links.map((l,i)=><a key={i} className="phc-link" href={l.url} target="_blank" rel="noreferrer" title={l.url}>🔗 {l.label||l.url}</a>)}</div>}
-                {!pr.title&&!pr.email&&!pr.birthday&&!(pr.links||[]).length && <div className="phc-empty">No details added yet.</div>}
-                <div className="phc-edit" onClick={()=>setShowProfile(true)}>✎ Edit profile</div>
+                <div className="phc-actions">
+                  <div className="phc-action" onClick={()=>{setShowRepSelect(false);setActiveRep(currentUser.name);setTab('rep-home');}}><span>📊</span>My Dashboard</div>
+                  <div className="phc-action" onClick={()=>setShowProfile(true)}><span>✎</span>Edit Profile</div>
+                  <div className="phc-action" onClick={()=>setShowChangePw(true)}><span>🔑</span>Change Password</div>
+                  <div className="phc-action danger" onClick={logout}><span>⎋</span>Logout</div>
+                </div>
               </div>
             ); })()}
           </div>
@@ -5268,9 +5274,12 @@ function App() {
               );
             })}
           </>}
+          {/* Admins navigate every rep here; a rep reaches their OWN dashboard via
+              the topbar profile button (so there's a single profile control). */}
+          {isAdmin && <>
           <div className="nav-divider"/>
-          <div className="sidebar-section-label">{isAdmin?'Sales Reps':'My Profile'}</div>
-          {(config.salesReps||[]).filter(r=>isAdmin||r===currentUser.name).map(r=>{
+          <div className="sidebar-section-label">Sales Reps</div>
+          {(config.salesReps||[]).map(r=>{
             // Active (non-contacted) leads — the rep's remaining work queue.
             const cnt=vLeads.filter(l=>l.assignedTo===r && !l.tags.includes('Contacted')).length;
             return(
@@ -5283,6 +5292,7 @@ function App() {
               </div>
             );
           })}
+          </>}
           <div style={{flex:1}}/>
           <div className="sidebar-footer">
             {isAdmin && <div className="nav-item settings" title="Settings & Customize" onClick={()=>setShowSettings(true)}>
