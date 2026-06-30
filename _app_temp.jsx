@@ -3199,6 +3199,12 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
 
     const br=FOLLOWER_BRACKETS.find(b=>b.v===minF)||FOLLOWER_BRACKETS[0];
     const isAnyBracket = !br.v;
+    // Widen the bracket DOWN by one tier so channels just under the threshold
+    // still count (e.g. "100K – 500K" also keeps 50K–100K). The upper bound is
+    // unchanged. effMin = the previous tier's min.
+    const brIdx=FOLLOWER_BRACKETS.indexOf(br);
+    const effMin = (!isAnyBracket && brIdx>0) ? FOLLOWER_BRACKETS[brIdx-1].min : br.min;
+    const rangeLabel = isAnyBracket ? '' : (fmtFollowers(effMin)+' – '+(br.max===Infinity?'∞':fmtFollowers(br.max)));
     // YouTube search can't filter by subscriber count, so we fetch channels and
     // bucket them client-side. One 50-channel page rarely holds enough matches
     // for a narrow bracket, so KEEP PAGING until we've collected TARGET in-bracket
@@ -3246,7 +3252,7 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
         // Bucket each channel: in-bracket / unknown subs / below / above. Unknown
         // and out-of-band are dropped for a specific bracket; everything passes
         // for "Any followers".
-        mapped.forEach(l=>{ const f=parseFollowers(l.followers); if(isAnyBracket){ buckets.kept.push(l); return; } if(!f){ buckets.unknown.push(l); return; } if(f<br.min){ buckets.below.push(l); } else if(f>=br.max){ buckets.above.push(l); } else { buckets.kept.push(l); } });
+        mapped.forEach(l=>{ const f=parseFollowers(l.followers); if(isAnyBracket){ buckets.kept.push(l); return; } if(!f){ buckets.unknown.push(l); return; } if(f<effMin){ buckets.below.push(l); } else if(f>=br.max){ buckets.above.push(l); } else { buckets.kept.push(l); } });
         lastToken=nextToken; pagesFetched++;
         if(buckets.kept.length>=TARGET) break;   // enough matches collected
         if(!nextToken) break;                     // no more pages from YouTube
@@ -3267,8 +3273,8 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
     const skipped = buckets.unknown.length + buckets.below.length + buckets.above.length;
     const skipParts=[];
     if(buckets.unknown.length) skipParts.push(`${buckets.unknown.length} unknown subs`);
-    if(buckets.below.length)   skipParts.push(`${buckets.below.length} below ${br.label.split(' – ')[0]||br.label}`);
-    if(buckets.above.length)   skipParts.push(`${buckets.above.length} above ${br.label.split(' – ')[1]||br.label}`);
+    if(buckets.below.length)   skipParts.push(`${buckets.below.length} below ${fmtFollowers(effMin)}`);
+    if(buckets.above.length)   skipParts.push(`${buckets.above.length} above ${br.max===Infinity?br.label:fmtFollowers(br.max)}`);
     try{ console.log('[Enfinity scraper] pages:',pagesFetched,'items:',totalItems,'| kept:',kept.length,'| dropped:',skipParts,'| sample below:',buckets.below[0]?.channelName,buckets.below[0]?.followers,'| sample above:',buckets.above[0]?.channelName,buckets.above[0]?.followers); }catch(e){}
 
     // Drop channels already in the Close CRM so we only surface FRESH leads.
@@ -3282,7 +3288,8 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
       else if(skipped && buckets.unknown.length===skipped) emptyMsg=`All ${skipped} channels came back with unknown subscriber counts (channels.list isn't enriching). Check your API key's Application Restrictions in Google Cloud Console — set them to "None" for server-side use.`;
       else if(skipped) emptyMsg=`No matches for ${br.label} across ${pagesFetched} page(s) (${skipDetail}). Try a wider bracket, a different keyword, or run again to page deeper.`;
       else emptyMsg='Scraper ran but returned 0 profiles';
-      addToast(fresh.length ? `✓ ${fresh.length} fresh lead(s) scraped`+extra : emptyMsg,'success');
+      const okMsg = `✓ ${fresh.length} fresh lead(s) scraped`+(rangeLabel?` (${rangeLabel})`:'')+extra;
+      addToast(fresh.length ? okMsg : emptyMsg,'success');
     };
     if(checkWh && kept.length){
       try{
