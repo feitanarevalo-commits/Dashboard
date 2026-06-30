@@ -12,6 +12,13 @@ function getRowClass(lead) {
 }
 function avatarLetter(name){ return name ? name[0].toUpperCase() : '?'; }
 function hasStatusTag(lead){ return STATUS_TAGS.some(t=>lead.tags.includes(t)); }
+// The taggable statuses shown on every lead picker. Driven by the admin-editable
+// config.statusTags (so "+ Add tag" in Customize actually adds a usable tag),
+// with HT always available. Falls back to the built-in STATUSES.
+function statusOptions(config){
+  const base=(config&&Array.isArray(config.statusTags)&&config.statusTags.length)?config.statusTags:STATUSES;
+  return [...new Set([...base,'HT'])];
+}
 // Normalize a raw status/tag string from a sheet into a canonical STATUS_TAGS
 // value, so tag-based routing (Potential → rep, Contacted → Contacted tab, …)
 // works no matter how the sheet spells or cases it. Unknown tags pass through.
@@ -631,7 +638,7 @@ function ContextMenu({x,y,lead,sel,allLeads,config,campColorMap,onEdit,onDelete,
       </div>}
       <div className="ctx-sep"/>
       <div className="ctx-section-label">Tags</div>
-      {[...STATUSES,'HT'].map(t=>{
+      {statusOptions(config).map(t=>{
         const on=live.tags.includes(t);
         const c=TAG_COLORS[t]||{bg:'#F0F2F5',color:'#68737D'};
         return(
@@ -1022,8 +1029,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
         {toolbarAfterSearch}
         <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
           <option value="">All Status</option>
-          {STATUSES.map(s=><option key={s}>{s}</option>)}
-          <option value="HT">HT (High Ticket)</option>
+          {statusOptions(config).map(s=><option key={s} value={s}>{s==='HT'?'HT (High Ticket)':s}</option>)}
         </select>
         {showAssigned && (
           <select value={filterRep} onChange={e=>setFilterRep(e.target.value)}>
@@ -1052,7 +1058,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
           <div className="toolbar-sep"/>
           <span className="bulk-panel-label">Tags</span>
           <div className="bulk-chip">
-            {[...STATUSES,'HT'].map(t=>{
+            {statusOptions(config).map(t=>{
               const on=bulkTags.includes(t);
               const c=TAG_COLORS[t]||{bg:'#F0F2F5',color:'#68737D'};
               return<span key={t} className={`bulk-chip-item${on?' active':''}`}
@@ -1174,7 +1180,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
                   )}
                   {cols.tags && (
                     <td>
-                      <InlinePicker type="tag" selected={lead.tags} options={[...STATUSES,'HT']} campColorMap={campColorMap}
+                      <InlinePicker type="tag" selected={lead.tags} options={statusOptions(config)} campColorMap={campColorMap}
                         onChange={tags=>patchLead(lead.id,{tags})} single/>
                     </td>
                   )}
@@ -2113,6 +2119,32 @@ function deleteKbArticleFromSupabase(id){
   return SB.from('kb_articles').delete().eq('id',String(id)).then(({error})=>({ok:!error,error}));
 }
 
+// ── Dashboard config (sales reps, status tags, tabs, campaigns…) ──────────
+// Persisted so Customize changes by an admin stick across reloads AND apply to
+// every teammate's browser — not just the admin's in-memory session.
+// Merge a saved config over the code defaults: arrays/scalars (salesReps,
+// statusTags, users, campaigns, webhooks) take the saved value; the nested
+// toggle maps deep-merge so NEW tabs/columns/features added in code still appear.
+function mergeConfig(base, over){
+  if(!over || typeof over!=='object') return base;
+  return {
+    ...base, ...over,
+    tabs:{...(base.tabs||{}), ...(over.tabs||{})},
+    columns:{...(base.columns||{}), ...(over.columns||{})},
+    features:{...(base.features||{}), ...(over.features||{})},
+  };
+}
+function loadAppConfigFromSupabase(){
+  if(!SB) return Promise.resolve(null);
+  return SB.from('app_config').select('data').eq('id',1).maybeSingle()
+    .then(({data,error})=>(error||!data)?null:(data.data||null)).catch(()=>null);
+}
+function saveAppConfigToSupabase(cfg){
+  if(!SB) return Promise.resolve({ok:true});
+  return SB.from('app_config').upsert({id:1,data:cfg,updated_at:new Date().toISOString()},{onConflict:'id'})
+    .then(({error})=>({ok:!error,error}));
+}
+
 // ── Per-rep YouTube API keys (shared across all browsers) ─────────────────
 // Stored in Supabase so a key set by the admin in Customize is visible to the
 // rep on THEIR machine. Without this, keys lived only in the admin's in-memory
@@ -2934,7 +2966,7 @@ function ProfilePanel({lead,config,campColorMap,onClose,onSave,onDelete,addToast
           <div className="profile-section">
             <div className="profile-section-title">Status Tags</div>
             <div className="tag-grid">
-              {[...STATUSES,'HT'].map(t=>{
+              {statusOptions(config).map(t=>{
                 const on=form.tags.includes(t); const c=TAG_COLORS[t]||{bg:'#F0F2F5',color:'#68737D'};
                 return <button key={t} type="button" className={`tag-btn${on?' on':''}`} style={on?{background:c.bg,color:c.color,borderColor:c.color}:{}} onClick={()=>toggleTag(t)}>{t==='HT'?'⚡ HT':t}</button>;
               })}
@@ -4730,8 +4762,11 @@ function App() {
   function applyConfig(cfg){
     setConfig(cfg);
     if(!cfg.tabs[tab])setTab('home');
-    // Push per-rep YouTube API keys to Supabase so every rep's browser sees the
-    // key the admin set for them (otherwise they stay in admin's session only).
+    // Persist the whole config to Supabase so Customize changes (sales reps,
+    // status tags, tabs, campaigns…) stick across reloads and reach every
+    // teammate — not just this admin's session.
+    try{ saveAppConfigToSupabase(cfg).then(r=>{ if(!r||r.ok===false) addToast('Saved locally, but the cloud sync failed — check connection','error'); }); }catch(e){}
+    // Per-rep YouTube API keys also go to their dedicated table.
     try{ saveRepApiKeysToSupabase(cfg.repApiKeys||{}); }catch(e){}
   }
   function importLeads(newLeads){
@@ -4974,6 +5009,10 @@ function App() {
   // Load shared profiles from Supabase once on start, then re-render so avatars
   // / titles / birthdays reflect the team-wide data.
   useEffect(()=>{ loadProfilesFromSupabase().then(()=>setProfileTick(t=>t+1)); },[]);
+  // Load the team's saved dashboard config (sales reps, status tags, tabs,
+  // campaigns…) so an admin's Customize changes apply on every browser, not
+  // just where they were made. Merged over the code defaults.
+  useEffect(()=>{ loadAppConfigFromSupabase().then(saved=>{ if(saved) setConfig(c=>mergeConfig(c,saved)); }); },[]);
   // Per-rep YouTube API keys are shared via Supabase — merge them into config on
   // load so a rep on their own browser picks up the key the admin set for them.
   useEffect(()=>{ loadRepApiKeysFromSupabase().then(map=>{ if(map&&Object.keys(map).length) setConfig(c=>({...c,repApiKeys:{...(c.repApiKeys||{}),...map}})); }); },[]);
