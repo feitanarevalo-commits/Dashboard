@@ -3168,7 +3168,7 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
 
-  function scrape(){
+  async function scrape(){
     const wh=(config.scrapeWebhook||'').trim();
     if(!wh || wh.includes('your-') || wh.includes('webhook-id')){
       addToast('No scraper webhook set — add it in ⚙ Customize → Scraper Webhook','info');
@@ -3178,113 +3178,122 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
     const relevanceLanguage=LANG_CODES[language]||'';
     // Pagination memory: continue from where this keyword+language left off so
     // each run returns fresh channels (stored per browser).
-    const pageKey='srPage_'+kw.toLowerCase()+'|'+relevanceLanguage;
+    const pageKey='srPage2_'+kw.toLowerCase()+'|'+relevanceLanguage;
     let pageToken=''; try{ pageToken=localStorage.getItem(pageKey)||''; }catch(e){}
     // Pre-build the optional query fragment so Make just appends it (no fragile
     // conditional logic in the scenario). Empty when first page / all languages.
     const regionCode=REGION_CODES[language]||'';
-    let extraQuery='';
-    if(relevanceLanguage){
-      // A chosen language stays in-language via relevanceLanguage + region.
-      extraQuery+='&relevanceLanguage='+relevanceLanguage;
-      if(regionCode) extraQuery+='&regionCode='+regionCode;
-    }
-    // IMPORTANT: do NOT add publishedAfter or order=date for channel searches.
-    // For type=channel, publishedAfter filters on the channel's CREATION date
-    // (not recent uploads), so it was restricting results to channels created
-    // in the last 3 months — i.e. brand-new, tiny channels with ~0 subs. And
-    // order=date surfaces the newest (smallest) channels. Default relevance
-    // ordering returns the most relevant, typically ESTABLISHED channels, so
-    // the follower brackets actually have channels to match.
-    if(pageToken) extraQuery+='&pageToken='+encodeURIComponent(pageToken);
+    // Base query fragment (no publishedAfter / order=date — for type=channel
+    // searches publishedAfter filters on the channel's CREATION date, which
+    // restricted results to brand-new tiny channels; default relevance ordering
+    // surfaces established channels). Language stays in-language via region.
+    const baseExtra = relevanceLanguage
+      ? ('&relevanceLanguage='+relevanceLanguage + (regionCode?'&regionCode='+regionCode:''))
+      : '';
     // Use the rep's own YouTube API key so each rep has their own 10k/day quota.
-    // Lookup order: localStorage (set by the rep themselves on this page) → config
-    // (admin-managed) → blank (Edge Function falls back to the shared key).
+    // Lookup order: localStorage → config (admin-managed, synced from Supabase)
+    // → blank (Edge Function falls back to the shared key).
     let apiKey='';
     try{ apiKey=localStorage.getItem('ytKey_'+(currentUser&&currentUser.name||''))||''; }catch(e){}
     if(!apiKey) apiKey=(config.repApiKeys||{})[currentUser&&currentUser.name]||'';
-    const payload={ type:'search', platform, keyword:kw, interest:'', language, relevanceLanguage, order:'date', pageToken, extraQuery, apiKey, minFollowers:parseFollowers(minF), maxFollowers:null, sortBy:'date', limit:50 };
+
+    const br=FOLLOWER_BRACKETS.find(b=>b.v===minF)||FOLLOWER_BRACKETS[0];
+    const isAnyBracket = !br.v;
+    // YouTube search can't filter by subscriber count, so we fetch channels and
+    // bucket them client-side. One 50-channel page rarely holds enough matches
+    // for a narrow bracket, so KEEP PAGING until we've collected TARGET in-bracket
+    // channels or hit MAX_PAGES. "Any followers" needs only one page.
+    const TARGET = 24;
+    const MAX_PAGES = isAnyBracket ? 1 : 5;
+    const buckets={kept:[],unknown:[],below:[],above:[]};
+    let lastToken=pageToken, pagesFetched=0, totalItems=0, warned=false;
+
     setLoading(true);
     addToast('Running scraper…','info');
-    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-      .then(r=>r.text().then(t=>{
-        // Surface YouTube quota errors with the clean message from the Edge Function.
+    try{
+      for(let page=0; page<MAX_PAGES; page++){
+        let extraQuery=baseExtra;
+        if(lastToken) extraQuery+='&pageToken='+encodeURIComponent(lastToken);
+        const payload={ type:'search', platform, keyword:kw, interest:'', language, relevanceLanguage, pageToken:lastToken, extraQuery, apiKey, minFollowers:parseFollowers(minF), maxFollowers:null, limit:50 };
+        const r=await fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        const text=await r.text();
         if(!r.ok){
-          let parsed=null; try{ parsed=JSON.parse(t); }catch(e){}
+          // Surface YouTube quota errors with the clean message from the Edge Function.
+          let parsed=null; try{ parsed=JSON.parse(text); }catch(e){}
           if(parsed && parsed.quotaExceeded){ throw new Error(parsed.error||'YouTube API quota exceeded'); }
           if(parsed && parsed.error){ throw new Error(String(parsed.error).slice(0,300)); }
-          throw new Error('HTTP '+r.status+(t&&t.trim()?' — '+t.replace(/\s+/g,' ').slice(0,140):''));
+          throw new Error('HTTP '+r.status+(text&&text.trim()?' — '+text.replace(/\s+/g,' ').slice(0,140):''));
         }
-        return {t, nextToken:(r.headers.get('X-Next-Page-Token')||''), warning:(r.headers.get('X-Scrape-Warning')||'')};
-      }))
-      .then(o=>{ if(o.warning) addToast('⚠ '+o.warning,'info'); return o; })
-      .then(({t:text, nextToken})=>{
+        const nextToken=r.headers.get('X-Next-Page-Token')||'';
+        const warning=r.headers.get('X-Scrape-Warning')||'';
+        if(warning && !warned){ addToast('⚠ '+warning,'info'); warned=true; }
         if(!text || !text.trim()){
-          addToast('Scraper returned an empty response — in n8n set Respond to Webhook → "Respond With: All Incoming Items" and connect it after Get dataset items','error');
-          return;
+          if(page===0) addToast('Scraper returned an empty response — in n8n set Respond to Webhook → "Respond With: All Incoming Items" and connect it after Get dataset items','error');
+          lastToken=nextToken; break;
         }
         let data;
         try{ data=JSON.parse(text); }
         catch(err){
-          if(text.trim().toLowerCase()==='accepted'){
-            addToast('Make returned its default "Accepted" — add an Array Aggregator before the Webhook Response and have it return the JSON array (Content-Type: application/json)','error');
-          } else {
-            addToast('Scraper response was not valid JSON (got: '+text.slice(0,60)+'…)','error');
+          if(page===0){
+            if(text.trim().toLowerCase()==='accepted') addToast('Make returned its default "Accepted" — add an Array Aggregator before the Webhook Response and have it return the JSON array (Content-Type: application/json)','error');
+            else addToast('Scraper response was not valid JSON (got: '+text.slice(0,60)+'…)','error');
           }
-          return;
+          lastToken=nextToken; break;
         }
         const items=Array.isArray(data)?data:(data.results||data.items||data.data||[]);
-        // Advance / reset the pagination cursor (from the X-Next-Page-Token header).
-        const tok=nextToken||((data&&!Array.isArray(data)&&data.nextPageToken)||'');
-        try{ if(tok) localStorage.setItem(pageKey,tok); else localStorage.removeItem(pageKey); }catch(e){}
-        try{ console.log('[Enfinity scraper] received',items.length,'items. First item:',items[0]); }catch(e){}
-        const mapped=items.map((it,i)=>mapDiscoveryResult(it,platform==='All'?null:platform,i));
-        // Keep only channels INSIDE the selected follower bracket (a band, not
-        // just a minimum). When a SPECIFIC bracket is selected, unknown/0
-        // followers are DROPPED — they don't match the criteria. With "Any
-        // followers", unknowns pass through (no filter to apply).
-        const br=FOLLOWER_BRACKETS.find(b=>b.v===minF)||FOLLOWER_BRACKETS[0];
-        const isAnyBracket = !br.v;
-        // Bucket each scraped channel so we can show a breakdown if everything
-        // gets filtered out (the most common confusion is "all 21 were unknown").
-        const buckets={kept:[],unknown:[],below:[],above:[]};
+        totalItems+=items.length;
+        const mapped=items.map((it,i)=>mapDiscoveryResult(it,platform==='All'?null:platform,page*50+i));
+        // Bucket each channel: in-bracket / unknown subs / below / above. Unknown
+        // and out-of-band are dropped for a specific bracket; everything passes
+        // for "Any followers".
         mapped.forEach(l=>{ const f=parseFollowers(l.followers); if(isAnyBracket){ buckets.kept.push(l); return; } if(!f){ buckets.unknown.push(l); return; } if(f<br.min){ buckets.below.push(l); } else if(f>=br.max){ buckets.above.push(l); } else { buckets.kept.push(l); } });
-        const kept = buckets.kept;
-        const skipped = mapped.length - kept.length;
-        const skipParts=[];
-        if(buckets.unknown.length) skipParts.push(`${buckets.unknown.length} unknown subs`);
-        if(buckets.below.length)   skipParts.push(`${buckets.below.length} below ${br.label.split(' – ')[0]||br.label}`);
-        if(buckets.above.length)   skipParts.push(`${buckets.above.length} above ${br.label.split(' – ')[1]||br.label}`);
-        try{ if(skipped) console.log('[Enfinity scraper] bracket filter dropped:', skipParts, '| sample unknown:', buckets.unknown[0]?.channelName, '| sample below:', buckets.below[0]?.channelName, buckets.below[0]?.followers, '| sample above:', buckets.above[0]?.channelName, buckets.above[0]?.followers); }catch(e){}
-        // Drop channels already in the Close CRM (the ~628k org) so we only ever
-        // surface FRESH leads. Dedup by YouTube channel id / email via close-check.
-        // If the check is unavailable/fails, don't block — show everything.
-        const checkWh=(config.closeCheckWebhook||'').trim();
-        const finish=(fresh,onClose)=>{
-          if(onResults) onResults(fresh);
-          const skipDetail = skipParts.length ? skipParts.join(', ') : `outside ${br.label}`;
-          const extra=(skipped?` · ${skipDetail}`:'')+(onClose?` · ${onClose} already on Close`:'');
-          let emptyMsg;
-          if(onClose) emptyMsg=`All scraped channels are already on Close (${onClose})`;
-          else if(skipped && buckets.unknown.length===skipped) emptyMsg=`All ${skipped} channels came back with unknown subscriber counts (channels.list isn't enriching). Check your API key's Application Restrictions in Google Cloud Console — set them to "None" for server-side use.`;
-          else if(skipped) emptyMsg=`No matches for ${br.label} (${skipDetail}). Try a wider bracket or a different keyword.`;
-          else emptyMsg='Scraper ran but returned 0 profiles';
-          addToast(fresh.length ? `✓ ${fresh.length} fresh lead(s) scraped`+extra : emptyMsg,'success');
-        };
-        if(checkWh && kept.length){
-          fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads:kept.map((l,i)=>({key:i,channelId:l.channelId,url:l.url,emails:l.emails}))})})
-            .then(r=>r.json())
-            .then(resp=>{ const ex=new Set((resp&&resp.existing)||[]); const fresh=kept.filter((l,i)=>!ex.has(i)); finish(fresh,kept.length-fresh.length); })
-            .catch(()=>finish(kept,0));
-        } else { finish(kept,0); }
-      })
-      .catch(e=>{
-        const cors=(e&&e.message||'').toLowerCase().includes('failed to fetch');
-        addToast(cors
-          ? 'Scrape blocked (CORS): the response is missing Access-Control-Allow-Origin. Make → add header key "Access-Control-Allow-Origin" = "*" in the Webhook Response module. n8n → set the Webhook node "Allowed Origins" to *.'
-          : `Scrape failed: ${e.message}`,'error');
-      })
-      .finally(()=>setLoading(false));
+        lastToken=nextToken; pagesFetched++;
+        if(buckets.kept.length>=TARGET) break;   // enough matches collected
+        if(!nextToken) break;                     // no more pages from YouTube
+      }
+    }catch(e){
+      setLoading(false);
+      const cors=(e&&e.message||'').toLowerCase().includes('failed to fetch');
+      addToast(cors
+        ? 'Scrape blocked (CORS): the response is missing Access-Control-Allow-Origin. Make → add header key "Access-Control-Allow-Origin" = "*" in the Webhook Response module. n8n → set the Webhook node "Allowed Origins" to *.'
+        : `Scrape failed: ${e.message}`,'error');
+      return;
+    }
+    // Save the cursor so the next run continues deeper (fresh channels). Clear
+    // when YouTube has no more pages so an identical search restarts from the top.
+    try{ if(lastToken) localStorage.setItem(pageKey,lastToken); else localStorage.removeItem(pageKey); }catch(e){}
+
+    const kept = buckets.kept;
+    const skipped = buckets.unknown.length + buckets.below.length + buckets.above.length;
+    const skipParts=[];
+    if(buckets.unknown.length) skipParts.push(`${buckets.unknown.length} unknown subs`);
+    if(buckets.below.length)   skipParts.push(`${buckets.below.length} below ${br.label.split(' – ')[0]||br.label}`);
+    if(buckets.above.length)   skipParts.push(`${buckets.above.length} above ${br.label.split(' – ')[1]||br.label}`);
+    try{ console.log('[Enfinity scraper] pages:',pagesFetched,'items:',totalItems,'| kept:',kept.length,'| dropped:',skipParts,'| sample below:',buckets.below[0]?.channelName,buckets.below[0]?.followers,'| sample above:',buckets.above[0]?.channelName,buckets.above[0]?.followers); }catch(e){}
+
+    // Drop channels already in the Close CRM so we only surface FRESH leads.
+    const checkWh=(config.closeCheckWebhook||'').trim();
+    const finish=(fresh,onClose)=>{
+      if(onResults) onResults(fresh);
+      const skipDetail = skipParts.length ? skipParts.join(', ') : `outside ${br.label}`;
+      const extra=(skipped?` · ${skipDetail}`:'')+(onClose?` · ${onClose} already on Close`:'');
+      let emptyMsg;
+      if(onClose) emptyMsg=`All ${onClose} matching channels are already on Close — run again to page deeper for new ones.`;
+      else if(skipped && buckets.unknown.length===skipped) emptyMsg=`All ${skipped} channels came back with unknown subscriber counts (channels.list isn't enriching). Check your API key's Application Restrictions in Google Cloud Console — set them to "None" for server-side use.`;
+      else if(skipped) emptyMsg=`No matches for ${br.label} across ${pagesFetched} page(s) (${skipDetail}). Try a wider bracket, a different keyword, or run again to page deeper.`;
+      else emptyMsg='Scraper ran but returned 0 profiles';
+      addToast(fresh.length ? `✓ ${fresh.length} fresh lead(s) scraped`+extra : emptyMsg,'success');
+    };
+    if(checkWh && kept.length){
+      try{
+        const cr=await fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads:kept.map((l,i)=>({key:i,channelId:l.channelId,url:l.url,emails:l.emails}))})});
+        const resp=await cr.json();
+        const ex=new Set((resp&&resp.existing)||[]);
+        const fresh=kept.filter((l,i)=>!ex.has(i));
+        finish(fresh,kept.length-fresh.length);
+      }catch(e){ finish(kept,0); }
+    } else { finish(kept,0); }
+    setLoading(false);
   }
 
   const runBtn=(
