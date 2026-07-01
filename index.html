@@ -10857,12 +10857,17 @@ function App() {
     setLeads(ls => ls.map(l => l.id === updated.id ? updated : l));
     logH('✏️', `Lead "${updated.channelName}" updated`);
   }
+  // A lead "belongs" to a rep if they scraped it or it's assigned to them.
+  function ownsLead(l) {
+    return !!l && (l.assignedTo === currentUser.name || l.scrapedBy === currentUser.name);
+  }
   function delL(id) {
-    if (!isAdmin) {
-      addToast('Only admins can delete leads', 'error');
+    const l = leads.find(x => x.id === id);
+    // Reps may delete their OWN leads; admins may delete anything.
+    if (!isAdmin && !ownsLead(l)) {
+      addToast('You can only delete your own leads', 'error');
       return;
     }
-    const l = leads.find(x => x.id === id);
     setLeads(ls => ls.filter(x => x.id !== id));
     deleteLeadFromSupabase(id);
     logH('🗑', `Lead "${l?.channelName}" deleted`);
@@ -10890,11 +10895,21 @@ function App() {
   }
   function bulkDelete(ids) {
     if (!ids || !ids.length) return;
-    const set = new Set(ids);
+    // Non-admins can only bulk-delete leads they own; skip the rest.
+    let target = ids;
+    if (!isAdmin) {
+      const mine = new Set(leads.filter(ownsLead).map(l => l.id));
+      target = ids.filter(id => mine.has(id));
+    }
+    if (!target.length) {
+      addToast('You can only delete your own leads', 'error');
+      return;
+    }
+    const set = new Set(target);
     setLeads(ls => ls.filter(l => !set.has(l.id)));
-    deleteLeadsFromSupabase(ids);
-    logH('🗑', `Bulk: ${ids.length} lead(s) deleted`);
-    addToast(`${ids.length} lead(s) deleted`, 'error');
+    deleteLeadsFromSupabase(target);
+    logH('🗑', `Bulk: ${target.length} lead(s) deleted`);
+    addToast(`${target.length} lead(s) deleted` + (target.length < ids.length ? ` · ${ids.length - target.length} skipped (not yours)` : ''), 'error');
   }
   // Auto-flag leads that already exist in the real Close DB. Runs in the
   // background after an import or manual add (the scraper already drops Close
@@ -11643,6 +11658,9 @@ function App() {
       };
     }).filter(g => g.leads.length > 1).sort((a, b) => b.reps.length - a.reps.length || b.leads.length - a.leads.length);
   }();
+  // Reps see duplicate groups that involve THEIR leads (so they're notified when
+  // a channel they have is also worked by another rep); admins see all groups.
+  const myDupGroups = isAdmin ? dupGroups : dupGroups.filter(g => g.leads.some(l => l.assignedTo === currentUser.name || l.scrapedBy === currentUser.name));
   const recentCutoff = new Date();
   recentCutoff.setDate(recentCutoff.getDate() - 7);
   // A lead is "Pending Qualification" if it carries that status tag OR it's the
@@ -11654,7 +11672,7 @@ function App() {
     contacted: vLeads.filter(l => l.tags.includes('Contacted')).length,
     recycle: vLeads.filter(l => l.tags.includes('For Recycle')).length,
     recent: vLeads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff).length,
-    duplicates: dupGroups.length
+    duplicates: myDupGroups.length
   };
   const NAV_MAIN = [{
     id: 'home',
@@ -11881,7 +11899,7 @@ function App() {
       printTitle: "Recently Assigned Leads"
     });
     if (tab === 'duplicates') return /*#__PURE__*/React.createElement(DuplicatesView, {
-      groups: dupGroups,
+      groups: myDupGroups,
       config: config,
       onSave: saveL,
       onDelete: delL,

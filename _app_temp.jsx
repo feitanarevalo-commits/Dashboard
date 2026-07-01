@@ -4682,13 +4682,25 @@ function App() {
     setLeads(ls=>ls.map(l=>l.id===updated.id?updated:l));
     logH('✏️',`Lead "${updated.channelName}" updated`);
   }
+  // A lead "belongs" to a rep if they scraped it or it's assigned to them.
+  function ownsLead(l){ return !!l && (l.assignedTo===currentUser.name || l.scrapedBy===currentUser.name); }
   function delL(id){
-    if(!isAdmin){ addToast('Only admins can delete leads','error'); return; }
-    const l=leads.find(x=>x.id===id);setLeads(ls=>ls.filter(x=>x.id!==id));deleteLeadFromSupabase(id);logH('🗑',`Lead "${l?.channelName}" deleted`);addToast(`"${l?.channelName}" deleted`,'error');
+    const l=leads.find(x=>x.id===id);
+    // Reps may delete their OWN leads; admins may delete anything.
+    if(!isAdmin && !ownsLead(l)){ addToast('You can only delete your own leads','error'); return; }
+    setLeads(ls=>ls.filter(x=>x.id!==id));deleteLeadFromSupabase(id);logH('🗑',`Lead "${l?.channelName}" deleted`);addToast(`"${l?.channelName}" deleted`,'error');
   }
   function logH(icon,text){setHistory(h=>[{id:Date.now(),icon,text,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:true},...h]);}
   function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
-  function bulkDelete(ids){ if(!ids||!ids.length) return; const set=new Set(ids); setLeads(ls=>ls.filter(l=>!set.has(l.id))); deleteLeadsFromSupabase(ids); logH('🗑',`Bulk: ${ids.length} lead(s) deleted`); addToast(`${ids.length} lead(s) deleted`,'error'); }
+  function bulkDelete(ids){
+    if(!ids||!ids.length) return;
+    // Non-admins can only bulk-delete leads they own; skip the rest.
+    let target=ids;
+    if(!isAdmin){ const mine=new Set(leads.filter(ownsLead).map(l=>l.id)); target=ids.filter(id=>mine.has(id)); }
+    if(!target.length){ addToast('You can only delete your own leads','error'); return; }
+    const set=new Set(target); setLeads(ls=>ls.filter(l=>!set.has(l.id))); deleteLeadsFromSupabase(target); logH('🗑',`Bulk: ${target.length} lead(s) deleted`);
+    addToast(`${target.length} lead(s) deleted`+(target.length<ids.length?` · ${ids.length-target.length} skipped (not yours)`:''),'error');
+  }
   // Auto-flag leads that already exist in the real Close DB. Runs in the
   // background after an import or manual add (the scraper already drops Close
   // dupes up-front). Matches are tagged "Existing Leads" so a rep SEES that the
@@ -5126,6 +5138,9 @@ function App() {
     }).filter(g=>g.leads.length>1)
       .sort((a,b)=>(b.reps.length-a.reps.length)||(b.leads.length-a.leads.length));
   })();
+  // Reps see duplicate groups that involve THEIR leads (so they're notified when
+  // a channel they have is also worked by another rep); admins see all groups.
+  const myDupGroups = isAdmin ? dupGroups : dupGroups.filter(g=>g.leads.some(l=>l.assignedTo===currentUser.name || l.scrapedBy===currentUser.name));
 
   const recentCutoff=new Date();recentCutoff.setDate(recentCutoff.getDate()-7);
   // A lead is "Pending Qualification" if it carries that status tag OR it's the
@@ -5137,7 +5152,7 @@ function App() {
     contacted:vLeads.filter(l=>l.tags.includes('Contacted')).length,
     recycle:vLeads.filter(l=>l.tags.includes('For Recycle')).length,
     recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff).length,
-    duplicates:dupGroups.length,
+    duplicates:myDupGroups.length,
   };
 
   const NAV_MAIN=[
@@ -5176,7 +5191,7 @@ function App() {
     if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap}/>;
     if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
-    if(tab==='duplicates') return <DuplicatesView groups={dupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
+    if(tab==='duplicates') return <DuplicatesView groups={myDupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
     if(tab==='google-import') return <GoogleImportView onImport={importLeads} addToast={addToast}/>;
     if(tab==='agency') return <AgencyView agencies={agencies} setAgencies={setAgencies} leads={vLeads} config={config} currentUser={currentUser} isAdmin={isAdmin} addToast={addToast} onImportSheet={importAgencyLeads}/>;
     if(tab==='close-data') return <CloseSearchView config={config}/>;
