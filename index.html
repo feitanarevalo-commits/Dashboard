@@ -2687,10 +2687,23 @@ function CloseSearchView({
   const [searched, setSearched] = useState(false);
   const [total, setTotal] = useState(0);
   const wh = (config.closeSearchWebhook || '').trim();
+  // Each search gets a sequence number; only the LATEST one's response is applied.
+  // This makes rapid/back-to-back searches (and a cleared box mid-flight) safe —
+  // an older, slower response can never clobber a newer search's results. Each
+  // user's browser runs its own instance, so concurrent users never interfere.
+  const seqRef = useRef(0);
+  function clearResults() {
+    seqRef.current++;
+    setLeads([]);
+    setTotal(0);
+    setSearched(false);
+    setLoading(false);
+  }
   function run(e) {
     e && e.preventDefault();
     const term = q.trim();
     if (!term || !wh) return;
+    const myseq = ++seqRef.current;
     setLoading(true);
     setSearched(true);
     fetch(wh, {
@@ -2702,13 +2715,18 @@ function CloseSearchView({
         q: term
       })
     }).then(r => r.json()).then(d => {
+      if (myseq !== seqRef.current) return;
       if (d && d.ok === false) throw new Error(d.error || 'failed');
       setLeads(d && d.leads || []);
       setTotal(d && d.total || 0);
     }).catch(() => {
-      setLeads([]);
-      setTotal(0);
-    }).finally(() => setLoading(false));
+      if (myseq === seqRef.current) {
+        setLeads([]);
+        setTotal(0);
+      }
+    }).finally(() => {
+      if (myseq === seqRef.current) setLoading(false);
+    });
   }
   const th = {
     textAlign: 'left',
@@ -2746,7 +2764,11 @@ function CloseSearchView({
     }
   }, /*#__PURE__*/React.createElement("input", {
     value: q,
-    onChange: e => setQ(e.target.value),
+    onChange: e => {
+      const v = e.target.value;
+      setQ(v);
+      if (!v.trim()) clearResults();
+    },
     placeholder: "Search by channel name, email, or URL…",
     style: {
       flex: 1,

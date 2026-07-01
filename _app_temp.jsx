@@ -1375,10 +1375,18 @@ function CloseSearchView({config}) {
   const [searched,setSearched]=useState(false);
   const [total,setTotal]=useState(0);
   const wh=(config.closeSearchWebhook||'').trim();
-  function run(e){ e&&e.preventDefault(); const term=q.trim(); if(!term||!wh) return; setLoading(true); setSearched(true);
+  // Each search gets a sequence number; only the LATEST one's response is applied.
+  // This makes rapid/back-to-back searches (and a cleared box mid-flight) safe —
+  // an older, slower response can never clobber a newer search's results. Each
+  // user's browser runs its own instance, so concurrent users never interfere.
+  const seqRef=useRef(0);
+  function clearResults(){ seqRef.current++; setLeads([]); setTotal(0); setSearched(false); setLoading(false); }
+  function run(e){ e&&e.preventDefault(); const term=q.trim(); if(!term||!wh) return;
+    const myseq=++seqRef.current; setLoading(true); setSearched(true);
     fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:term})})
-      .then(r=>r.json()).then(d=>{ if(d&&d.ok===false) throw new Error(d.error||'failed'); setLeads((d&&d.leads)||[]); setTotal((d&&d.total)||0); })
-      .catch(()=>{ setLeads([]); setTotal(0); }).finally(()=>setLoading(false));
+      .then(r=>r.json()).then(d=>{ if(myseq!==seqRef.current) return; if(d&&d.ok===false) throw new Error(d.error||'failed'); setLeads((d&&d.leads)||[]); setTotal((d&&d.total)||0); })
+      .catch(()=>{ if(myseq===seqRef.current){ setLeads([]); setTotal(0); } })
+      .finally(()=>{ if(myseq===seqRef.current) setLoading(false); });
   }
   const th={textAlign:'left',padding:'8px 10px',borderBottom:'2px solid var(--border)',fontWeight:600,fontSize:12};
   const td={padding:'7px 10px',borderBottom:'1px solid var(--border)',verticalAlign:'top'};
@@ -1388,7 +1396,7 @@ function CloseSearchView({config}) {
         <div className="card-header"><div className="card-title">☁ Search Close Database <span style={{fontWeight:400,color:'var(--text-dim)',fontSize:12}}>· check if a lead already exists</span></div></div>
         <div className="card-body">
           <form onSubmit={run} style={{display:'flex',gap:8}}>
-            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search by channel name, email, or URL…" style={{flex:1,padding:'9px 12px'}} autoFocus/>
+            <input value={q} onChange={e=>{ const v=e.target.value; setQ(v); if(!v.trim()) clearResults(); }} placeholder="Search by channel name, email, or URL…" style={{flex:1,padding:'9px 12px'}} autoFocus/>
             <button type="submit" className="btn btn-primary" disabled={loading||!q.trim()}>{loading?'Searching…':'🔍 Search'}</button>
           </form>
           <div style={{marginTop:6,fontSize:12,color:'var(--text-dim)'}}>Searches your full Close database (~628k leads) — by lead name, contact email & channel fields.</div>
