@@ -11467,6 +11467,48 @@ function App() {
     return () => clearTimeout(h);
   }, [leads, leadsReady]);
 
+  // Live cross-user sync: every 15s pull the shared leads table and merge, so one
+  // rep's additions/edits (and cross-rep DUPLICATES) show up for everyone without
+  // a manual reload. Local unsaved edits are preserved; leads another rep deleted
+  // are dropped. Returns the SAME array reference when nothing changed (no churn).
+  useEffect(() => {
+    if (!SB || !leadsReady) return;
+    let stop = false;
+    const iv = setInterval(() => {
+      loadLeadsFromSupabase().then(remote => {
+        if (stop || !Array.isArray(remote)) return;
+        const remoteById = {};
+        remote.forEach(l => remoteById[String(l.id)] = l);
+        setLeads(local => {
+          const synced = leadsSyncRef.current || {};
+          const localIds = new Set(local.map(l => String(l.id)));
+          const out = [];
+          local.forEach(l => {
+            const id = String(l.id),
+              r = remoteById[id];
+            const dirty = JSON.stringify(l) !== synced[id]; // local edit not yet pushed
+            if (r === undefined) {
+              if (!(id in synced) || dirty) out.push(l); /* else: deleted by another rep */
+            } else out.push(dirty ? l : r); // keep my edit, else take shared
+          });
+          remote.forEach(l => {
+            if (!localIds.has(String(l.id))) out.push(l);
+          }); // new from other reps
+          if (out.length === local.length) {
+            const lm = {};
+            local.forEach(l => lm[String(l.id)] = JSON.stringify(l));
+            if (out.every(l => lm[String(l.id)] === JSON.stringify(l))) return local; // no change → no churn
+          }
+          return out;
+        });
+      }).catch(() => {});
+    }, 15000);
+    return () => {
+      stop = true;
+      clearInterval(iv);
+    };
+  }, [leadsReady]);
+
   // Auto-load from Close after login ONLY if Supabase had no leads yet (first-time
   // setup); otherwise Supabase is the source and we don't overwrite it.
   useEffect(() => {
