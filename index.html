@@ -4874,6 +4874,48 @@ function saveRepApiKeysToSupabase(keys) {
   }));
 }
 
+// ── Per-rep CLOSE API keys (write-only; server-read only) ─────────────────
+// Close keys grant full CRM access, so the browser can WRITE them but never
+// read them back. The status view returns only whether each rep has one set;
+// the close-push Edge Function reads the actual keys server-side (service role).
+// Writes/reads go through the rep-close-key Edge Function (service role) so the
+// sensitive keys never need a browser-readable RLS policy on the table.
+function repCloseKeyFn(payload) {
+  try {
+    const base = typeof DEFAULT_CONFIG !== 'undefined' && DEFAULT_CONFIG.supabaseUrl || '';
+    if (!base) return Promise.resolve(null);
+    return fetch(base + '/functions/v1/rep-close-key', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    }).then(r => r.json()).catch(() => null);
+  } catch (e) {
+    return Promise.resolve(null);
+  }
+}
+function loadRepCloseKeyStatusFromSupabase() {
+  return repCloseKeyFn({
+    action: 'status'
+  }).then(res => {
+    const m = {};
+    if (res && res.ok && Array.isArray(res.status)) res.status.forEach(r => {
+      m[r.rep_name] = !!r.has_key;
+    });
+    return m;
+  });
+}
+function saveRepCloseKey(repName, apiKey) {
+  return repCloseKeyFn({
+    action: 'set',
+    rep: repName,
+    apiKey: String(apiKey || '')
+  }).then(res => ({
+    ok: !!(res && res.ok)
+  }));
+}
+
 // ── Replies / interest feed (🔔) ──────────────────────────
 // One per reply from SmartReach (prospect replied / category) or Close (inbound
 // email). Scoped to a rep so each person sees only their own.
@@ -8067,6 +8109,13 @@ function SettingsDrawer({
     label: '',
     color: '#1366D6'
   });
+  // Per-rep Close API keys are write-only: we hold typed drafts locally and only
+  // know (from the status view) whether each rep already has one set.
+  const [closeKeyDrafts, setCloseKeyDrafts] = useState({});
+  const [closeKeyStatus, setCloseKeyStatus] = useState({});
+  useEffect(() => {
+    loadRepCloseKeyStatusFromSupabase().then(setCloseKeyStatus);
+  }, []);
   function set(path, val) {
     setLocal(prev => {
       const n = JSON.parse(JSON.stringify(prev));
@@ -8177,7 +8226,16 @@ function SettingsDrawer({
   }
   function apply() {
     onConfig(local);
-    addToast('Settings saved', 'success');
+    // Persist any typed Close keys (write-only; blank = leave the existing one).
+    let savedCloseKeys = 0;
+    Object.keys(closeKeyDrafts).forEach(rep => {
+      const v = (closeKeyDrafts[rep] || '').trim();
+      if (v) {
+        saveRepCloseKey(rep, v);
+        savedCloseKeys++;
+      }
+    });
+    addToast(savedCloseKeys ? `Settings saved · ${savedCloseKeys} Close key(s) updated` : 'Settings saved', 'success');
     onClose();
   }
   function reset() {
@@ -8731,6 +8789,63 @@ function SettingsDrawer({
       },
       title: k ? 'Personal key set' : 'Falls back to shared key'
     }, k ? '✓ personal' : 'shared'));
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-section-title"
+  }, "Per-Rep Close API Keys ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9,
+      opacity: .6
+    }
+  }, "Import attribution")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-dim)',
+      marginBottom: 10,
+      lineHeight: 1.5
+    }
+  }, "Paste each rep's ", /*#__PURE__*/React.createElement("b", null, "Close"), " API key so the leads they import show ", /*#__PURE__*/React.createElement("b", null, "them"), " as the creator in Close (not the shared account). Keys are ", /*#__PURE__*/React.createElement("b", null, "write-only"), " — stored securely and never shown again; leave blank to keep the current one. Blank = imports use the shared key.", /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 6
+    }
+  }, "Get it from the rep's Close login → ", /*#__PURE__*/React.createElement("b", null, "Settings → API Keys → New API Key"), ".")), /*#__PURE__*/React.createElement("div", {
+    className: "edit-list"
+  }, local.salesReps.map(r => {
+    const set = !!closeKeyStatus[r];
+    return /*#__PURE__*/React.createElement("div", {
+      className: "edit-row",
+      key: r
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 88,
+        fontSize: 12,
+        fontWeight: 600,
+        color: 'var(--text)',
+        flexShrink: 0
+      }
+    }, r), /*#__PURE__*/React.createElement("input", {
+      type: "password",
+      autoComplete: "new-password",
+      value: closeKeyDrafts[r] || '',
+      onChange: e => setCloseKeyDrafts(d => ({
+        ...d,
+        [r]: e.target.value
+      })),
+      placeholder: set ? '•••••• set · type to replace' : 'api_…   paste Close API key',
+      style: {
+        flex: 1,
+        fontFamily: 'monospace',
+        fontSize: 11.5
+      }
+    }), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        color: set ? 'var(--success)' : 'var(--text-light)',
+        whiteSpace: 'nowrap'
+      },
+      title: set ? 'This rep has their own Close key' : 'Uses the shared Close key'
+    }, set ? '✓ set' : 'shared'));
   }))), /*#__PURE__*/React.createElement("div", {
     className: "drawer-section"
   }, /*#__PURE__*/React.createElement("div", {

@@ -2171,6 +2171,28 @@ function saveRepApiKeysToSupabase(keys){
   return SB.from('rep_api_keys').upsert(rows,{onConflict:'rep_name'}).then(({error})=>({ok:!error,error}));
 }
 
+// ── Per-rep CLOSE API keys (write-only; server-read only) ─────────────────
+// Close keys grant full CRM access, so the browser can WRITE them but never
+// read them back. The status view returns only whether each rep has one set;
+// the close-push Edge Function reads the actual keys server-side (service role).
+// Writes/reads go through the rep-close-key Edge Function (service role) so the
+// sensitive keys never need a browser-readable RLS policy on the table.
+function repCloseKeyFn(payload){
+  try{
+    const base=(typeof DEFAULT_CONFIG!=='undefined'&&DEFAULT_CONFIG.supabaseUrl)||'';
+    if(!base) return Promise.resolve(null);
+    return fetch(base+'/functions/v1/rep-close-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json()).catch(()=>null);
+  }catch(e){ return Promise.resolve(null); }
+}
+function loadRepCloseKeyStatusFromSupabase(){
+  return repCloseKeyFn({action:'status'}).then(res=>{
+    const m={}; if(res&&res.ok&&Array.isArray(res.status)) res.status.forEach(r=>{ m[r.rep_name]=!!r.has_key; }); return m;
+  });
+}
+function saveRepCloseKey(repName,apiKey){
+  return repCloseKeyFn({action:'set',rep:repName,apiKey:String(apiKey||'')}).then(res=>({ok:!!(res&&res.ok)}));
+}
+
 // ── Replies / interest feed (🔔) ──────────────────────────
 // One per reply from SmartReach (prospect replied / category) or Close (inbound
 // email). Scoped to a rep so each person sees only their own.
@@ -3588,6 +3610,11 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   const [newRep,setNewRep]=useState('');
   const [newTag,setNewTag]=useState('');
   const [newCamp,setNewCamp]=useState({label:'',color:'#1366D6'});
+  // Per-rep Close API keys are write-only: we hold typed drafts locally and only
+  // know (from the status view) whether each rep already has one set.
+  const [closeKeyDrafts,setCloseKeyDrafts]=useState({});
+  const [closeKeyStatus,setCloseKeyStatus]=useState({});
+  useEffect(()=>{ loadRepCloseKeyStatusFromSupabase().then(setCloseKeyStatus); },[]);
   function set(path,val){setLocal(prev=>{const n=JSON.parse(JSON.stringify(prev));const parts=path.split('.');let o=n;for(let i=0;i<parts.length-1;i++)o=o[parts[i]];o[parts[parts.length-1]]=val;return n;});}
   const [newRepRole,setNewRepRole]=useState('employee');
   function addRep(){
@@ -3623,7 +3650,14 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   function addCamp(){const lab=newCamp.label.trim().toUpperCase();if(!lab)return;setLocal(l=>({...l,campaigns:[...l.campaigns,{id:lab,label:lab,color:newCamp.color}]}));setNewCamp({label:'',color:'#1366D6'});}
   function remCamp(id){setLocal(l=>({...l,campaigns:l.campaigns.filter(c=>c.id!==id)}));}
   function updCampColor(id,col){setLocal(l=>({...l,campaigns:l.campaigns.map(c=>c.id===id?{...c,color:col}:c)}));}
-  function apply(){onConfig(local);addToast('Settings saved','success');onClose();}
+  function apply(){
+    onConfig(local);
+    // Persist any typed Close keys (write-only; blank = leave the existing one).
+    let savedCloseKeys=0;
+    Object.keys(closeKeyDrafts).forEach(rep=>{ const v=(closeKeyDrafts[rep]||'').trim(); if(v){ saveRepCloseKey(rep,v); savedCloseKeys++; } });
+    addToast(savedCloseKeys?`Settings saved · ${savedCloseKeys} Close key(s) updated`:'Settings saved','success');
+    onClose();
+  }
   function reset(){setLocal(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));}
 
   const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'prev-scraped':{label:'Previously Scraped',icon:'💾'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},agency:{label:'Agency',icon:'🏢'},'close-data':{label:'Close Leads Data',icon:'☁️'},pending:{label:'Pending Qualification',icon:'⏳'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},recent:{label:'Recently Assigned',icon:'🕐'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
@@ -3788,6 +3822,25 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
                     <div style={{width:88,fontSize:12,fontWeight:600,color:'var(--text)',flexShrink:0}}>{r}</div>
                     <input value={k} onChange={e=>setLocal(l=>({...l,repApiKeys:{...(l.repApiKeys||{}),[r]:e.target.value}}))} placeholder="AIza…   (paste rep's YouTube Data API key)" style={{flex:1,fontFamily:'monospace',fontSize:11.5}}/>
                     <span style={{fontSize:10,color:k?'var(--success)':'var(--text-light)',whiteSpace:'nowrap'}} title={k?'Personal key set':'Falls back to shared key'}>{k?'✓ personal':'shared'}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="drawer-section">
+            <div className="drawer-section-title">Per-Rep Close API Keys <span style={{fontSize:9,opacity:.6}}>Import attribution</span></div>
+            <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:10,lineHeight:1.5}}>
+              Paste each rep's <b>Close</b> API key so the leads they import show <b>them</b> as the creator in Close (not the shared account). Keys are <b>write-only</b> — stored securely and never shown again; leave blank to keep the current one. Blank = imports use the shared key.
+              <div style={{marginTop:6}}>Get it from the rep's Close login → <b>Settings → API Keys → New API Key</b>.</div>
+            </div>
+            <div className="edit-list">
+              {local.salesReps.map(r=>{
+                const set=!!closeKeyStatus[r];
+                return (
+                  <div className="edit-row" key={r}>
+                    <div style={{width:88,fontSize:12,fontWeight:600,color:'var(--text)',flexShrink:0}}>{r}</div>
+                    <input type="password" autoComplete="new-password" value={closeKeyDrafts[r]||''} onChange={e=>setCloseKeyDrafts(d=>({...d,[r]:e.target.value}))} placeholder={set?'•••••• set · type to replace':'api_…   paste Close API key'} style={{flex:1,fontFamily:'monospace',fontSize:11.5}}/>
+                    <span style={{fontSize:10,color:set?'var(--success)':'var(--text-light)',whiteSpace:'nowrap'}} title={set?'This rep has their own Close key':'Uses the shared Close key'}>{set?'✓ set':'shared'}</span>
                   </div>
                 );
               })}
