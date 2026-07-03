@@ -12054,7 +12054,7 @@ function App() {
   }();
   // Reps see duplicate groups that involve THEIR leads (so they're notified when
   // a channel they have is also worked by another rep); admins see all groups.
-  const myDupGroups = isAdmin ? dupGroups : dupGroups.filter(g => g.leads.some(l => l.assignedTo === currentUser.name || l.scrapedBy === currentUser.name));
+  const myDupGroups = isAdmin || !currentUser ? dupGroups : dupGroups.filter(g => g.leads.some(l => l.assignedTo === currentUser.name || l.scrapedBy === currentUser.name));
   const recentCutoff = new Date();
   recentCutoff.setDate(recentCutoff.getDate() - 7);
   // A lead is "Pending Qualification" if it carries that status tag OR it's the
