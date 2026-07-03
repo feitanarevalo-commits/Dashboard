@@ -623,8 +623,10 @@ function ContextMenu({x,y,lead,sel,allLeads,config,campColorMap,onEdit,onDelete,
     const u={...live,campaigns:nextCamps(live.campaigns)};setLive(u);onEdit(u);
   }
   function assignRep(r){
-    if(isBulk){applyToTargets({assignedTo:r});}
-    const u={...live,assignedTo:r,dateAssigned:new Date().toISOString().split('T')[0]};
+    // r falsy → unassign (clear the assignment date too).
+    const patch = r ? {assignedTo:r,dateAssigned:new Date().toISOString().split('T')[0]} : {assignedTo:null,dateAssigned:null};
+    if(isBulk){applyToTargets(patch);}
+    const u={...live,...patch};
     setLive(u);onEdit(u);onClose();
   }
   function openAll(){
@@ -688,6 +690,12 @@ function ContextMenu({x,y,lead,sel,allLeads,config,campColorMap,onEdit,onDelete,
           </div>
         );
       })}
+      {(live.assignedTo||isBulk)&&(
+        <div className="ctx-item" onClick={()=>assignRep(null)}>
+          <div style={{width:20,height:20,borderRadius:'50%',border:'1px dashed var(--border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,color:'var(--text-dim)',flexShrink:0}}>✕</div>
+          <span style={{color:'var(--text-dim)'}}>Unassign</span>
+        </div>
+      )}
       <div className="ctx-sep"/>
       <div className="ctx-item danger" onClick={()=>{if(window.confirm(`Delete "${live.channelName}"?`)){onDelete(live.id);}onClose();}}>
         <span>🗑</span> Delete Lead
@@ -1048,7 +1056,8 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
     sel.forEach(id=>{
       const l=leads.find(x=>x.id===id);if(!l)return;
       let u={...l};
-      if(bulkRep){u.assignedTo=bulkRep;u.dateAssigned=today;}
+      if(bulkRep==='__unassign__'){u.assignedTo=null;u.dateAssigned=null;}
+      else if(bulkRep){u.assignedTo=bulkRep;u.dateAssigned=today;}
       if(bulkTags.length){u.tags=[...bulkTags];}  // single-select: replace tag
       bulkCamps.forEach(c=>{if(!u.campaigns.includes(c))u.campaigns=[...u.campaigns,c];});
       onEdit(u);
@@ -1097,6 +1106,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
             <select value={bulkRep} onChange={e=>setBulkRep(e.target.value)} style={{fontSize:12,padding:'5px 10px'}}>
               <option value="">— none —</option>
               {allReps.map(r=><option key={r}>{r}</option>)}
+              <option value="__unassign__">✕ Unassign</option>
             </select>
           </>}
           <div className="toolbar-sep"/>

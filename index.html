@@ -1064,15 +1064,20 @@ function ContextMenu({
     onEdit(u);
   }
   function assignRep(r) {
+    // r falsy → unassign (clear the assignment date too).
+    const patch = r ? {
+      assignedTo: r,
+      dateAssigned: new Date().toISOString().split('T')[0]
+    } : {
+      assignedTo: null,
+      dateAssigned: null
+    };
     if (isBulk) {
-      applyToTargets({
-        assignedTo: r
-      });
+      applyToTargets(patch);
     }
     const u = {
       ...live,
-      assignedTo: r,
-      dateAssigned: new Date().toISOString().split('T')[0]
+      ...patch
     };
     setLive(u);
     onEdit(u);
@@ -1225,7 +1230,27 @@ function ContextMenu({
         fontSize: 11
       }
     }, "✓"));
-  }), /*#__PURE__*/React.createElement("div", {
+  }), (live.assignedTo || isBulk) && /*#__PURE__*/React.createElement("div", {
+    className: "ctx-item",
+    onClick: () => assignRep(null)
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 20,
+      height: 20,
+      borderRadius: '50%',
+      border: '1px dashed var(--border)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: 11,
+      color: 'var(--text-dim)',
+      flexShrink: 0
+    }
+  }, "✕"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-dim)'
+    }
+  }, "Unassign")), /*#__PURE__*/React.createElement("div", {
     className: "ctx-sep"
   }), /*#__PURE__*/React.createElement("div", {
     className: "ctx-item danger",
@@ -1891,7 +1916,10 @@ function LeadsTable({
       let u = {
         ...l
       };
-      if (bulkRep) {
+      if (bulkRep === '__unassign__') {
+        u.assignedTo = null;
+        u.dateAssigned = null;
+      } else if (bulkRep) {
         u.assignedTo = bulkRep;
         u.dateAssigned = today;
       }
@@ -2023,7 +2051,9 @@ function LeadsTable({
     value: ""
   }, "— none —"), allReps.map(r => /*#__PURE__*/React.createElement("option", {
     key: r
-  }, r)))), /*#__PURE__*/React.createElement("div", {
+  }, r)), /*#__PURE__*/React.createElement("option", {
+    value: "__unassign__"
+  }, "✕ Unassign"))), /*#__PURE__*/React.createElement("div", {
     className: "toolbar-sep"
   }), /*#__PURE__*/React.createElement("span", {
     className: "bulk-panel-label"
