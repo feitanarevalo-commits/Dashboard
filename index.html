@@ -8097,7 +8097,7 @@ function LeadMgmtView({
     }, r[0]), r, " (", cnt, ")");
   }), /*#__PURE__*/React.createElement("button", {
     className: `btn btn-sm ${repView === 'unassigned' ? 'btn-danger' : 'btn-outline'}`,
-    onClick: () => setRepView(v => v === 'unassigned' ? '' : ' unassigned'),
+    onClick: () => setRepView(v => v === 'unassigned' ? '' : 'unassigned'),
     style: repView === 'unassigned' ? {} : {
       borderColor: 'var(--warn)',
       color: 'var(--warn)'
