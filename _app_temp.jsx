@@ -3685,7 +3685,7 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   }
   function reset(){setLocal(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));}
 
-  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'prev-scraped':{label:'Previously Scraped',icon:'💾'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},agency:{label:'Agency',icon:'🏢'},'close-data':{label:'Close Leads Data',icon:'☁️'},pending:{label:'Pending Qualification',icon:'⏳'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},recent:{label:'Recently Assigned',icon:'🕐'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
+  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},agency:{label:'Agency',icon:'🏢'},'close-data':{label:'Close Leads Data',icon:'☁️'},pending:{label:'Pending Qualification',icon:'⏳'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},recent:{label:'Recently Assigned',icon:'🕐'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
   const COL_META={thumbnail:'Thumbnail',channelName:'Channel Name',url:'URL',platform:'Platform',niche:'Niche',followers:'Followers',emails:'Email(s)',tags:'Status Tags',campaign:'Campaign',assignedTo:'Assigned To',dateAssigned:'Date Assigned'};
   const FEAT_META={bulkAssign:{label:'Bulk Assign'},exportCSV:{label:'Export CSV'},exportPDF:{label:'Export PDF'},dailyRefresh:{label:'Daily Auto-Refresh'},colorHighlights:{label:'Campaign Color Rows'},webhookTrigger:{label:'n8n Webhook'},historyRestore:{label:'History Restore'},emailValidation:{label:'Email Validation (future)'}};
 
@@ -4342,7 +4342,7 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
   // Pages
   const PAGE_DEFS=[
     {id:'home',label:'Home',icon:'⊟'},{id:'scraper',label:'Scraper',icon:'◎'},
-    {id:'history',label:'History',icon:'◷'},{id:'prev-scraped',label:'Previously Scraped',icon:'◈'},
+    {id:'history',label:'History',icon:'◷'},
     {id:'lead-mgmt',label:'Lead Management',icon:'◉'},{id:'google-import',label:'Google Sheets Import',icon:'◫'},
     {id:'agency',label:'Agency Folders',icon:'▦'},
     {id:'close-data',label:'Close Leads Data',icon:'☁'},
@@ -5278,7 +5278,6 @@ function App() {
     {id:'home',icon:'⊟',label:'Home'},
     {id:'scraper',icon:'◎',label:'Scraper'},
     {id:'history',icon:'◷',label:'History'},
-    {id:'prev-scraped',icon:'◈',label:'Previously Scraped'},
     {id:'lead-mgmt',icon:'◉',label:'Lead Management'},
     {id:'google-import',icon:'◫',label:'Google Sheets'},
     {id:'agency',icon:'▦',label:'Agency'},
