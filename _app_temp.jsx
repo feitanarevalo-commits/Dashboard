@@ -869,6 +869,36 @@ function InlineEmail({emails, onSave}) {
   );
 }
 
+// Quick note on a lead — e.g. why a Pending lead is parked, so a rep sees their
+// own reminder when they come back to it. Saved on the lead (syncs to Supabase).
+function NoteModal({lead,onClose,onSave}){
+  const [text,setText]=useState(lead.note||'');
+  function save(){ onSave({...lead,note:text.trim()}); onClose(); }
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:480}}>
+        <div className="modal-header">
+          <div><h2>📝 Note</h2><p style={{color:'var(--text-dim)',fontSize:13,marginTop:3}}>{lead.channelName}</p></div>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
+        </div>
+        <div className="form-group">
+          <textarea value={text} onChange={e=>setText(e.target.value)} autoFocus onKeyDown={e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey))save();}}
+            placeholder="e.g. Waiting on their reply about rates · follow up next week · not a fit for MSN yet…"
+            style={{width:'100%',minHeight:150,fontSize:13,lineHeight:1.55,padding:'10px 12px',resize:'vertical'}}/>
+          <div style={{fontSize:11,color:'var(--text-light)',marginTop:5}}>Only you and admins see this. Saved to the lead — ⌘/Ctrl+Enter to save.</div>
+        </div>
+        <div className="modal-footer">
+          <div>{lead.note && <button type="button" className="btn btn-ghost" style={{color:'var(--danger)'}} onClick={()=>{onSave({...lead,note:''});onClose();}}>Clear note</button>}</div>
+          <div className="modal-footer-right">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn btn-primary" onClick={save}>Save note</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── LEADS TABLE ──────────────────────────────────────────
 function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
   const [sel,setSel] = useState([]);
@@ -885,6 +915,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
   const [bulkTags,setBulkTags] = useState([]);
   const [bulkCamps,setBulkCamps] = useState([]);
   const [editLead,setEditLead] = useState(null);
+  const [noteLead,setNoteLead] = useState(null);
   const [ctxMenu,setCtxMenu] = useState(null);
   const [page,setPage] = useState(1);
   const [colFilter,setColFilter] = useState({});
@@ -1210,6 +1241,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
                   <td className="no-print">
                     <div style={{display:'flex',gap:5}}>
                       <button className="btn-icon" onClick={()=>onRowOpen?onRowOpen(lead):setEditLead(lead)} title={onRowOpen?'View profile':'Edit lead'}>{onRowOpen?'👁':'✏'}</button>
+                      {onEdit && <button className="btn-icon" onClick={()=>setNoteLead(lead)} style={lead.note?{color:'var(--accent)',borderColor:'var(--accent-light)',background:'var(--accent-light)'}:{}} title={lead.note?('Note: '+String(lead.note).slice(0,100)+(String(lead.note).length>100?'…':'')):'Add a note'}>📝</button>}
                       {onDelete && <button className="btn-icon" style={{color:'var(--danger)',borderColor:'rgba(222,53,11,.25)'}} onClick={()=>{if(window.confirm(`Delete "${lead.channelName}"?`))onDelete(lead.id);}} title="Delete lead">🗑</button>}
                     </div>
                   </td>
@@ -1234,6 +1266,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
         </div>
       )}
       {editLead&&<LeadModal lead={editLead} config={config} onClose={()=>setEditLead(null)} onSave={l=>{if(onEdit)onEdit(l);setEditLead(null);}} onDelete={id=>{if(onDelete)onDelete(id);setEditLead(null);}}/>}
+      {noteLead&&<NoteModal lead={noteLead} onClose={()=>setNoteLead(null)} onSave={l=>{if(onEdit)onEdit(l);setNoteLead(null);}}/>}
       {ctxMenu&&<ContextMenu x={ctxMenu.x} y={ctxMenu.y} lead={ctxMenu.lead} sel={sel} allLeads={leads} config={config} campColorMap={campColorMap} onEdit={l=>{if(onEdit)onEdit(l);}} onDelete={id=>{if(onDelete)onDelete(id);setCtxMenu(null);}} onOpenEdit={l=>setEditLead(l)} onClose={()=>setCtxMenu(null)}/>}
     </div>
   );

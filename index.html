@@ -1598,6 +1598,96 @@ function InlineEmail({
   }, "+", list.length - 1));
 }
 
+// Quick note on a lead — e.g. why a Pending lead is parked, so a rep sees their
+// own reminder when they come back to it. Saved on the lead (syncs to Supabase).
+function NoteModal({
+  lead,
+  onClose,
+  onSave
+}) {
+  const [text, setText] = useState(lead.note || '');
+  function save() {
+    onSave({
+      ...lead,
+      note: text.trim()
+    });
+    onClose();
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-overlay",
+    onClick: e => e.target === e.currentTarget && onClose()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal",
+    style: {
+      maxWidth: 480
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-header"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", null, "📝 Note"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: 'var(--text-dim)',
+      fontSize: 13,
+      marginTop: 3
+    }
+  }, lead.channelName)), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: onClose,
+    style: {
+      fontSize: 16,
+      padding: '4px 8px'
+    }
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "form-group"
+  }, /*#__PURE__*/React.createElement("textarea", {
+    value: text,
+    onChange: e => setText(e.target.value),
+    autoFocus: true,
+    onKeyDown: e => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
+    },
+    placeholder: "e.g. Waiting on their reply about rates · follow up next week · not a fit for MSN yet…",
+    style: {
+      width: '100%',
+      minHeight: 150,
+      fontSize: 13,
+      lineHeight: 1.55,
+      padding: '10px 12px',
+      resize: 'vertical'
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-light)',
+      marginTop: 5
+    }
+  }, "Only you and admins see this. Saved to the lead — ⌘/Ctrl+Enter to save.")), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer"
+  }, /*#__PURE__*/React.createElement("div", null, lead.note && /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn-ghost",
+    style: {
+      color: 'var(--danger)'
+    },
+    onClick: () => {
+      onSave({
+        ...lead,
+        note: ''
+      });
+      onClose();
+    }
+  }, "Clear note")), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer-right"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn-ghost",
+    onClick: onClose
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn-primary",
+    onClick: save
+  }, "Save note")))));
+}
+
 // ─── LEADS TABLE ──────────────────────────────────────────
 function LeadsTable({
   leads,
@@ -1639,6 +1729,7 @@ function LeadsTable({
   const [bulkTags, setBulkTags] = useState([]);
   const [bulkCamps, setBulkCamps] = useState([]);
   const [editLead, setEditLead] = useState(null);
+  const [noteLead, setNoteLead] = useState(null);
   const [ctxMenu, setCtxMenu] = useState(null);
   const [page, setPage] = useState(1);
   const [colFilter, setColFilter] = useState({});
@@ -2226,7 +2317,16 @@ function LeadsTable({
     className: "btn-icon",
     onClick: () => onRowOpen ? onRowOpen(lead) : setEditLead(lead),
     title: onRowOpen ? 'View profile' : 'Edit lead'
-  }, onRowOpen ? '👁' : '✏'), onDelete && /*#__PURE__*/React.createElement("button", {
+  }, onRowOpen ? '👁' : '✏'), onEdit && /*#__PURE__*/React.createElement("button", {
+    className: "btn-icon",
+    onClick: () => setNoteLead(lead),
+    style: lead.note ? {
+      color: 'var(--accent)',
+      borderColor: 'var(--accent-light)',
+      background: 'var(--accent-light)'
+    } : {},
+    title: lead.note ? 'Note: ' + String(lead.note).slice(0, 100) + (String(lead.note).length > 100 ? '…' : '') : 'Add a note'
+  }, "📝"), onDelete && /*#__PURE__*/React.createElement("button", {
     className: "btn-icon",
     style: {
       color: 'var(--danger)',
@@ -2287,6 +2387,13 @@ function LeadsTable({
     onDelete: id => {
       if (onDelete) onDelete(id);
       setEditLead(null);
+    }
+  }), noteLead && /*#__PURE__*/React.createElement(NoteModal, {
+    lead: noteLead,
+    onClose: () => setNoteLead(null),
+    onSave: l => {
+      if (onEdit) onEdit(l);
+      setNoteLead(null);
     }
   }), ctxMenu && /*#__PURE__*/React.createElement(ContextMenu, {
     x: ctxMenu.x,
