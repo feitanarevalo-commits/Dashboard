@@ -2461,7 +2461,7 @@ function AddLeadModal({rep,config,onAdd,onClose}) {
   );
 }
 
-function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssign,onBack,onImportClose,onImportSmartReach,onAddLead}) {
+function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssign,onBack,onImportClose,onImportSmartReach,onAddLead,isLeadgen}) {
   function importToClose(r,ls){
     if(onImportClose) onImportClose(r,ls);
   }
@@ -2518,20 +2518,20 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
           </div>
         </div>
         <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',justifyContent:'flex-end'}}>
-          <button className="btn btn-primary btn-sm" disabled={!fresh}
+          {!isLeadgen && <button className="btn btn-primary btn-sm" disabled={!fresh}
             onClick={()=>importToClose(rep,freshPotential)}
             title={fresh?`Send ${rep}'s ${fresh} Fresh Potential lead(s) to Close.io (already-imported leads are skipped)`:(potential?'All Potential leads are already imported to Close':'No Potential leads to send yet')}>
             ⬆ Send {fresh} to Close.io
-          </button>
+          </button>}
           <button className="btn btn-outline btn-sm" onClick={()=>setShowAdd(true)}
             title={`Manually add a lead under ${rep}`}>➕ Add Lead</button>
           <button className="btn btn-outline btn-sm" onClick={()=>setShowClose(true)}
             title={`View ${rep}'s leads in Close.io (assigned to them)`}>📁 Close Leads</button>
           <div className="export-group">
-            {feats.exportCSV && <button className="btn btn-outline btn-sm" disabled={!fresh}
+            {feats.exportCSV && !isLeadgen && <button className="btn btn-outline btn-sm" disabled={!fresh}
               onClick={()=>exportCloseCSV(freshPotential,`${rep}_close_import.csv`)}
               title="Download a Close.io-ready CSV of the Fresh Potential leads to import in Close (already-imported leads are skipped)">⬇ Close CSV</button>}
-            {feats.exportCSV && <button className="btn btn-outline btn-sm" disabled={!srCount}
+            {feats.exportCSV && !isLeadgen && <button className="btn btn-outline btn-sm" disabled={!srCount}
               onClick={()=>exportSmartReachCSV(smartReachLeads,`${rep}_smartreach.csv`)}
               title="Download a SmartReach CSV (channel name + email only) of all this rep's emailable leads">⬇ SmartReach CSV</button>}
             {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(myLeads,`${rep}_leads.csv`)}>⬇ Export CSV</button>}
@@ -2573,8 +2573,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
       <LeadsTable
         leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap}
-        smartReachSend={{ campaigns:(config.smartReachCampaigns&&config.smartReachCampaigns[rep])||[], onSend:(leads,campId,campLabel)=>importToSmartReach(rep,leads,campId,campLabel) }}
-        closeSend={{ onSend:(ls)=>importToClose(rep,ls) }}
+        smartReachSend={isLeadgen?null:{ campaigns:(config.smartReachCampaigns&&config.smartReachCampaigns[rep])||[], onSend:(leads,campId,campLabel)=>importToSmartReach(rep,leads,campId,campLabel) }}
+        closeSend={isLeadgen?null:{ onSend:(ls)=>importToClose(rep,ls) }}
         hideExport
         filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
       />
@@ -5357,7 +5357,7 @@ function App() {
 
   function renderMain(){
     if(showRepSelect) return <RepSelectScreen leads={vLeads} config={config} activeRep={activeRep} onSelect={r=>{if(r){setActiveRep(r);setTab('rep-home');}setShowRepSelect(false);}}/>;
-    if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead}/>;
+    if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead} isLeadgen={!!(currentUser&&currentUser.role==='leadgen')}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
     if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle}/>;

@@ -5610,7 +5610,8 @@ function RepDashboard({
   onBack,
   onImportClose,
   onImportSmartReach,
-  onAddLead
+  onAddLead,
+  isLeadgen
 }) {
   function importToClose(r, ls) {
     if (onImportClose) onImportClose(r, ls);
@@ -5690,7 +5691,7 @@ function RepDashboard({
       flexWrap: 'wrap',
       justifyContent: 'flex-end'
     }
-  }, /*#__PURE__*/React.createElement("button", {
+  }, !isLeadgen && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary btn-sm",
     disabled: !fresh,
     onClick: () => importToClose(rep, freshPotential),
@@ -5705,12 +5706,12 @@ function RepDashboard({
     title: `View ${rep}'s leads in Close.io (assigned to them)`
   }, "📁 Close Leads"), /*#__PURE__*/React.createElement("div", {
     className: "export-group"
-  }, feats.exportCSV && /*#__PURE__*/React.createElement("button", {
+  }, feats.exportCSV && !isLeadgen && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
     disabled: !fresh,
     onClick: () => exportCloseCSV(freshPotential, `${rep}_close_import.csv`),
     title: "Download a Close.io-ready CSV of the Fresh Potential leads to import in Close (already-imported leads are skipped)"
-  }, "⬇ Close CSV"), feats.exportCSV && /*#__PURE__*/React.createElement("button", {
+  }, "⬇ Close CSV"), feats.exportCSV && !isLeadgen && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
     disabled: !srCount,
     onClick: () => exportSmartReachCSV(smartReachLeads, `${rep}_smartreach.csv`),
@@ -5891,11 +5892,11 @@ function RepDashboard({
     config: config,
     feats: feats,
     campColorMap: campColorMap,
-    smartReachSend: {
+    smartReachSend: isLeadgen ? null : {
       campaigns: config.smartReachCampaigns && config.smartReachCampaigns[rep] || [],
       onSend: (leads, campId, campLabel) => importToSmartReach(rep, leads, campId, campLabel)
     },
-    closeSend: {
+    closeSend: isLeadgen ? null : {
       onSend: ls => importToClose(rep, ls)
     },
     hideExport: true,
@@ -12165,7 +12166,8 @@ function App() {
       onBack: () => setTab('home'),
       onImportClose: importToClose,
       onImportSmartReach: importToSmartReach,
-      onAddLead: addLead
+      onAddLead: addLead,
+      isLeadgen: !!(currentUser && currentUser.role === 'leadgen')
     });
     if (tab === 'home') return /*#__PURE__*/React.createElement(HomeView, {
       leads: vLeads,
