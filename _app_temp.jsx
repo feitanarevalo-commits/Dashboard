@@ -2559,16 +2559,39 @@ function RepSelectScreen({leads,config,activeRep,onSelect}) {
 }
 
 // ─── CONTACTED VIEW ──────────────────────────────────────
-function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,campColorMap}) {
+function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,campColorMap,addToast}) {
   const contacted=leads.filter(l=>l.tags.includes('Contacted'));
   const today=new Date();
+  // Pull each pushed lead's most recent CONTACT date from Close so the recycle
+  // clock counts from the LAST touch, not the first-contacted date.
+  const [closeContacts,setCloseContacts]=useState({});
+  const closeIds=contacted.map(l=>l.closeLeadId).filter(Boolean);
+  const closeIdsKey=[...new Set(closeIds)].sort().join(',');
+  useEffect(()=>{
+    if(!closeIdsKey) return;
+    const base=(config.supabaseUrl||'').trim(); if(!base) return;
+    fetch(base+'/functions/v1/close-last-contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leadIds:closeIdsKey.split(',')})})
+      .then(r=>r.json()).then(res=>{ if(res&&res.ok&&res.contacts) setCloseContacts(res.contacts); }).catch(()=>{});
+  },[closeIdsKey]);
+  // Effective "last contact" = the most recent of Close's last touch and the
+  // manually-logged date. Returns {date, fromClose}.
+  function effectiveContact(l){
+    let best=null, fromClose=false;
+    const cc=l.closeLeadId&&closeContacts[l.closeLeadId];
+    if(cc){ best=new Date(cc); fromClose=true; }
+    if(l.lastContactDate){ const d=new Date(l.lastContactDate); if(!best||d>best){ best=d; fromClose=false; } }
+    return best?{date:best,fromClose}:null;
+  }
   function recycleInfo(l){
-    if(!l.lastContactDate) return null;
-    const diff=Math.floor((today-new Date(l.lastContactDate))/86400000);
+    const e=effectiveContact(l);
+    if(!e) return null;
+    const diff=Math.floor((today-e.date)/86400000);
     if(l.campaigns.includes('VVV')){const left=30-diff;return{threshold:30,diff,left,color:left<=7?'var(--danger)':left<=14?'var(--warn)':'var(--success)'};}
     if(l.campaigns.includes('MSN')){const left=90-diff;return{threshold:90,diff,left,color:left<=14?'var(--danger)':left<=30?'var(--warn)':'var(--success)'};}
     return null;
   }
+  // Manual reset: stamp today's contact date (works for any lead, incl. ones not in Close).
+  function logContact(l){ if(onSave){ onSave({...l,lastContactDate:today.toISOString().split('T')[0]}); if(addToast) addToast(`Logged a contact for "${l.channelName}" — recycle clock reset`,'success'); } }
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'auto'}}>
       <div style={{padding:'16px 24px',borderBottom:'1px solid var(--border)',background:'var(--card)',display:'flex',gap:12,flexShrink:0}}>
@@ -2580,20 +2603,22 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
       <table className="leads-table">
         <thead><tr>
           <th>Channel</th><th>Campaign</th><th>Assigned To</th>
-          <th>Last Contacted</th><th>Days Since Contact</th><th>Recycle In</th>
+          <th>Last Contacted</th><th>Days Since Contact</th><th>Recycle In</th><th></th>
         </tr></thead>
         <tbody>
-          {contacted.length===0&&<tr><td colSpan={6} style={{textAlign:'center',padding:32,color:'var(--text-dim)'}}>No contacted leads yet</td></tr>}
+          {contacted.length===0&&<tr><td colSpan={7} style={{textAlign:'center',padding:32,color:'var(--text-dim)'}}>No contacted leads yet</td></tr>}
           {contacted.map(l=>{
             const r=recycleInfo(l);
+            const e=effectiveContact(l);
             return(
               <tr key={l.id} className={l.campaigns.includes('MSN')&&l.campaigns.includes('VVV')?'row-both':l.campaigns.includes('MSN')?'row-msn':l.campaigns.includes('VVV')?'row-vvv':''}>
                 <td><div style={{fontWeight:600,fontSize:13}}>{l.channelName}</div><div style={{fontSize:11,color:'var(--text-dim)'}}>{l.platform}</div></td>
                 <td>{l.campaigns.map(c=><span key={c} className="tag-badge" style={{background:campColorMap[c]||'var(--accent)',color:'#fff',marginRight:4}}>{c}</span>)}</td>
                 <td>{l.assignedTo||<span style={{color:'var(--text-dim)'}}>—</span>}</td>
-                <td>{l.lastContactDate||<span style={{color:'var(--text-dim)'}}>—</span>}</td>
+                <td>{e?<span>{e.date.toISOString().split('T')[0]}{e.fromClose?<span style={{fontSize:10,color:'var(--accent)',marginLeft:5}} title="Most recent email/call from Close">· Close</span>:null}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
                 <td>{r?<span style={{fontWeight:600,color:r.diff>0?'var(--text-dim)':'var(--text)'}}>{r.diff} day{r.diff!==1?'s':''}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
                 <td>{r?<span style={{fontWeight:700,color:r.color}}>{r.left<=0?'⚠ Ready to Recycle':`${r.left}d`}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
+                <td><button className="btn btn-ghost btn-xs" title="Log a contact today — resets the recycle clock" onClick={()=>logContact(l)}>✓ Log contact</button></td>
               </tr>
             );
           })}
@@ -5282,7 +5307,7 @@ function App() {
     if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
     if(tab==='lead-mgmt') return <LeadMgmtView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} addToast={addToast} config={config}/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(isPendingLead)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
-    if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap}/>;
+    if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap} addToast={addToast}/>;
     if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
     if(tab==='duplicates') return <DuplicatesView groups={myDupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;

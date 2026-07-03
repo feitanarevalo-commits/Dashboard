@@ -5819,13 +5819,58 @@ function ContactedView({
   onBulkDelete,
   onBulkAssign,
   config,
-  campColorMap
+  campColorMap,
+  addToast
 }) {
   const contacted = leads.filter(l => l.tags.includes('Contacted'));
   const today = new Date();
+  // Pull each pushed lead's most recent CONTACT date from Close so the recycle
+  // clock counts from the LAST touch, not the first-contacted date.
+  const [closeContacts, setCloseContacts] = useState({});
+  const closeIds = contacted.map(l => l.closeLeadId).filter(Boolean);
+  const closeIdsKey = [...new Set(closeIds)].sort().join(',');
+  useEffect(() => {
+    if (!closeIdsKey) return;
+    const base = (config.supabaseUrl || '').trim();
+    if (!base) return;
+    fetch(base + '/functions/v1/close-last-contact', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        leadIds: closeIdsKey.split(',')
+      })
+    }).then(r => r.json()).then(res => {
+      if (res && res.ok && res.contacts) setCloseContacts(res.contacts);
+    }).catch(() => {});
+  }, [closeIdsKey]);
+  // Effective "last contact" = the most recent of Close's last touch and the
+  // manually-logged date. Returns {date, fromClose}.
+  function effectiveContact(l) {
+    let best = null,
+      fromClose = false;
+    const cc = l.closeLeadId && closeContacts[l.closeLeadId];
+    if (cc) {
+      best = new Date(cc);
+      fromClose = true;
+    }
+    if (l.lastContactDate) {
+      const d = new Date(l.lastContactDate);
+      if (!best || d > best) {
+        best = d;
+        fromClose = false;
+      }
+    }
+    return best ? {
+      date: best,
+      fromClose
+    } : null;
+  }
   function recycleInfo(l) {
-    if (!l.lastContactDate) return null;
-    const diff = Math.floor((today - new Date(l.lastContactDate)) / 86400000);
+    const e = effectiveContact(l);
+    if (!e) return null;
+    const diff = Math.floor((today - e.date) / 86400000);
     if (l.campaigns.includes('VVV')) {
       const left = 30 - diff;
       return {
@@ -5845,6 +5890,16 @@ function ContactedView({
       };
     }
     return null;
+  }
+  // Manual reset: stamp today's contact date (works for any lead, incl. ones not in Close).
+  function logContact(l) {
+    if (onSave) {
+      onSave({
+        ...l,
+        lastContactDate: today.toISOString().split('T')[0]
+      });
+      if (addToast) addToast(`Logged a contact for "${l.channelName}" — recycle clock reset`, 'success');
+    }
   }
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5906,8 +5961,8 @@ function ContactedView({
     return r && r.left <= 14 && r.left > 0;
   }).length))), /*#__PURE__*/React.createElement("table", {
     className: "leads-table"
-  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Channel"), /*#__PURE__*/React.createElement("th", null, "Campaign"), /*#__PURE__*/React.createElement("th", null, "Assigned To"), /*#__PURE__*/React.createElement("th", null, "Last Contacted"), /*#__PURE__*/React.createElement("th", null, "Days Since Contact"), /*#__PURE__*/React.createElement("th", null, "Recycle In"))), /*#__PURE__*/React.createElement("tbody", null, contacted.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: 6,
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Channel"), /*#__PURE__*/React.createElement("th", null, "Campaign"), /*#__PURE__*/React.createElement("th", null, "Assigned To"), /*#__PURE__*/React.createElement("th", null, "Last Contacted"), /*#__PURE__*/React.createElement("th", null, "Days Since Contact"), /*#__PURE__*/React.createElement("th", null, "Recycle In"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, contacted.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: 7,
     style: {
       textAlign: 'center',
       padding: 32,
@@ -5915,6 +5970,7 @@ function ContactedView({
     }
   }, "No contacted leads yet")), contacted.map(l => {
     const r = recycleInfo(l);
+    const e = effectiveContact(l);
     return /*#__PURE__*/React.createElement("tr", {
       key: l.id,
       className: l.campaigns.includes('MSN') && l.campaigns.includes('VVV') ? 'row-both' : l.campaigns.includes('MSN') ? 'row-msn' : l.campaigns.includes('VVV') ? 'row-vvv' : ''
@@ -5940,7 +5996,14 @@ function ContactedView({
       style: {
         color: 'var(--text-dim)'
       }
-    }, "—")), /*#__PURE__*/React.createElement("td", null, l.lastContactDate || /*#__PURE__*/React.createElement("span", {
+    }, "—")), /*#__PURE__*/React.createElement("td", null, e ? /*#__PURE__*/React.createElement("span", null, e.date.toISOString().split('T')[0], e.fromClose ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        color: 'var(--accent)',
+        marginLeft: 5
+      },
+      title: "Most recent email/call from Close"
+    }, "· Close") : null) : /*#__PURE__*/React.createElement("span", {
       style: {
         color: 'var(--text-dim)'
       }
@@ -5962,7 +6025,11 @@ function ContactedView({
       style: {
         color: 'var(--text-dim)'
       }
-    }, "—")));
+    }, "—")), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost btn-xs",
+      title: "Log a contact today — resets the recycle clock",
+      onClick: () => logContact(l)
+    }, "✓ Log contact")));
   }))));
 }
 
@@ -12045,7 +12112,8 @@ function App() {
       onBulkDelete: bulkDelete,
       onBulkAssign: bulkAssign,
       config: config,
-      campColorMap: campColorMap
+      campColorMap: campColorMap,
+      addToast: addToast
     });
     if (tab === 'recycle') return /*#__PURE__*/React.createElement(LeadsTable, {
       leads: vLeads.filter(l => l.tags.includes('For Recycle')),
