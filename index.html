@@ -10890,6 +10890,7 @@ function App() {
   const leadsSyncRef = useRef({}); // {id: JSON} last synced
   const [history, setHistory] = useState(SAMPLE_HISTORY);
   const [toasts, setToasts] = useState([]);
+  const toastSeqRef = useRef(0); // guarantees a unique id per toast (Date.now() collided)
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [showSettings, setShowSettings] = useState(false);
   const [activeRep, setActiveRep] = useState(() => localStorage.getItem('activeRep') || null);
@@ -11181,7 +11182,7 @@ function App() {
     } catch (e) {}
   }, [agencies]);
   function addToast(msg, type = 'info') {
-    const id = Date.now();
+    const id = ++toastSeqRef.current;
     setToasts(t => [...t, {
       id,
       msg,

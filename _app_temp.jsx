@@ -4686,6 +4686,7 @@ function App() {
   const leadsSyncRef=useRef({});                       // {id: JSON} last synced
   const [history,setHistory]=useState(SAMPLE_HISTORY);
   const [toasts,setToasts]=useState([]);
+  const toastSeqRef=useRef(0);   // guarantees a unique id per toast (Date.now() collided)
   const [config,setConfig]=useState(DEFAULT_CONFIG);
   const [showSettings,setShowSettings]=useState(false);
   const [activeRep,setActiveRep]=useState(()=>localStorage.getItem('activeRep')||null);
@@ -4809,7 +4810,7 @@ function App() {
 
   useEffect(()=>{ try{localStorage.setItem('agencies',JSON.stringify(agencies));}catch(e){} },[agencies]);
 
-  function addToast(msg,type='info'){const id=Date.now();setToasts(t=>[...t,{id,msg,type}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);}
+  function addToast(msg,type='info'){const id=++toastSeqRef.current;setToasts(t=>[...t,{id,msg,type}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);}
   function saveL(upd){
     const old=leads.find(l=>l.id===upd.id);
     // Employees may only edit leads that are unassigned or assigned to themselves.
