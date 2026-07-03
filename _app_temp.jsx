@@ -19,6 +19,19 @@ function statusOptions(config){
   const base=(config&&Array.isArray(config.statusTags)&&config.statusTags.length)?config.statusTags:STATUSES;
   return [...new Set([...base,'HT'])];
 }
+// Status tags that have their OWN dedicated tab. A lead carrying one has "landed"
+// there and should leave the general Scraper / Lead Management lists.
+const STATUS_TAB_TAGS = ['Pending Qualification','Contacted','For Recycle'];
+function hasTabStatusTag(lead){ return STATUS_TAB_TAGS.some(t=>(lead.tags||[]).includes(t)); }
+// Any status tag — built-in OR admin-added (config.statusTags). Used to drop a
+// lead from the FRESH Scraper queue the moment it's triaged with any status.
+function hasAnyStatusTag(lead, config){
+  const tags=lead.tags||[];
+  if(STATUS_TAGS.some(t=>tags.includes(t))) return true;
+  if(STATUS_TAB_TAGS.some(t=>tags.includes(t))) return true;
+  const custom=(config&&Array.isArray(config.statusTags))?config.statusTags:[];
+  return custom.some(t=>tags.includes(t));
+}
 // Normalize a raw status/tag string from a sheet into a canonical STATUS_TAGS
 // value, so tag-based routing (Potential → rep, Contacted → Contacted tab, …)
 // works no matter how the sheet spells or cases it. Unknown tags pass through.
@@ -3475,7 +3488,7 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
   // A rep sees only the channels THEY scraped; admins see the whole queue.
   const myName=currentUser&&currentUser.name;
   const seeAll=isAdminUser(currentUser);
-  const queue=leads.filter(l=>!hasStatusTag(l) && leadOrigin(l)!=='Imported' && (seeAll || l.scrapedBy===myName));
+  const queue=leads.filter(l=>!hasAnyStatusTag(l,config) && leadOrigin(l)!=='Imported' && (seeAll || l.scrapedBy===myName));
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
       <LeadsTable leads={queue} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
@@ -3619,14 +3632,18 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onClearAl
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
   const all=(config.salesReps||[]);
-  const unassigned=leads.filter(l=>!l.assignedTo);
-  const display=repView==='unassigned'?unassigned:repView?leads.filter(l=>l.assignedTo===repView):leads;
+  // Lead Management = the working pool of leads NOT yet sorted into a dedicated
+  // status tab (Pending Qualification / Contacted / For Recycle). Once tagged,
+  // they live in that tab instead of cluttering this list.
+  const pool=leads.filter(l=>!hasTabStatusTag(l));
+  const unassigned=pool.filter(l=>!l.assignedTo);
+  const display=repView==='unassigned'?unassigned:repView?pool.filter(l=>l.assignedTo===repView):pool;
 
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
       <div style={{background:'var(--card)',borderBottom:'1px solid var(--border)',padding:'12px 20px',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',flexShrink:0}} className="no-print">
-        <button className={`btn btn-sm ${repView===''?'btn-primary':'btn-outline'}`} onClick={()=>setRepView('')}>All ({leads.length})</button>
-        {all.map(r=>{const cnt=leads.filter(l=>l.assignedTo===r).length;return(
+        <button className={`btn btn-sm ${repView===''?'btn-primary':'btn-outline'}`} onClick={()=>setRepView('')}>All ({pool.length})</button>
+        {all.map(r=>{const cnt=pool.filter(l=>l.assignedTo===r).length;return(
           <button key={r} className={`btn btn-sm ${repView===r?'btn-primary':'btn-outline'}`} onClick={()=>setRepView(v=>v===r?'':r)}>
             <div style={{width:16,height:16,borderRadius:'50%',background:'var(--accent)',color:'white',display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:700,marginRight:4}}>{r[0]}</div>
             {r} ({cnt})
