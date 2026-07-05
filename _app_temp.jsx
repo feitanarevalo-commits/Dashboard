@@ -2560,8 +2560,9 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
         <div className="stat-card" style={{flex:1,minWidth:138}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
         <div className="stat-card orange" style={{flex:1,minWidth:138}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
       </div>
-      <div className="rep-quota-row no-print" style={{display:'flex',gap:10,padding:'0 24px 10px',flexShrink:0,background:'var(--bg)',alignItems:'center',flexWrap:'wrap'}}>
-        <div style={{display:'flex',alignItems:'center',gap:10,marginRight:6,padding:'8px 12px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',color:'var(--text)'}}>
+      {/* Daily Quota + date on its OWN line, above the potential cards */}
+      <div className="no-print" style={{padding:'0 24px 8px',flexShrink:0,background:'var(--bg)'}}>
+        <div style={{display:'inline-flex',alignItems:'center',gap:10,padding:'8px 12px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',color:'var(--text)'}}>
           <div style={{display:'flex',flexDirection:'column',gap:1}}>
             <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'-.01em'}}>📅 Daily Quota</span>
             <span style={{fontSize:10,color:'var(--text-dim)'}}>open potentials per campaign</span>
@@ -2570,17 +2571,20 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             style={{padding:'6px 10px',border:'1px solid var(--border)',borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)',fontFamily:'inherit'}}/>
           <button className="btn btn-ghost btn-sm" onClick={()=>setQuotaDay(todayStr)} disabled={quotaDay===todayStr}>Today</button>
         </div>
+      </div>
+      {/* Potential cards — full-width row so they align in columns with the top stats */}
+      <div className="rep-quota-row no-print" style={{display:'flex',gap:10,padding:'0 24px 12px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>
         {(config.campaigns||[]).map(c=>(
-          <div key={c.id} className="stat-card" style={{flex:'0 0 auto',minWidth:128,borderLeft:`3px solid ${c.color}`,padding:'14px 16px'}}>
+          <div key={c.id} className="stat-card" style={{flex:1,minWidth:118,borderLeft:`3px solid ${c.color}`}}>
             <div className="stat-label">{c.label} Potentials</div>
             <div className="stat-value" style={{color:c.color}}>{campPotential(c.id)}</div>
           </div>
         ))}
-        <div className="stat-card" style={{flex:'0 0 auto',minWidth:128,padding:'14px 16px'}}>
+        <div className="stat-card" style={{flex:1,minWidth:118}}>
           <div className="stat-label">Open Total</div>
           <div className="stat-value">{dayPotentialTotal}</div>
         </div>
-        <div className="stat-card" style={{flex:'0 0 auto',minWidth:128,padding:'14px 16px'}}>
+        <div className="stat-card" style={{flex:1,minWidth:118}}>
           <div className="stat-label">Contacted {quotaDay===todayStr?'Today':'That Day'}</div>
           <div className="stat-value" style={{color:'var(--accent)'}}>{dayContacted}</div>
         </div>

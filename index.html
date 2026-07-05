@@ -5810,22 +5810,17 @@ function RepDashboard({
   }, "High Ticket"), /*#__PURE__*/React.createElement("div", {
     className: "stat-value"
   }, ht))), /*#__PURE__*/React.createElement("div", {
-    className: "rep-quota-row no-print",
+    className: "no-print",
     style: {
-      display: 'flex',
-      gap: 10,
-      padding: '0 24px 10px',
+      padding: '0 24px 8px',
       flexShrink: 0,
-      background: 'var(--bg)',
-      alignItems: 'center',
-      flexWrap: 'wrap'
+      background: 'var(--bg)'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      display: 'flex',
+      display: 'inline-flex',
       alignItems: 'center',
       gap: 10,
-      marginRight: 6,
       padding: '8px 12px',
       background: 'var(--card)',
       border: '1px solid var(--border)',
@@ -5868,14 +5863,23 @@ function RepDashboard({
     className: "btn btn-ghost btn-sm",
     onClick: () => setQuotaDay(todayStr),
     disabled: quotaDay === todayStr
-  }, "Today")), (config.campaigns || []).map(c => /*#__PURE__*/React.createElement("div", {
+  }, "Today"))), /*#__PURE__*/React.createElement("div", {
+    className: "rep-quota-row no-print",
+    style: {
+      display: 'flex',
+      gap: 10,
+      padding: '0 24px 12px',
+      flexShrink: 0,
+      background: 'var(--bg)',
+      flexWrap: 'wrap'
+    }
+  }, (config.campaigns || []).map(c => /*#__PURE__*/React.createElement("div", {
     key: c.id,
     className: "stat-card",
     style: {
-      flex: '0 0 auto',
-      minWidth: 128,
-      borderLeft: `3px solid ${c.color}`,
-      padding: '14px 16px'
+      flex: 1,
+      minWidth: 118,
+      borderLeft: `3px solid ${c.color}`
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
@@ -5887,9 +5891,8 @@ function RepDashboard({
   }, campPotential(c.id)))), /*#__PURE__*/React.createElement("div", {
     className: "stat-card",
     style: {
-      flex: '0 0 auto',
-      minWidth: 128,
-      padding: '14px 16px'
+      flex: 1,
+      minWidth: 118
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
@@ -5898,9 +5901,8 @@ function RepDashboard({
   }, dayPotentialTotal)), /*#__PURE__*/React.createElement("div", {
     className: "stat-card",
     style: {
-      flex: '0 0 auto',
-      minWidth: 128,
-      padding: '14px 16px'
+      flex: 1,
+      minWidth: 118
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
