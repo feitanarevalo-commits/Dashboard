@@ -3685,7 +3685,7 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onClearAl
 }
 
 // ─── HISTORY VIEW ─────────────────────────────────────────
-function HistoryView({history,addToast,feats}) {
+function HistoryView({history,addToast,feats,onRestore}) {
   return (
     <div className="history-list">
       {history.map(e=>(
@@ -3694,7 +3694,7 @@ function HistoryView({history,addToast,feats}) {
           <div className="history-text">{e.text}</div>
           <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,flexShrink:0}}>
             <div className="history-time">{e.time}</div>
-            {e.restorable && feats.historyRestore && <button className="btn btn-ghost btn-xs" onClick={()=>addToast('Action restored','success')}>↩ Restore</button>}
+            {e.restorable && e.restore && <button className="btn btn-ghost btn-xs" title={`Re-add the deleted lead(s)`} onClick={()=>onRestore&&onRestore(e)}>↩ Restore</button>}
           </div>
         </div>
       ))}
@@ -4848,9 +4848,21 @@ function App() {
     const l=leads.find(x=>x.id===id);
     // Reps may delete their OWN leads; admins may delete anything.
     if(!isAdmin && !ownsLead(l)){ addToast('You can only delete your own leads','error'); return; }
-    setLeads(ls=>ls.filter(x=>x.id!==id));deleteLeadFromSupabase(id);logH('🗑',`Lead "${l?.channelName}" deleted`);addToast(`"${l?.channelName}" deleted`,'error');
+    setLeads(ls=>ls.filter(x=>x.id!==id));deleteLeadFromSupabase(id);logH('🗑',`Lead "${l?.channelName}" deleted`,l?{type:'undelete',leads:[l]}:null);addToast(`"${l?.channelName}" deleted`,'error');
   }
-  function logH(icon,text){setHistory(h=>[{id:Date.now(),icon,text,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:true},...h]);}
+  function logH(icon,text,restore){setHistory(h=>[{id:Date.now()+'_'+Math.floor(Math.random()*1e6),icon,text,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:!!restore,restore:restore||null},...h]);}
+  // Undo a delete recorded in history: re-add the removed lead(s) to the pool and
+  // re-persist them to Supabase (dedup by id). Only "undelete" entries carry a
+  // restore payload, so only those show a Restore button.
+  function restoreHistory(entry){
+    if(!entry||!entry.restore||entry.restore.type!=='undelete') return;
+    const toRestore=(entry.restore.leads||[]).filter(Boolean);
+    if(!toRestore.length){ addToast('Nothing to restore','info'); return; }
+    setLeads(existing=>{ const have=new Set(existing.map(l=>String(l.id))); const add=toRestore.filter(l=>!have.has(String(l.id))); return [...add,...existing]; });
+    try{ upsertLeadsToSupabase(toRestore); }catch(e){}
+    setHistory(h=>h.map(x=>x.id===entry.id?{...x,restorable:false,text:x.text+' · ↩ restored'}:x));
+    addToast(`✓ Restored ${toRestore.length} lead(s)`,'success');
+  }
   function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
   function bulkDelete(ids){
     if(!ids||!ids.length) return;
@@ -4858,7 +4870,7 @@ function App() {
     let target=ids;
     if(!isAdmin){ const mine=new Set(leads.filter(ownsLead).map(l=>l.id)); target=ids.filter(id=>mine.has(id)); }
     if(!target.length){ addToast('You can only delete your own leads','error'); return; }
-    const set=new Set(target); setLeads(ls=>ls.filter(l=>!set.has(l.id))); deleteLeadsFromSupabase(target); logH('🗑',`Bulk: ${target.length} lead(s) deleted`);
+    const set=new Set(target); const deleted=leads.filter(l=>set.has(l.id)); setLeads(ls=>ls.filter(l=>!set.has(l.id))); deleteLeadsFromSupabase(target); logH('🗑',`Bulk: ${target.length} lead(s) deleted`,{type:'undelete',leads:deleted});
     addToast(`${target.length} lead(s) deleted`+(target.length<ids.length?` · ${ids.length-target.length} skipped (not yours)`:''),'error');
   }
   // Auto-flag leads that already exist in the real Close DB. Runs in the
@@ -4894,7 +4906,7 @@ function App() {
     addToast(`✓ "${lead.channelName}" added to ${lead.assignedTo}`,'success');
     checkAndTagFromClose([lead],'manually-added');
   }
-  function clearAllLeads(){ const n=leads.length; setLeads([]); leadsSyncRef.current={}; clearAllLeadsFromSupabase(); logH('🗑',`Cleared ALL leads (${n})`); addToast(`Cleared all ${n} lead(s)`,'error'); }
+  function clearAllLeads(){ const n=leads.length; const snapshot=[...leads]; setLeads([]); leadsSyncRef.current={}; clearAllLeadsFromSupabase(); logH('🗑',`Cleared ALL leads (${n})`,{type:'undelete',leads:snapshot}); addToast(`Cleared all ${n} lead(s)`,'error'); }
   // Fire-and-forget mirror to the leaves Google Sheet. Uses no-cors + text/plain
   // so it works with a Google Apps Script web app (which can't answer CORS
   // preflight); the body is still a JSON string the script parses. Works with
@@ -5376,7 +5388,7 @@ function App() {
     if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle}/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
     if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
-    if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}}/>;
+    if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
     if(tab==='lead-mgmt') return <LeadMgmtView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} addToast={addToast} config={config}/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(isPendingLead)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;

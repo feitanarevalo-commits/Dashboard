@@ -8314,7 +8314,8 @@ function LeadMgmtView({
 function HistoryView({
   history,
   addToast,
-  feats
+  feats,
+  onRestore
 }) {
   return /*#__PURE__*/React.createElement("div", {
     className: "history-list"
@@ -8335,9 +8336,10 @@ function HistoryView({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "history-time"
-  }, e.time), e.restorable && feats.historyRestore && /*#__PURE__*/React.createElement("button", {
+  }, e.time), e.restorable && e.restore && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost btn-xs",
-    onClick: () => addToast('Action restored', 'success')
+    title: `Re-add the deleted lead(s)`,
+    onClick: () => onRestore && onRestore(e)
   }, "↩ Restore")))));
 }
 
@@ -11246,19 +11248,48 @@ function App() {
     }
     setLeads(ls => ls.filter(x => x.id !== id));
     deleteLeadFromSupabase(id);
-    logH('🗑', `Lead "${l?.channelName}" deleted`);
+    logH('🗑', `Lead "${l?.channelName}" deleted`, l ? {
+      type: 'undelete',
+      leads: [l]
+    } : null);
     addToast(`"${l?.channelName}" deleted`, 'error');
   }
-  function logH(icon, text) {
+  function logH(icon, text, restore) {
     setHistory(h => [{
-      id: Date.now(),
+      id: Date.now() + '_' + Math.floor(Math.random() * 1e6),
       icon,
       text,
       time: new Date().toLocaleString('en-CA', {
         hour12: false
       }).replace(',', ''),
-      restorable: true
+      restorable: !!restore,
+      restore: restore || null
     }, ...h]);
+  }
+  // Undo a delete recorded in history: re-add the removed lead(s) to the pool and
+  // re-persist them to Supabase (dedup by id). Only "undelete" entries carry a
+  // restore payload, so only those show a Restore button.
+  function restoreHistory(entry) {
+    if (!entry || !entry.restore || entry.restore.type !== 'undelete') return;
+    const toRestore = (entry.restore.leads || []).filter(Boolean);
+    if (!toRestore.length) {
+      addToast('Nothing to restore', 'info');
+      return;
+    }
+    setLeads(existing => {
+      const have = new Set(existing.map(l => String(l.id)));
+      const add = toRestore.filter(l => !have.has(String(l.id)));
+      return [...add, ...existing];
+    });
+    try {
+      upsertLeadsToSupabase(toRestore);
+    } catch (e) {}
+    setHistory(h => h.map(x => x.id === entry.id ? {
+      ...x,
+      restorable: false,
+      text: x.text + ' · ↩ restored'
+    } : x));
+    addToast(`✓ Restored ${toRestore.length} lead(s)`, 'success');
   }
   function bulkAssign(ids, rep) {
     setLeads(ls => ls.map(l => ids.includes(l.id) ? {
@@ -11282,9 +11313,13 @@ function App() {
       return;
     }
     const set = new Set(target);
+    const deleted = leads.filter(l => set.has(l.id));
     setLeads(ls => ls.filter(l => !set.has(l.id)));
     deleteLeadsFromSupabase(target);
-    logH('🗑', `Bulk: ${target.length} lead(s) deleted`);
+    logH('🗑', `Bulk: ${target.length} lead(s) deleted`, {
+      type: 'undelete',
+      leads: deleted
+    });
     addToast(`${target.length} lead(s) deleted` + (target.length < ids.length ? ` · ${ids.length - target.length} skipped (not yours)` : ''), 'error');
   }
   // Auto-flag leads that already exist in the real Close DB. Runs in the
@@ -11341,10 +11376,14 @@ function App() {
   }
   function clearAllLeads() {
     const n = leads.length;
+    const snapshot = [...leads];
     setLeads([]);
     leadsSyncRef.current = {};
     clearAllLeadsFromSupabase();
-    logH('🗑', `Cleared ALL leads (${n})`);
+    logH('🗑', `Cleared ALL leads (${n})`, {
+      type: 'undelete',
+      leads: snapshot
+    });
     addToast(`Cleared all ${n} lead(s)`, 'error');
   }
   // Fire-and-forget mirror to the leaves Google Sheet. Uses no-cors + text/plain
@@ -12232,7 +12271,8 @@ function App() {
     if (tab === 'history') return /*#__PURE__*/React.createElement(HistoryView, {
       history: history,
       addToast: addToast,
-      feats: config.features || {}
+      feats: config.features || {},
+      onRestore: restoreHistory
     });
     if (tab === 'prev-scraped') return /*#__PURE__*/React.createElement(LeadsTable, {
       leads: vLeads,
