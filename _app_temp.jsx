@@ -2553,15 +2553,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
           <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button>
         </div>
       </div>
-      <div className="rep-stats-row" style={{display:'flex',gap:10,padding:'10px 24px 6px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>
-        <div className="stat-card accent" style={{flex:1,minWidth:138}}><div className="stat-label">Total</div><div className="stat-value">{total}</div></div>
-        <div className="stat-card green" style={{flex:1,minWidth:138}}><div className="stat-label">Potential</div><div className="stat-value">{potential}</div></div>
-        <div className="stat-card" style={{flex:1,minWidth:138}} title="Fresh Potential leads not yet on Close — the import queue"><div className="stat-label">Fresh (to import)</div><div className="stat-value">{fresh}</div></div>
-        <div className="stat-card" style={{flex:1,minWidth:138}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
-        <div className="stat-card orange" style={{flex:1,minWidth:138}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
-      </div>
-      {/* Daily Quota + date on its OWN line, above the potential cards */}
-      <div className="no-print" style={{padding:'0 24px 8px',flexShrink:0,background:'var(--bg)'}}>
+      {/* Daily Quota + date on top; the two stat-card rows sit below it, aligned */}
+      <div className="no-print" style={{padding:'10px 24px 8px',flexShrink:0,background:'var(--bg)'}}>
         <div style={{display:'inline-flex',alignItems:'center',gap:10,padding:'8px 12px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',color:'var(--text)'}}>
           <div style={{display:'flex',flexDirection:'column',gap:1}}>
             <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'-.01em'}}>📅 Daily Quota</span>
@@ -2571,6 +2564,13 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             style={{padding:'6px 10px',border:'1px solid var(--border)',borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)',fontFamily:'inherit'}}/>
           <button className="btn btn-ghost btn-sm" onClick={()=>setQuotaDay(todayStr)} disabled={quotaDay===todayStr}>Today</button>
         </div>
+      </div>
+      <div className="rep-stats-row" style={{display:'flex',gap:10,padding:'0 24px 6px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>
+        <div className="stat-card accent" style={{flex:1,minWidth:138}}><div className="stat-label">Total</div><div className="stat-value">{total}</div></div>
+        <div className="stat-card green" style={{flex:1,minWidth:138}}><div className="stat-label">Potential</div><div className="stat-value">{potential}</div></div>
+        <div className="stat-card" style={{flex:1,minWidth:138}} title="Fresh Potential leads not yet on Close — the import queue"><div className="stat-label">Fresh (to import)</div><div className="stat-value">{fresh}</div></div>
+        <div className="stat-card" style={{flex:1,minWidth:138}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
+        <div className="stat-card orange" style={{flex:1,minWidth:138}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
       </div>
       {/* Potential cards — full-width row so they align in columns with the top stats */}
       <div className="rep-quota-row no-print" style={{display:'flex',gap:10,padding:'0 24px 12px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>

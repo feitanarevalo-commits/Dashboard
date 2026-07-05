@@ -5749,11 +5749,65 @@ function RepDashboard({
     className: "btn btn-ghost btn-sm",
     onClick: onBack
   }, "← Back"))), /*#__PURE__*/React.createElement("div", {
+    className: "no-print",
+    style: {
+      padding: '10px 24px 8px',
+      flexShrink: 0,
+      background: 'var(--bg)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '8px 12px',
+      background: 'var(--card)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-lg)',
+      color: 'var(--text)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 1
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: "'Space Grotesk',sans-serif",
+      fontWeight: 700,
+      fontSize: 13,
+      letterSpacing: '-.01em'
+    }
+  }, "📅 Daily Quota"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: 'var(--text-dim)'
+    }
+  }, "open potentials per campaign")), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: quotaDay,
+    max: todayStr,
+    onChange: e => setQuotaDay(e.target.value || todayStr),
+    style: {
+      padding: '6px 10px',
+      border: '1px solid var(--border)',
+      borderRadius: 8,
+      fontSize: 12,
+      background: 'var(--bg)',
+      color: 'var(--text)',
+      fontFamily: 'inherit'
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: () => setQuotaDay(todayStr),
+    disabled: quotaDay === todayStr
+  }, "Today"))), /*#__PURE__*/React.createElement("div", {
     className: "rep-stats-row",
     style: {
       display: 'flex',
       gap: 10,
-      padding: '10px 24px 6px',
+      padding: '0 24px 6px',
       flexShrink: 0,
       background: 'var(--bg)',
       flexWrap: 'wrap'
@@ -5810,60 +5864,6 @@ function RepDashboard({
   }, "High Ticket"), /*#__PURE__*/React.createElement("div", {
     className: "stat-value"
   }, ht))), /*#__PURE__*/React.createElement("div", {
-    className: "no-print",
-    style: {
-      padding: '0 24px 8px',
-      flexShrink: 0,
-      background: 'var(--bg)'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 10,
-      padding: '8px 12px',
-      background: 'var(--card)',
-      border: '1px solid var(--border)',
-      borderRadius: 'var(--radius-lg)',
-      color: 'var(--text)'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 1
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontFamily: "'Space Grotesk',sans-serif",
-      fontWeight: 700,
-      fontSize: 13,
-      letterSpacing: '-.01em'
-    }
-  }, "📅 Daily Quota"), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 10,
-      color: 'var(--text-dim)'
-    }
-  }, "open potentials per campaign")), /*#__PURE__*/React.createElement("input", {
-    type: "date",
-    value: quotaDay,
-    max: todayStr,
-    onChange: e => setQuotaDay(e.target.value || todayStr),
-    style: {
-      padding: '6px 10px',
-      border: '1px solid var(--border)',
-      borderRadius: 8,
-      fontSize: 12,
-      background: 'var(--bg)',
-      color: 'var(--text)',
-      fontFamily: 'inherit'
-    }
-  }), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost btn-sm",
-    onClick: () => setQuotaDay(todayStr),
-    disabled: quotaDay === todayStr
-  }, "Today"))), /*#__PURE__*/React.createElement("div", {
     className: "rep-quota-row no-print",
     style: {
       display: 'flex',
