@@ -2468,6 +2468,19 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   function importToSmartReach(r,ls,campId,campLabel){
     if(onImportSmartReach) onImportSmartReach(r,ls,campId,campLabel);
   }
+  // Pull the LIVE SmartReach campaign list so newly-created campaigns appear
+  // without editing config. Falls back to the static config list if the fetch
+  // fails. Excludes ended (stopped) campaigns.
+  const [liveSrCampaigns,setLiveSrCampaigns]=useState(null);
+  useEffect(()=>{
+    if(isLeadgen) return;
+    const base=(config.supabaseUrl||'').trim(); if(!base) return;
+    fetch(base+'/functions/v1/smartreach-campaigns',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+      .then(r=>r.json()).then(res=>{ if(res&&res.ok&&Array.isArray(res.campaigns)) setLiveSrCampaigns(res.campaigns); }).catch(()=>{});
+  },[]);
+  const srCampaignOpts = (liveSrCampaigns!=null)
+    ? liveSrCampaigns.filter(c=>c.status!=='stopped').map(c=>({id:c.id,label:c.name+(c.status&&c.status!=='running'?' · '+String(c.status).replace(/_/g,' '):'')}))
+    : ((config.smartReachCampaigns&&config.smartReachCampaigns[rep])||[]);
   // myLeads = everything assigned to the rep (drives the stat cards & counts).
   // activeLeads = the rep's work queue shown in the table; once a lead is tagged
   // Contacted it leaves this queue and appears under the global Contacted tab.
@@ -2573,7 +2586,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
       <LeadsTable
         leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap}
-        smartReachSend={isLeadgen?null:{ campaigns:(config.smartReachCampaigns&&config.smartReachCampaigns[rep])||[], onSend:(leads,campId,campLabel)=>importToSmartReach(rep,leads,campId,campLabel) }}
+        smartReachSend={isLeadgen?null:{ campaigns:srCampaignOpts, onSend:(leads,campId,campLabel)=>importToSmartReach(rep,leads,campId,campLabel) }}
         closeSend={isLeadgen?null:{ onSend:(ls)=>importToClose(rep,ls) }}
         hideExport
         filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
