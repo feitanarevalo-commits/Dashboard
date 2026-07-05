@@ -3758,7 +3758,7 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   }
   function reset(){setLocal(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));}
 
-  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},agency:{label:'Agency',icon:'🏢'},'close-data':{label:'Close Leads Data',icon:'☁️'},pending:{label:'Pending Qualification',icon:'⏳'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},recent:{label:'Recently Assigned',icon:'🕐'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
+  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},agency:{label:'Agency',icon:'🏢'},'close-data':{label:'Close Leads Data',icon:'☁️'},pending:{label:'Pending Qualification',icon:'⏳'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
   const COL_META={thumbnail:'Thumbnail',channelName:'Channel Name',url:'URL',platform:'Platform',niche:'Niche',followers:'Followers',emails:'Email(s)',tags:'Status Tags',campaign:'Campaign',assignedTo:'Assigned To',dateAssigned:'Date Assigned'};
   const FEAT_META={bulkAssign:{label:'Bulk Assign'},exportCSV:{label:'Export CSV'},exportPDF:{label:'Export PDF'},dailyRefresh:{label:'Daily Auto-Refresh'},colorHighlights:{label:'Campaign Color Rows'},webhookTrigger:{label:'n8n Webhook'},historyRestore:{label:'History Restore'},emailValidation:{label:'Email Validation (future)'}};
 
@@ -4421,7 +4421,6 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
     {id:'close-data',label:'Close Leads Data',icon:'☁'},
     {id:'pending',label:'Pending Qualification',icon:'◔'},
     {id:'contacted',label:'Contacted Leads',icon:'✉'},{id:'recycle',label:'For Recycle',icon:'↻'},
-    {id:'recent',label:'Recently Assigned',icon:'◑'},
   ].filter(p=>(config.tabs||{})[p.id]);
   (config.campaigns||[]).forEach(c=>PAGE_DEFS.push({id:c.id.toLowerCase(),label:`${c.label} Campaign`,icon:'●'}));
   const pages=PAGE_DEFS.filter(p=>!ql||match(p.label)).map(p=>({...p,kind:'Pages',run:()=>{onNavigate(p.id);onClose();}}));
@@ -5376,7 +5375,6 @@ function App() {
     {id:'pending',icon:'◔',label:'Pending Qualification',count:counts.pending,cls:'orange'},
     {id:'contacted',icon:'✉',label:'Contacted',count:counts.contacted,cls:'blue'},
     {id:'recycle',icon:'↻',label:'For Recycle',count:counts.recycle,cls:'orange'},
-    {id:'recent',icon:'◑',label:'Recently Assigned',count:counts.recent,cls:''},
     {id:'duplicates',icon:'⧉',label:'Duplicates',count:counts.duplicates,cls:'red'},
   ];
 

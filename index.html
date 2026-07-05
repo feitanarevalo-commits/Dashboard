@@ -8532,10 +8532,6 @@ function SettingsDrawer({
       label: 'For Recycle',
       icon: '♻️'
     },
-    recent: {
-      label: 'Recently Assigned',
-      icon: '🕐'
-    },
     msn: {
       label: 'MSN Tab',
       icon: '🔵'
@@ -10260,10 +10256,6 @@ function GlobalSearch({
     id: 'recycle',
     label: 'For Recycle',
     icon: '↻'
-  }, {
-    id: 'recent',
-    label: 'Recently Assigned',
-    icon: '◑'
   }].filter(p => (config.tabs || {})[p.id]);
   (config.campaigns || []).forEach(c => PAGE_DEFS.push({
     id: c.id.toLowerCase(),
@@ -12192,12 +12184,6 @@ function App() {
     label: 'For Recycle',
     count: counts.recycle,
     cls: 'orange'
-  }, {
-    id: 'recent',
-    icon: '◑',
-    label: 'Recently Assigned',
-    count: counts.recent,
-    cls: ''
   }, {
     id: 'duplicates',
     icon: '⧉',
