@@ -1749,6 +1749,7 @@ function LeadsTable({
   smartReachSend = null,
   closeSend = null,
   hideExport = false,
+  hideRepFilter = false,
   config,
   feats,
   campColorMap,
@@ -2007,7 +2008,7 @@ function LeadsTable({
   }, "All Status"), statusOptions(config).map(s => /*#__PURE__*/React.createElement("option", {
     key: s,
     value: s
-  }, s === 'HT' ? 'HT (High Ticket)' : s))), showAssigned && /*#__PURE__*/React.createElement("select", {
+  }, s === 'HT' ? 'HT (High Ticket)' : s))), showAssigned && !hideRepFilter && /*#__PURE__*/React.createElement("select", {
     value: filterRep,
     onChange: e => setFilterRep(e.target.value)
   }, /*#__PURE__*/React.createElement("option", {
@@ -7886,6 +7887,7 @@ function ScraperView({
     showOrigin: true,
     toolbarStart: runBtn,
     toolbarAfterSearch: scraperFilters,
+    hideRepFilter: !seeAll,
     searchValue: keyword,
     onSearchChange: setKeyword,
     searchFilters: false,

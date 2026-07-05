@@ -921,7 +921,7 @@ function NoteModal({lead,onClose,onSave}){
 }
 
 // ─── LEADS TABLE ──────────────────────────────────────────
-function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
+function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,hideRepFilter=false,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
   const [sel,setSel] = useState([]);
   const [searchState,setSearchState] = useState('');
   // When the parent provides search control (e.g. Scraper uses it as the
@@ -1084,7 +1084,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onBulkAssign,showAs
           <option value="">All Status</option>
           {statusOptions(config).map(s=><option key={s} value={s}>{s==='HT'?'HT (High Ticket)':s}</option>)}
         </select>
-        {showAssigned && (
+        {showAssigned && !hideRepFilter && (
           <select value={filterRep} onChange={e=>setFilterRep(e.target.value)}>
             <option value="">All Reps</option>
             {allReps.map(r=><option key={r}>{r}</option>)}
@@ -3515,7 +3515,7 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
       <LeadsTable leads={queue} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
-        showAssigned showCampaign showOrigin toolbarStart={runBtn} toolbarAfterSearch={scraperFilters}
+        showAssigned showCampaign showOrigin toolbarStart={runBtn} toolbarAfterSearch={scraperFilters} hideRepFilter={!seeAll}
         searchValue={keyword} onSearchChange={setKeyword} searchFilters={false} searchPlaceholder="Search query (sent to scraper)…"
         config={config} feats={feats} campColorMap={campColorMap} filename="scraper_queue" printTitle="Scraper Queue"/>
     </div>
