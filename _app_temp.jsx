@@ -5565,18 +5565,13 @@ function App() {
           </>}
           <div style={{flex:1}}/>
           <div className="sidebar-footer">
+            {/* Change Password + Logout live under the topbar profile menu now. */}
             {isAdmin && <div className="nav-item settings" title="Settings & Customize" onClick={()=>setShowSettings(true)}>
               <span className="nav-icon">⚙</span>Settings &amp; Customize
             </div>}
-            <div className="nav-item settings" title="Change Password" onClick={()=>setShowChangePw(true)}>
-              <span className="nav-icon">🔑</span>Change Password
-            </div>
             {isAdmin && <div className="nav-item settings" title="Reset Teammate's Password" onClick={()=>setShowAdminReset(true)}>
               <span className="nav-icon">🛠</span>Reset Teammate's Password
             </div>}
-            <div className="nav-item settings" title={`Logout (${currentUser.name})`} onClick={logout}>
-              <span className="nav-icon">⎋</span>Logout ({currentUser.name})
-            </div>
           </div>
         </nav>
 

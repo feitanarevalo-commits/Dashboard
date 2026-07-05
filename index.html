@@ -12736,25 +12736,13 @@ function App() {
     onClick: () => setShowSettings(true)
   }, /*#__PURE__*/React.createElement("span", {
     className: "nav-icon"
-  }, "⚙"), "Settings & Customize"), /*#__PURE__*/React.createElement("div", {
-    className: "nav-item settings",
-    title: "Change Password",
-    onClick: () => setShowChangePw(true)
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "nav-icon"
-  }, "🔑"), "Change Password"), isAdmin && /*#__PURE__*/React.createElement("div", {
+  }, "⚙"), "Settings & Customize"), isAdmin && /*#__PURE__*/React.createElement("div", {
     className: "nav-item settings",
     title: "Reset Teammate's Password",
     onClick: () => setShowAdminReset(true)
   }, /*#__PURE__*/React.createElement("span", {
     className: "nav-icon"
-  }, "🛠"), "Reset Teammate's Password"), /*#__PURE__*/React.createElement("div", {
-    className: "nav-item settings",
-    title: `Logout (${currentUser.name})`,
-    onClick: logout
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "nav-icon"
-  }, "⎋"), "Logout (", currentUser.name, ")"))), /*#__PURE__*/React.createElement("div", {
+  }, "🛠"), "Reset Teammate's Password"))), /*#__PURE__*/React.createElement("div", {
     className: "main"
   }, !showRepSelect && !activeRep && tab !== 'knowledge' && /*#__PURE__*/React.createElement("div", {
     className: "main-header"
