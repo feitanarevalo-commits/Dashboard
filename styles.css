@@ -241,6 +241,10 @@ h1, h2, h3, h4, h5, h6, .display { font-family: 'Space Grotesk', 'Plus Jakarta S
 .stat-card.green .stat-value { color: var(--success); }
 .stat-card.orange .stat-value { color: var(--warn); }
 .stat-card.purple .stat-value { color: var(--purple); }
+/* Compact the per-rep dashboard stat cards so the leads table below gets more room. */
+.rep-stats-row .stat-card, .rep-quota-row .stat-card { padding: 9px 13px; min-width: 96px !important; }
+.rep-stats-row .stat-card .stat-label, .rep-quota-row .stat-card .stat-label { font-size: 9.5px; margin-bottom: 3px; }
+.rep-stats-row .stat-card .stat-value, .rep-quota-row .stat-card .stat-value { font-size: 20px; }
 
 /* ── TABLE ── */
 .table-container { flex: 1; overflow: auto; padding: 0; }

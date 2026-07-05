@@ -2553,14 +2553,14 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
           <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button>
         </div>
       </div>
-      <div className="rep-stats-row" style={{display:'flex',gap:12,padding:'18px 32px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>
+      <div className="rep-stats-row" style={{display:'flex',gap:10,padding:'10px 24px 6px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>
         <div className="stat-card accent" style={{flex:1,minWidth:138}}><div className="stat-label">Total</div><div className="stat-value">{total}</div></div>
         <div className="stat-card green" style={{flex:1,minWidth:138}}><div className="stat-label">Potential</div><div className="stat-value">{potential}</div></div>
         <div className="stat-card" style={{flex:1,minWidth:138}} title="Fresh Potential leads not yet on Close — the import queue"><div className="stat-label">Fresh (to import)</div><div className="stat-value">{fresh}</div></div>
         <div className="stat-card" style={{flex:1,minWidth:138}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
         <div className="stat-card orange" style={{flex:1,minWidth:138}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
       </div>
-      <div className="rep-quota-row no-print" style={{display:'flex',gap:12,padding:'0 32px 18px',flexShrink:0,background:'var(--bg)',alignItems:'center',flexWrap:'wrap'}}>
+      <div className="rep-quota-row no-print" style={{display:'flex',gap:10,padding:'0 24px 10px',flexShrink:0,background:'var(--bg)',alignItems:'center',flexWrap:'wrap'}}>
         <div style={{display:'flex',flexDirection:'column',gap:2,marginRight:6,padding:'10px 14px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',color:'var(--text)'}}>
           <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'-.01em'}}>📅 Daily Quota</span>
           <span style={{fontSize:10,color:'var(--text-dim)'}}>open potentials per campaign</span>
