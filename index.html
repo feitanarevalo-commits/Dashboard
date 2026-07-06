@@ -1743,6 +1743,7 @@ function LeadsTable({
   onEdit,
   onDelete,
   onBulkDelete = null,
+  onArchive = null,
   onBulkAssign,
   showAssigned = false,
   showCampaign = true,
@@ -2148,7 +2149,18 @@ function LeadsTable({
       setSrCampaign('');
     },
     title: selEmailable.length ? `Send the ${selEmailable.length} selected lead(s) with an email to the chosen SmartReach campaign` : 'Select leads that have an email first'
-  }, "✉ Send ", selEmailable.length, " to SmartReach")), (onBulkDelete || onDelete) && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "✉ Send ", selEmailable.length, " to SmartReach")), onArchive && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "toolbar-sep"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: () => {
+      if (window.confirm(`Archive ${sel.length} selected lead(s)?\n\nThey move out of the active dashboard into the Archive to keep things fast. You can restore them anytime from History or the Archive view.`)) {
+        onArchive(sel);
+        setSel([]);
+      }
+    },
+    title: "Move the selected leads to the Archive (recoverable)"
+  }, "🗄 Archive ", sel.length)), (onBulkDelete || onDelete) && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "toolbar-sep"
   }), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-sm",
@@ -4828,10 +4840,62 @@ function loadLeadsFromSupabase() {
     let from = 0;
     for (let i = 0; i < 1000; i++) {
       // hard safety cap = 1,000,000 rows
+      // Archived leads are excluded from the active set (kept small = fast at
+      // scale). They live on and are fetched on demand in the Archive view.
       const {
         data,
         error
-      } = await SB.from('leads').select('id,data').range(from, from + PAGE - 1);
+      } = await SB.from('leads').select('id,data').eq('archived', false).range(from, from + PAGE - 1);
+      if (error || !data) {
+        if (i === 0) return null;
+        break;
+      }
+      out.push(...data.map(r => r.data).filter(Boolean));
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+    return out;
+  }
+  return all().catch(() => null);
+}
+// Archiving = a recoverable soft-remove. archived=true drops a lead from the
+// active load (and thus from every view + the 15s live-sync); restore flips it
+// back. Only the Archive view and these helpers ever touch the flag.
+function archiveLeadsInSupabase(ids) {
+  if (!SB || !ids || !ids.length) return Promise.resolve(false);
+  return SB.from('leads').update({
+    archived: true,
+    updated_at: new Date().toISOString()
+  }).in('id', ids.map(String)).then(({
+    error
+  }) => {
+    if (error) console.warn('[leads] archive failed', error.message);
+    return !error;
+  }).catch(() => false);
+}
+function unarchiveLeadsInSupabase(ids) {
+  if (!SB || !ids || !ids.length) return Promise.resolve(false);
+  return SB.from('leads').update({
+    archived: false,
+    updated_at: new Date().toISOString()
+  }).in('id', ids.map(String)).then(({
+    error
+  }) => {
+    if (error) console.warn('[leads] unarchive failed', error.message);
+    return !error;
+  }).catch(() => false);
+}
+function loadArchivedFromSupabase() {
+  if (!SB) return Promise.resolve(null);
+  async function all() {
+    const PAGE = 1000,
+      out = [];
+    let from = 0;
+    for (let i = 0; i < 1000; i++) {
+      const {
+        data,
+        error
+      } = await SB.from('leads').select('id,data').eq('archived', true).range(from, from + PAGE - 1);
       if (error || !data) {
         if (i === 0) return null;
         break;
@@ -8251,6 +8315,7 @@ function LeadMgmtView({
   onSave,
   onDelete,
   onBulkDelete,
+  onArchive,
   onBulkAssign,
   onClearAll,
   addToast,
@@ -8334,6 +8399,7 @@ function LeadMgmtView({
     onEdit: onSave,
     onDelete: onDelete,
     onBulkDelete: onBulkDelete,
+    onArchive: onArchive,
     onBulkAssign: onBulkAssign,
     showAssigned: true,
     showCampaign: true,
@@ -8344,6 +8410,181 @@ function LeadMgmtView({
     filename: "lead_management",
     printTitle: "Lead Management Report"
   }));
+}
+
+// Admin-only browser for archived leads. These are excluded from the active load
+// (that's what keeps the dashboard fast at scale), so we fetch them on demand
+// here. Restore flips a lead back to active and re-adds it to the live pool.
+function ArchiveView({
+  loadArchived,
+  onRestore,
+  config,
+  campColorMap,
+  addToast
+}) {
+  const [rows, setRows] = useState(null); // null = loading, [] = loaded empty
+  const [err, setErr] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sel, setSel] = useState([]);
+  const [reloadTick, setReloadTick] = useState(0);
+  useEffect(() => {
+    let stop = false;
+    setRows(null);
+    setErr(false);
+    setSel([]);
+    loadArchived().then(r => {
+      if (stop) return;
+      if (!Array.isArray(r)) {
+        setErr(true);
+        setRows([]);
+      } else setRows(r);
+    }).catch(() => {
+      if (!stop) {
+        setErr(true);
+        setRows([]);
+      }
+    });
+    return () => {
+      stop = true;
+    };
+  }, [reloadTick]);
+  const s = search.trim().toLowerCase();
+  const filtered = (rows || []).filter(l => !s || (l.channelName || '').toLowerCase().includes(s) || (l.niche || '').toLowerCase().includes(s) || (l.assignedTo || '').toLowerCase().includes(s));
+  const allSel = filtered.length > 0 && filtered.every(l => sel.includes(l.id));
+  function toggleAll() {
+    setSel(allSel ? [] : filtered.map(l => l.id));
+  }
+  function toggleOne(id) {
+    setSel(x => x.includes(id) ? x.filter(i => i !== id) : [...x, id]);
+  }
+  function restore(ids) {
+    const set = new Set(ids);
+    const objs = (rows || []).filter(l => set.has(l.id));
+    if (!objs.length) return;
+    onRestore(objs);
+    setRows(rs => (rs || []).filter(l => !set.has(l.id)));
+    setSel(x => x.filter(i => !set.has(i)));
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "toolbar no-print"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "search-field"
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "14",
+    height: "14",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2"
+  }, /*#__PURE__*/React.createElement("circle", {
+    cx: "11",
+    cy: "11",
+    r: "8"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "m21 21-4.35-4.35"
+  })), /*#__PURE__*/React.createElement("input", {
+    placeholder: "Search archived channels, niches, reps...",
+    value: search,
+    onChange: e => setSearch(e.target.value)
+  })), /*#__PURE__*/React.createElement("span", {
+    className: "count-label no-print"
+  }, rows == null ? 'Loading…' : `${filtered.length} archived`, sel.length > 0 && ` · ${sel.length} selected`), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm no-print",
+    style: {
+      marginLeft: 'auto'
+    },
+    onClick: () => setReloadTick(t => t + 1),
+    title: "Reload the archive"
+  }, "↻ Refresh")), sel.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "bulk-panel no-print"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: 'var(--accent)',
+      fontSize: 13,
+      whiteSpace: 'nowrap'
+    }
+  }, "✓ ", sel.length, " selected"), /*#__PURE__*/React.createElement("div", {
+    className: "toolbar-sep"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    onClick: () => restore(sel),
+    title: "Restore the selected leads to the active dashboard"
+  }, "♻ Restore ", sel.length), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: () => setSel([])
+  }, "✕ Clear")), /*#__PURE__*/React.createElement("div", {
+    className: "table-container"
+  }, rows == null ? /*#__PURE__*/React.createElement("div", {
+    className: "empty"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "empty-icon"
+  }, "⏳"), /*#__PURE__*/React.createElement("h3", null, "Loading archive…")) : filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "empty"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "empty-icon"
+  }, "🗄"), /*#__PURE__*/React.createElement("h3", null, err ? 'Could not load the archive' : s ? 'No archived leads match your search' : 'Nothing archived yet'), /*#__PURE__*/React.createElement("p", null, err ? 'Please try Refresh.' : s ? 'Try a different search.' : 'Archived leads move here and stay out of the active dashboard until restored.')) : /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 40
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: allSel,
+    onChange: toggleAll
+  })), /*#__PURE__*/React.createElement("th", null, "Channel"), /*#__PURE__*/React.createElement("th", null, "Platform"), /*#__PURE__*/React.createElement("th", null, "Followers"), /*#__PURE__*/React.createElement("th", null, "Tags"), /*#__PURE__*/React.createElement("th", null, "Assigned To"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 90
+    },
+    className: "no-print"
+  }, "Actions"))), /*#__PURE__*/React.createElement("tbody", null, filtered.map(lead => /*#__PURE__*/React.createElement("tr", {
+    key: lead.id,
+    className: sel.includes(lead.id) ? 'row-selected' : ''
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: sel.includes(lead.id),
+    onChange: () => toggleOne(lead.id)
+  })), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
+    className: "channel-name"
+  }, lead.channelName), lead.niche && /*#__PURE__*/React.createElement("div", {
+    className: "channel-sub"
+  }, lead.niche)), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+    className: "platform-badge"
+  }, PLATFORM_ICON[lead.platform], " ", lead.platform)), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+    className: "followers-val"
+  }, lead.followers)), /*#__PURE__*/React.createElement("td", null, (lead.tags || []).length ? (lead.tags || []).map(t => /*#__PURE__*/React.createElement("span", {
+    key: t,
+    className: "tag",
+    style: {
+      marginRight: 4
+    }
+  }, t)) : /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-light)',
+      fontSize: 11
+    }
+  }, "—")), /*#__PURE__*/React.createElement("td", null, lead.assignedTo ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 600
+    }
+  }, lead.assignedTo) : /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-light)',
+      fontSize: 11
+    }
+  }, "Unassigned")), /*#__PURE__*/React.createElement("td", {
+    className: "no-print"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: () => restore([lead.id]),
+    title: "Restore this lead to the active dashboard"
+  }, "♻ Restore"))))))));
 }
 
 // ─── HISTORY VIEW ─────────────────────────────────────────
@@ -11298,7 +11539,9 @@ function App() {
   // re-persist them to Supabase (dedup by id). Only "undelete" entries carry a
   // restore payload, so only those show a Restore button.
   function restoreHistory(entry) {
-    if (!entry || !entry.restore || entry.restore.type !== 'undelete') return;
+    if (!entry || !entry.restore) return;
+    const t = entry.restore.type;
+    if (t !== 'undelete' && t !== 'unarchive') return;
     const toRestore = (entry.restore.leads || []).filter(Boolean);
     if (!toRestore.length) {
       addToast('Nothing to restore', 'info');
@@ -11309,15 +11552,57 @@ function App() {
       const add = toRestore.filter(l => !have.has(String(l.id)));
       return [...add, ...existing];
     });
-    try {
-      upsertLeadsToSupabase(toRestore);
-    } catch (e) {}
+    // Undelete re-inserts rows; unarchive just flips the flag back to active.
+    if (t === 'unarchive') {
+      unarchiveLeadsInSupabase(toRestore.map(l => l.id));
+    } else {
+      try {
+        upsertLeadsToSupabase(toRestore);
+      } catch (e) {}
+    }
     setHistory(h => h.map(x => x.id === entry.id ? {
       ...x,
       restorable: false,
-      text: x.text + ' · ↩ restored'
+      text: x.text + (t === 'unarchive' ? ' · ↩ unarchived' : ' · ↩ restored')
     } : x));
     addToast(`✓ Restored ${toRestore.length} lead(s)`, 'success');
+  }
+  // Archiving: soft-remove selected leads from the active dashboard (recoverable
+  // via History → Restore, or the Archive view). Reps may archive only their own.
+  function archiveLeads(ids) {
+    if (!ids || !ids.length) return;
+    let target = ids;
+    if (!isAdmin) {
+      const mine = new Set(leads.filter(ownsLead).map(l => l.id));
+      target = ids.filter(id => mine.has(id));
+    }
+    if (!target.length) {
+      addToast('You can only archive your own leads', 'error');
+      return;
+    }
+    const set = new Set(target);
+    const archived = leads.filter(l => set.has(l.id));
+    setLeads(ls => ls.filter(l => !set.has(l.id)));
+    archiveLeadsInSupabase(target);
+    logH('🗄', `Archived ${target.length} lead(s)`, {
+      type: 'unarchive',
+      leads: archived
+    });
+    addToast(`🗄 ${target.length} lead(s) archived` + (target.length < ids.length ? ` · ${ids.length - target.length} skipped (not yours)` : ''), 'info');
+  }
+  // Restore archived leads from the Archive view: flip them active + re-add to
+  // the in-memory pool so they reappear immediately in Lead Management.
+  function restoreArchived(leadObjs) {
+    const arr = (leadObjs || []).filter(Boolean);
+    if (!arr.length) return;
+    setLeads(existing => {
+      const have = new Set(existing.map(l => String(l.id)));
+      const add = arr.filter(l => !have.has(String(l.id)));
+      return [...add, ...existing];
+    });
+    unarchiveLeadsInSupabase(arr.map(l => l.id));
+    logH('♻', `Restored ${arr.length} lead(s) from Archive`);
+    addToast(`♻ Restored ${arr.length} lead(s) from Archive`, 'success');
   }
   function bulkAssign(ids, rep) {
     setLeads(ls => ls.map(l => ids.includes(l.id) ? {
@@ -12212,6 +12497,10 @@ function App() {
     id: 'attendance',
     icon: '⏱',
     label: 'Attendance'
+  }, {
+    id: 'archive',
+    icon: '🗄',
+    label: 'Archive'
   }];
   const NAV_FILTER = [{
     id: 'pending',
@@ -12314,6 +12603,7 @@ function App() {
       onEdit: saveL,
       onDelete: delL,
       onBulkDelete: bulkDelete,
+      onArchive: archiveLeads,
       onBulkAssign: bulkAssign,
       showAssigned: true,
       showCampaign: true,
@@ -12329,6 +12619,7 @@ function App() {
       onSave: saveL,
       onDelete: delL,
       onBulkDelete: bulkDelete,
+      onArchive: archiveLeads,
       onBulkAssign: bulkAssign,
       onClearAll: isAdmin ? clearAllLeads : null,
       addToast: addToast,
@@ -12339,6 +12630,7 @@ function App() {
       onEdit: saveL,
       onDelete: delL,
       onBulkDelete: bulkDelete,
+      onArchive: archiveLeads,
       onBulkAssign: bulkAssign,
       showAssigned: true,
       showCampaign: true,
@@ -12364,6 +12656,7 @@ function App() {
       onEdit: saveL,
       onDelete: delL,
       onBulkDelete: bulkDelete,
+      onArchive: archiveLeads,
       onBulkAssign: bulkAssign,
       showAssigned: true,
       showCampaign: true,
@@ -12379,6 +12672,7 @@ function App() {
       onEdit: saveL,
       onDelete: delL,
       onBulkDelete: bulkDelete,
+      onArchive: archiveLeads,
       onBulkAssign: bulkAssign,
       showAssigned: true,
       showCampaign: true,
@@ -12395,6 +12689,17 @@ function App() {
       onSave: saveL,
       onDelete: delL,
       addToast: addToast
+    });
+    if (tab === 'archive') return isAdmin ? /*#__PURE__*/React.createElement(ArchiveView, {
+      loadArchived: loadArchivedFromSupabase,
+      onRestore: restoreArchived,
+      config: config,
+      campColorMap: campColorMap,
+      addToast: addToast
+    }) : /*#__PURE__*/React.createElement(HomeView, {
+      leads: vLeads,
+      config: config,
+      currentUser: currentUser
     });
     if (tab === 'google-import') return /*#__PURE__*/React.createElement(GoogleImportView, {
       onImport: importLeads,
@@ -12439,6 +12744,7 @@ function App() {
     recycle: 'For Recycle',
     recent: 'Recently Assigned',
     duplicates: 'Duplicate Leads',
+    archive: 'Archive',
     ...Object.fromEntries((config.campaigns || []).map(c => [c.id.toLowerCase(), `${c.label} Campaign`]))
   };
 
@@ -12692,7 +12998,7 @@ function App() {
     className: "sct-label"
   }, "Collapse")), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
-  }, "Main"), NAV_MAIN.filter(n => n.id === 'attendance' ? isAdmin : n.id === 'leaves' || n.id === 'knowledge' ? config.tabs[n.id] !== false : config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
+  }, "Main"), NAV_MAIN.filter(n => n.id === 'attendance' || n.id === 'archive' ? isAdmin : n.id === 'leaves' || n.id === 'knowledge' ? config.tabs[n.id] !== false : config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
     key: n.id,
     title: n.label,
     className: `nav-item ${tab === n.id && !showRepSelect ? 'active' : ''}`,
