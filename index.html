@@ -4908,6 +4908,31 @@ function loadArchivedFromSupabase() {
   }
   return all().catch(() => null);
 }
+// Just the channel keys of archived leads (not the full objects) — cheap payload
+// used to keep the scraper/import dedup aware of archived channels.
+function loadArchivedKeysFromSupabase() {
+  if (!SB) return Promise.resolve(null);
+  async function all() {
+    const PAGE = 1000,
+      out = [];
+    let from = 0;
+    for (let i = 0; i < 1000; i++) {
+      const {
+        data,
+        error
+      } = await SB.from('leads').select('lead_key').eq('archived', true).range(from, from + PAGE - 1);
+      if (error || !data) {
+        if (i === 0) return null;
+        break;
+      }
+      out.push(...data.map(r => r.lead_key).filter(Boolean));
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+    return out;
+  }
+  return all().catch(() => null);
+}
 function upsertLeadsToSupabase(arr) {
   if (!SB || !arr || !arr.length) return;
   try {
@@ -11182,6 +11207,11 @@ function App() {
   const [leadsReady, setLeadsReady] = useState(false); // Supabase leads loaded
   const supabaseHadLeadsRef = useRef(false);
   const leadsSyncRef = useRef({}); // {id: JSON} last synced
+  // Lightweight set of ARCHIVED channel keys (leadKey strings only — not the
+  // full objects, so it stays cheap at scale). Lets the scraper + imports still
+  // skip channels that were archived, so archived leads don't silently resurface
+  // as "fresh" just because they're no longer in the active in-memory set.
+  const archivedKeysRef = useRef(new Set());
   const [history, setHistory] = useState(SAMPLE_HISTORY);
   const [toasts, setToasts] = useState([]);
   const toastSeqRef = useRef(0); // guarantees a unique id per toast (Date.now() collided)
@@ -11583,6 +11613,10 @@ function App() {
     const set = new Set(target);
     const archived = leads.filter(l => set.has(l.id));
     setLeads(ls => ls.filter(l => !set.has(l.id)));
+    archived.forEach(l => {
+      const k = leadKey(l);
+      if (k) archivedKeysRef.current.add(k);
+    });
     archiveLeadsInSupabase(target);
     logH('🗄', `Archived ${target.length} lead(s)`, {
       type: 'unarchive',
@@ -11599,6 +11633,10 @@ function App() {
       const have = new Set(existing.map(l => String(l.id)));
       const add = arr.filter(l => !have.has(String(l.id)));
       return [...add, ...existing];
+    });
+    arr.forEach(l => {
+      const k = leadKey(l);
+      if (k) archivedKeysRef.current.delete(k);
     });
     unarchiveLeadsInSupabase(arr.map(l => l.id));
     logH('♻', `Restored ${arr.length} lead(s) from Archive`);
@@ -11677,6 +11715,11 @@ function App() {
     }).catch(() => {});
   }
   function addLead(lead) {
+    const bare = leadKey(lead);
+    if (bare && archivedKeysRef.current.has(bare)) {
+      addToast(`🗄 "${lead.channelName}" is in your Archive — restore it instead of re-adding`, 'info');
+      return;
+    }
     const k = leadKey(lead) + '|' + (lead.assignedTo || '');
     if (leads.some(l => leadKey(l) + '|' + (l.assignedTo || '') === k)) {
       addToast(`"${lead.channelName}" is already in ${lead.assignedTo}'s list`, 'info');
@@ -11832,18 +11875,26 @@ function App() {
       // that channel. The same channel under a DIFFERENT rep is kept on purpose,
       // so the Duplicates tab can flag that two reps are working the same lead.
       const seen = new Set(existing.map(l => leadKey(l) + '|' + (l.assignedTo || '')));
+      const arch = archivedKeysRef.current;
       const fresh = [];
+      let skippedArch = 0;
       newLeads.forEach(l => {
-        const k = leadKey(l) + '|' + (l.assignedTo || '');
-        if (leadKey(l) && seen.has(k)) return; // same channel already under this rep
+        const bare = leadKey(l);
+        if (bare && arch.has(bare)) {
+          skippedArch++;
+          return;
+        } // archived channel — don't resurface
+        const k = bare + '|' + (l.assignedTo || '');
+        if (bare && seen.has(k)) return; // same channel already under this rep
         seen.add(k);
         fresh.push({
           ...l,
           source: 'import'
         });
       });
-      const skipped = newLeads.length - fresh.length;
-      logH('📊', `Google Sheets import: ${fresh.length} lead(s) added${skipped > 0 ? ` · ${skipped} same-rep duplicate(s) skipped` : ''}`);
+      const skipped = newLeads.length - fresh.length - skippedArch;
+      logH('📊', `Google Sheets import: ${fresh.length} lead(s) added${skipped > 0 ? ` · ${skipped} same-rep duplicate(s) skipped` : ''}${skippedArch > 0 ? ` · ${skippedArch} in archive skipped` : ''}`);
+      if (skippedArch > 0) addToast(`🗄 ${skippedArch} imported channel(s) are in your Archive — skipped`, 'info');
       return [...existing, ...fresh];
     });
     autoFileAgencies(newLeads); // any rows with an "agency" column drop into that Agency folder
@@ -11858,10 +11909,13 @@ function App() {
     const arr = Array.isArray(parsedLeads) ? parsedLeads : [];
     setLeads(existing => {
       const seen = new Set(existing.map(l => leadKey(l) + '|' + (l.assignedTo || '')));
+      const arch = archivedKeysRef.current;
       const fresh = [];
       arr.forEach(l => {
-        const k = leadKey(l) + '|' + (l.assignedTo || '');
-        if (leadKey(l) && seen.has(k)) return;
+        const bare = leadKey(l);
+        if (bare && arch.has(bare)) return;
+        const k = bare + '|' + (l.assignedTo || '');
+        if (bare && seen.has(k)) return;
         seen.add(k);
         fresh.push({
           ...l,
@@ -11886,10 +11940,16 @@ function App() {
     // For Recycle, assigned, anywhere. Matched by normalised channel id so a
     // URL-only Pending lead still matches a scraped channelId.
     const seen = new Set(leads.map(leadKey).filter(Boolean));
+    const arch = archivedKeysRef.current;
     const fresh = [];
-    let skipped = 0;
+    let skipped = 0,
+      skippedArch = 0;
     arr.forEach(l => {
       const k = leadKey(l);
+      if (k && arch.has(k)) {
+        skippedArch++;
+        return;
+      } // deliberately archived — don't resurface
       if (k && seen.has(k)) {
         skipped++;
         return;
@@ -11911,8 +11971,9 @@ function App() {
       });
       return [...add, ...existing]; // newest first (top of the list)
     });
-    logH('🔎', `Discovery: ${fresh.length} new channel(s) added${skipped > 0 ? ` · ${skipped} already in your leads — skipped` : ''}`);
+    logH('🔎', `Discovery: ${fresh.length} new channel(s) added${skipped > 0 ? ` · ${skipped} already in your leads` : ''}${skippedArch > 0 ? ` · ${skippedArch} in archive` : ''}${skipped || skippedArch ? ' — skipped' : ''}`);
     if (skipped > 0) addToast(`⏭ ${skipped} channel(s) already in your leads (Pending/Contacted/etc.) — skipped`, 'info');
+    if (skippedArch > 0) addToast(`🗄 ${skippedArch} channel(s) are in your Archive — skipped (restore them to work again)`, 'info');
   }
 
   // Normalize a lead object coming back from Close (via n8n) into the shape
@@ -12164,6 +12225,10 @@ function App() {
       }
       setLeadsReady(true);
     });
+    // Load the archived channel keys so scraper/import dedup stays archive-aware.
+    loadArchivedKeysFromSupabase().then(keys => {
+      if (Array.isArray(keys)) archivedKeysRef.current = new Set(keys);
+    });
   }, []);
 
   // Persist lead changes to Supabase (debounced, upsert-only — deletes go through
@@ -12192,8 +12257,16 @@ function App() {
   // are dropped. Returns the SAME array reference when nothing changed (no churn).
   useEffect(() => {
     if (!SB || !leadsReady) return;
-    let stop = false;
+    let stop = false,
+      tick = 0;
     const iv = setInterval(() => {
+      // Every ~60s refresh the archived-keys set too, so an archive done by
+      // another admin propagates (keeps re-scrapes of it skipped everywhere).
+      if (tick++ % 4 === 0) {
+        loadArchivedKeysFromSupabase().then(keys => {
+          if (!stop && Array.isArray(keys)) archivedKeysRef.current = new Set(keys);
+        });
+      }
       loadLeadsFromSupabase().then(remote => {
         if (stop || !Array.isArray(remote)) return;
         const remoteById = {};
