@@ -2136,10 +2136,21 @@ function leadToRow(l){
 }
 function loadLeadsFromSupabase(){
   if(!SB) return Promise.resolve(null);
-  return SB.from('leads').select('id,data').then(({data,error})=>{
-    if(error||!data) return null;
-    return data.map(r=>r.data).filter(Boolean);
-  }).catch(()=>null);
+  // Paginate past PostgREST's ~1000-row cap so no leads are ever silently
+  // dropped. (Interim: still loads all into memory; server-side paging via the
+  // leads_page RPC is the scale path once the UI migrates to it.)
+  async function all(){
+    const PAGE=1000, out=[]; let from=0;
+    for(let i=0;i<1000;i++){   // hard safety cap = 1,000,000 rows
+      const {data,error}=await SB.from('leads').select('id,data').range(from,from+PAGE-1);
+      if(error||!data){ if(i===0) return null; break; }
+      out.push(...data.map(r=>r.data).filter(Boolean));
+      if(data.length<PAGE) break;
+      from+=PAGE;
+    }
+    return out;
+  }
+  return all().catch(()=>null);
 }
 function upsertLeadsToSupabase(arr){
   if(!SB||!arr||!arr.length) return;
