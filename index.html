@@ -3233,11 +3233,46 @@ function KbLaunchpad({
   isAdmin,
   onAddArticle,
   onEditArticle,
-  onDeleteArticle
+  onDeleteArticle,
+  dark
 }) {
   // Accent options: Blue #2f6bf0/#7db0ff · Indigo #5b5bd6/#a6a6ff · Teal #0f9b8e/#67e8d5 · Violet #7c5cfc/#c4a6ff
   const accent = '#5b5bd6',
     accentLight = '#a6a6ff';
+  // KB surface palette — the dark hero is fixed; the reading surfaces (page,
+  // tiles, chips, note-boxes, reader card) swap between light and dark so the KB
+  // matches the app theme. Per-category accent colours are untouched.
+  const S = dark ? {
+    pageBg: '#0d1117',
+    pageText: '#e6edf3',
+    card: '#161b22',
+    cardBorder: '#2a3038',
+    cardBorderSoft: '#232830',
+    title: '#e6edf3',
+    textDim: '#9aa4b2',
+    textFaint: '#6e7681',
+    chipBg: '#161b22',
+    chipBorder: '#2a3038',
+    chipText: '#9aa4b2',
+    noteBg: '#2a2410',
+    noteBorder: '#4a3f1a',
+    noteText: '#e3c15c'
+  } : {
+    pageBg: '#f4f4f8',
+    pageText: '#1c1a26',
+    card: '#fff',
+    cardBorder: '#ebeaf0',
+    cardBorderSoft: '#f0eff4',
+    title: '#1f1d2b',
+    textDim: '#6b6878',
+    textFaint: '#9c99a8',
+    chipBg: '#fff',
+    chipBorder: '#e6e5ec',
+    chipText: '#5b5868',
+    noteBg: '#fdf6e3',
+    noteBorder: '#f5e6bd',
+    noteText: '#8a5a00'
+  };
   const hexA = (hex, a) => {
     const n = parseInt(hex.slice(1), 16);
     return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
@@ -3280,8 +3315,8 @@ function KbLaunchpad({
         minHeight: 0,
         overflowY: 'auto',
         fontFamily: "'Plus Jakarta Sans',system-ui,sans-serif",
-        color: '#1c1a26',
-        background: '#f4f4f8'
+        color: S.pageText,
+        background: S.pageBg
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -3388,16 +3423,16 @@ function KbLaunchpad({
     }, /*#__PURE__*/React.createElement("div", {
       className: "kb-article",
       style: {
-        background: '#fff',
+        background: S.card,
         borderRadius: 18,
-        border: '1px solid #ebeaf0',
+        border: `1px solid ${S.cardBorder}`,
         padding: '44px 52px',
-        boxShadow: '0 18px 36px -18px rgba(20,18,40,.18)',
+        boxShadow: dark ? '0 18px 36px -18px rgba(0,0,0,.5)' : '0 18px 36px -18px rgba(20,18,40,.18)',
         '--accent': accent,
-        '--border': '#ebeaf0',
-        '--bg': '#f7f7fd',
-        '--text': '#1f1d2b',
-        '--text-dim': '#6b6878'
+        '--border': S.cardBorder,
+        '--bg': dark ? '#1c2230' : '#f7f7fd',
+        '--text': S.title,
+        '--text-dim': S.textDim
       }
     }, renderKbBody(selected.body))));
   }
@@ -3424,8 +3459,8 @@ function KbLaunchpad({
       minHeight: 0,
       overflowY: 'auto',
       fontFamily: "'Plus Jakarta Sans',system-ui,sans-serif",
-      color: '#1c1a26',
-      background: '#f4f4f8'
+      color: S.pageText,
+      background: S.pageBg
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3666,9 +3701,9 @@ function KbLaunchpad({
         fontSize: 13,
         fontWeight: 600,
         cursor: 'pointer',
-        color: on ? '#fff' : '#5b5868',
-        background: on ? accent : '#fff',
-        border: `1px solid ${on ? accent : '#e6e5ec'}`
+        color: on ? '#fff' : S.chipText,
+        background: on ? accent : S.chipBg,
+        border: `1px solid ${on ? accent : S.chipBorder}`
       }
     }, label);
   })), /*#__PURE__*/React.createElement("div", {
@@ -3690,8 +3725,8 @@ function KbLaunchpad({
         display: 'flex',
         flexDirection: 'column',
         cursor: 'pointer',
-        background: '#fff',
-        border: '1px solid #ebeaf0',
+        background: S.card,
+        border: `1px solid ${S.cardBorder}`,
         borderRadius: 18,
         padding: 20,
         animationDelay: (i * 0.04).toFixed(2) + 's',
@@ -3710,9 +3745,9 @@ function KbLaunchpad({
         width: 28,
         height: 28,
         borderRadius: 8,
-        border: '1px solid #ebeaf0',
-        background: '#fff',
-        color: '#6b6878',
+        border: `1px solid ${S.cardBorder}`,
+        background: S.card,
+        color: S.textDim,
         fontSize: 13,
         cursor: 'pointer',
         display: 'flex',
@@ -3755,7 +3790,7 @@ function KbLaunchpad({
         fontFamily: SG,
         fontWeight: 700,
         fontSize: 16,
-        color: '#1f1d2b',
+        color: S.title,
         lineHeight: 1.2
       }
     }, a.title), /*#__PURE__*/React.createElement("div", {
@@ -3792,7 +3827,7 @@ function KbLaunchpad({
       style: {
         fontSize: 13.5,
         lineHeight: 1.55,
-        color: '#6b6878',
+        color: S.textDim,
         margin: '0 0 14px',
         flex: 1
       }
@@ -3802,13 +3837,13 @@ function KbLaunchpad({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingTop: 13,
-        borderTop: '1px solid #f0eff4'
+        borderTop: `1px solid ${S.cardBorderSoft}`
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 12,
         fontWeight: 600,
-        color: '#9c99a8'
+        color: S.textFaint
       }
     }, "Read article →"), /*#__PURE__*/React.createElement("span", {
       style: {
@@ -3834,8 +3869,8 @@ function KbLaunchpad({
         display: 'flex',
         flexDirection: 'column',
         textDecoration: 'none',
-        background: '#fff',
-        border: '1px solid #ebeaf0',
+        background: S.card,
+        border: `1px solid ${S.cardBorder}`,
         borderRadius: 18,
         padding: 20,
         animationDelay: (i * 0.04).toFixed(2) + 's'
@@ -3873,7 +3908,7 @@ function KbLaunchpad({
         fontFamily: SG,
         fontWeight: 700,
         fontSize: 16,
-        color: '#1f1d2b',
+        color: S.title,
         lineHeight: 1.2
       }
     }, t.name), /*#__PURE__*/React.createElement("div", {
@@ -3915,7 +3950,7 @@ function KbLaunchpad({
       style: {
         fontSize: 13.5,
         lineHeight: 1.55,
-        color: '#6b6878',
+        color: S.textDim,
         margin: '0 0 14px',
         flex: 1
       }
@@ -3926,9 +3961,9 @@ function KbLaunchpad({
         gap: 7,
         fontSize: 12,
         lineHeight: 1.45,
-        color: '#8a5a00',
-        background: '#fdf6e3',
-        border: '1px solid #f5e6bd',
+        color: S.noteText,
+        background: S.noteBg,
+        border: `1px solid ${S.noteBorder}`,
         borderRadius: 9,
         padding: '8px 11px',
         marginBottom: 12
@@ -3939,13 +3974,13 @@ function KbLaunchpad({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingTop: 13,
-        borderTop: '1px solid #f0eff4'
+        borderTop: `1px solid ${S.cardBorderSoft}`
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 12,
         fontWeight: 600,
-        color: '#9c99a8',
+        color: S.textFaint,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap'
@@ -3965,14 +4000,14 @@ function KbLaunchpad({
     style: {
       textAlign: 'center',
       padding: '60px 20px',
-      color: '#8a8794'
+      color: S.textFaint
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontFamily: SG,
       fontWeight: 700,
       fontSize: 18,
-      color: '#5b5868',
+      color: S.textDim,
       marginBottom: 6
     }
   }, isManual ? 'No articles found' : 'No tools found'), /*#__PURE__*/React.createElement("div", {
@@ -4108,7 +4143,8 @@ function KnowledgeBaseView({
   articles,
   isAdmin,
   onSave,
-  onDelete
+  onDelete,
+  dark
 }) {
   const tools = typeof KB_TOOLS !== 'undefined' ? KB_TOOLS : [];
   const [view, setView] = useState('tools'); // 'tools' | 'manual'
@@ -4118,6 +4154,7 @@ function KnowledgeBaseView({
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(KbLaunchpad, {
     tools: tools,
     articles: articles || [],
+    dark: dark,
     view: view,
     onView: v => {
       setView(v);
@@ -12644,7 +12681,8 @@ function App() {
       articles: kbArticles,
       isAdmin: isAdmin,
       onSave: saveArticle,
-      onDelete: deleteArticle
+      onDelete: deleteArticle,
+      dark: darkMode
     });
     if (tab === 'attendance') return isAdmin ? /*#__PURE__*/React.createElement(AttendanceView, {
       sessions: sessions,

@@ -1564,9 +1564,23 @@ function getKbExcerpt(body, n){
   return '';
 }
 // Unified Knowledge Base UI — Tools launchpad + Manual articles (same design language).
-function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmin,onAddArticle,onEditArticle,onDeleteArticle}) {
+function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmin,onAddArticle,onEditArticle,onDeleteArticle,dark}) {
   // Accent options: Blue #2f6bf0/#7db0ff · Indigo #5b5bd6/#a6a6ff · Teal #0f9b8e/#67e8d5 · Violet #7c5cfc/#c4a6ff
   const accent='#5b5bd6', accentLight='#a6a6ff';
+  // KB surface palette — the dark hero is fixed; the reading surfaces (page,
+  // tiles, chips, note-boxes, reader card) swap between light and dark so the KB
+  // matches the app theme. Per-category accent colours are untouched.
+  const S = dark ? {
+    pageBg:'#0d1117', pageText:'#e6edf3', card:'#161b22', cardBorder:'#2a3038', cardBorderSoft:'#232830',
+    title:'#e6edf3', textDim:'#9aa4b2', textFaint:'#6e7681',
+    chipBg:'#161b22', chipBorder:'#2a3038', chipText:'#9aa4b2',
+    noteBg:'#2a2410', noteBorder:'#4a3f1a', noteText:'#e3c15c',
+  } : {
+    pageBg:'#f4f4f8', pageText:'#1c1a26', card:'#fff', cardBorder:'#ebeaf0', cardBorderSoft:'#f0eff4',
+    title:'#1f1d2b', textDim:'#6b6878', textFaint:'#9c99a8',
+    chipBg:'#fff', chipBorder:'#e6e5ec', chipText:'#5b5868',
+    noteBg:'#fdf6e3', noteBorder:'#f5e6bd', noteText:'#8a5a00',
+  };
   const hexA=(hex,a)=>{ const n=parseInt(hex.slice(1),16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
   const accentRing=hexA(accent,.12);
   const CAT_COLORS={Research:'#2f6bf0',Data:'#0f9d58',CRM:'#1f6f6b',Outreach:'#7c3aed',Platform:'#5b5bd6',Finance:'#e0552f'};
@@ -1588,7 +1602,7 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
   if(selected){
     const chapColor=CHAPTER_COLORS[selected.chapter]||accent;
     return (
-      <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",color:'#1c1a26',background:'#f4f4f8'}}>
+      <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",color:S.pageText,background:S.pageBg}}>
         <div style={{position:'relative',overflow:'hidden',background:'#15131f',color:'#fff',padding:'28px 0 60px'}}>
           <div style={{position:'absolute',width:560,height:380,borderRadius:'50%',top:-200,right:-80,background:`radial-gradient(circle, ${chapColor} 0%, transparent 70%)`,filter:'blur(80px)',opacity:.45,pointerEvents:'none'}}/>
           <div style={{position:'relative',maxWidth:840,margin:'0 auto',padding:'0 40px'}}>
@@ -1604,7 +1618,7 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
           </div>
         </div>
         <div style={{maxWidth:840,margin:'-28px auto 80px',padding:'0 40px',position:'relative'}}>
-          <div className="kb-article" style={{background:'#fff',borderRadius:18,border:'1px solid #ebeaf0',padding:'44px 52px',boxShadow:'0 18px 36px -18px rgba(20,18,40,.18)','--accent':accent,'--border':'#ebeaf0','--bg':'#f7f7fd','--text':'#1f1d2b','--text-dim':'#6b6878'}}>
+          <div className="kb-article" style={{background:S.card,borderRadius:18,border:`1px solid ${S.cardBorder}`,padding:'44px 52px',boxShadow:dark?'0 18px 36px -18px rgba(0,0,0,.5)':'0 18px 36px -18px rgba(20,18,40,.18)','--accent':accent,'--border':S.cardBorder,'--bg':dark?'#1c2230':'#f7f7fd','--text':S.title,'--text-dim':S.textDim}}>
             {renderKbBody(selected.body)}
           </div>
         </div>
@@ -1628,7 +1642,7 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
   const heroSub=isManual?'The full Sales Operations Manual — company, services, the 18-step sales process, tools, and commissions.':'Search, filter, and jump straight into any platform in the stack.';
   const searchPh=isManual?'Search the manual…':'Search tools…';
   return (
-    <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",color:'#1c1a26',background:'#f4f4f8'}}>
+    <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",color:S.pageText,background:S.pageBg}}>
       <div style={{position:'relative',overflow:'hidden',background:'#15131f',color:'#fff',padding:'40px 0 48px'}}>
         <div style={{position:'absolute',width:560,height:380,borderRadius:'50%',top:-160,right:-80,background:`radial-gradient(circle, ${accent} 0%, transparent 70%)`,filter:'blur(80px)',opacity:.5,pointerEvents:'none'}}/>
         <div style={{position:'relative',maxWidth:1040,margin:'0 auto',padding:'0 40px'}}>
@@ -1660,54 +1674,54 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
       <div style={{maxWidth:1040,margin:'0 auto',padding:'28px 40px 80px'}}>
         <div style={{display:'flex',flexWrap:'wrap',gap:9,marginBottom:26}}>
           {chips.map(c=>{ const on=c===cat; const label = isManual && c!=='All' ? c.replace(/^\d+ · /,'') : c; return (
-            <div key={c} className="kbl-chip" onClick={()=>setCat(c)} style={{padding:'8px 15px',borderRadius:999,fontSize:13,fontWeight:600,cursor:'pointer',color:on?'#fff':'#5b5868',background:on?accent:'#fff',border:`1px solid ${on?accent:'#e6e5ec'}`}}>{label}</div>
+            <div key={c} className="kbl-chip" onClick={()=>setCat(c)} style={{padding:'8px 15px',borderRadius:999,fontSize:13,fontWeight:600,cursor:'pointer',color:on?'#fff':S.chipText,background:on?accent:S.chipBg,border:`1px solid ${on?accent:S.chipBorder}`}}>{label}</div>
           );})}
         </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16}}>
           {isManual
             ? items.map((a,i)=>{ const cc=CHAPTER_COLORS[a.chapter]||accent; const m=a.chapter.match(/^(\d+)/); const initial=m?m[1]:(a.chapter[0]||'?'); const chapShort=a.chapter.replace(/^\d+ · /,''); return (
-                <div key={a.id} className="kbl-tile" onClick={()=>onSelect(a.id)} style={{display:'flex',flexDirection:'column',cursor:'pointer',background:'#fff',border:'1px solid #ebeaf0',borderRadius:18,padding:20,animationDelay:(i*0.04).toFixed(2)+'s',position:'relative'}}>
-                  {isAdmin && <button onClick={e=>{e.stopPropagation(); onEditArticle&&onEditArticle(a);}} title="Edit article" style={{position:'absolute',top:12,right:12,width:28,height:28,borderRadius:8,border:'1px solid #ebeaf0',background:'#fff',color:'#6b6878',fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,zIndex:1}} className="kbl-tile-edit">✏️</button>}
+                <div key={a.id} className="kbl-tile" onClick={()=>onSelect(a.id)} style={{display:'flex',flexDirection:'column',cursor:'pointer',background:S.card,border:`1px solid ${S.cardBorder}`,borderRadius:18,padding:20,animationDelay:(i*0.04).toFixed(2)+'s',position:'relative'}}>
+                  {isAdmin && <button onClick={e=>{e.stopPropagation(); onEditArticle&&onEditArticle(a);}} title="Edit article" style={{position:'absolute',top:12,right:12,width:28,height:28,borderRadius:8,border:`1px solid ${S.cardBorder}`,background:S.card,color:S.textDim,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,zIndex:1}} className="kbl-tile-edit">✏️</button>}
                   <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:13}}>
                     <div style={{flex:'0 0 46px',width:46,height:46,borderRadius:13,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:SG,fontWeight:700,fontSize:18,color:'#fff',background:cc,boxShadow:`0 7px 16px -6px ${cc}`}}>{initial}</div>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontFamily:SG,fontWeight:700,fontSize:16,color:'#1f1d2b',lineHeight:1.2}}>{a.title}</div>
+                      <div style={{fontFamily:SG,fontWeight:700,fontSize:16,color:S.title,lineHeight:1.2}}>{a.title}</div>
                       <div style={{fontSize:12,fontWeight:600,color:cc,marginTop:2}}>{chapShort}</div>
                     </div>
                     <span style={{flex:'0 0 auto',width:30,height:30,borderRadius:9,background:hexA(cc,.12),display:'flex',alignItems:'center',justifyContent:'center',color:cc}}>
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
                     </span>
                   </div>
-                  <p style={{fontSize:13.5,lineHeight:1.55,color:'#6b6878',margin:'0 0 14px',flex:1}}>{getKbExcerpt(a.body)}</p>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingTop:13,borderTop:'1px solid #f0eff4'}}>
-                    <span style={{fontSize:12,fontWeight:600,color:'#9c99a8'}}>Read article →</span>
+                  <p style={{fontSize:13.5,lineHeight:1.55,color:S.textDim,margin:'0 0 14px',flex:1}}>{getKbExcerpt(a.body)}</p>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingTop:13,borderTop:`1px solid ${S.cardBorderSoft}`}}>
+                    <span style={{fontSize:12,fontWeight:600,color:S.textFaint}}>Read article →</span>
                     <span style={{fontSize:10.5,fontWeight:700,letterSpacing:'.05em',padding:'3px 9px',borderRadius:999,color:cc,background:hexA(cc,.12)}}>Chapter {initial}</span>
                   </div>
                 </div>
               );})
             : items.map((t,i)=>{ const cc=CAT_COLORS[t.category]||accent; return (
-                <a key={t.name} className="kbl-tile" href={t.primaryHref} target="_blank" rel="noopener noreferrer" aria-label={'Open '+t.name} style={{display:'flex',flexDirection:'column',textDecoration:'none',background:'#fff',border:'1px solid #ebeaf0',borderRadius:18,padding:20,animationDelay:(i*0.04).toFixed(2)+'s'}}>
+                <a key={t.name} className="kbl-tile" href={t.primaryHref} target="_blank" rel="noopener noreferrer" aria-label={'Open '+t.name} style={{display:'flex',flexDirection:'column',textDecoration:'none',background:S.card,border:`1px solid ${S.cardBorder}`,borderRadius:18,padding:20,animationDelay:(i*0.04).toFixed(2)+'s'}}>
                   <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:13}}>
                     <div style={{flex:'0 0 46px',width:46,height:46,borderRadius:13,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:SG,fontWeight:700,fontSize:18,color:'#fff',background:t.color,boxShadow:`0 7px 16px -6px ${t.color}`}}>{t.name[0].toUpperCase()}</div>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontFamily:SG,fontWeight:700,fontSize:16,color:'#1f1d2b',lineHeight:1.2}}>{t.name}</div>
+                      <div style={{fontFamily:SG,fontWeight:700,fontSize:16,color:S.title,lineHeight:1.2}}>{t.name}</div>
                       <div style={{fontSize:12,fontWeight:600,color:accent,marginTop:2}}>{t.tagline}</div>
                     </div>
                     <span style={{flex:'0 0 auto',width:30,height:30,borderRadius:9,background:accentRing,display:'flex',alignItems:'center',justifyContent:'center',color:accent}}>
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
                     </span>
                   </div>
-                  <p style={{fontSize:13.5,lineHeight:1.55,color:'#6b6878',margin:'0 0 14px',flex:1}}>{t.desc}</p>
-                  {t.note && <div style={{display:'flex',alignItems:'flex-start',gap:7,fontSize:12,lineHeight:1.45,color:'#8a5a00',background:'#fdf6e3',border:'1px solid #f5e6bd',borderRadius:9,padding:'8px 11px',marginBottom:12}}><span>⚠️</span><span>{t.note}</span></div>}
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingTop:13,borderTop:'1px solid #f0eff4'}}>
-                    <span style={{fontSize:12,fontWeight:600,color:'#9c99a8',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.domain}</span>
+                  <p style={{fontSize:13.5,lineHeight:1.55,color:S.textDim,margin:'0 0 14px',flex:1}}>{t.desc}</p>
+                  {t.note && <div style={{display:'flex',alignItems:'flex-start',gap:7,fontSize:12,lineHeight:1.45,color:S.noteText,background:S.noteBg,border:`1px solid ${S.noteBorder}`,borderRadius:9,padding:'8px 11px',marginBottom:12}}><span>⚠️</span><span>{t.note}</span></div>}
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingTop:13,borderTop:`1px solid ${S.cardBorderSoft}`}}>
+                    <span style={{fontSize:12,fontWeight:600,color:S.textFaint,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.domain}</span>
                     <span style={{fontSize:10.5,fontWeight:700,letterSpacing:'.05em',padding:'3px 9px',borderRadius:999,color:cc,background:hexA(cc,.12)}}>{t.category}</span>
                   </div>
                 </a>
               );})}
         </div>
-        {items.length===0 && <div style={{textAlign:'center',padding:'60px 20px',color:'#8a8794'}}>
-          <div style={{fontFamily:SG,fontWeight:700,fontSize:18,color:'#5b5868',marginBottom:6}}>{isManual?'No articles found':'No tools found'}</div>
+        {items.length===0 && <div style={{textAlign:'center',padding:'60px 20px',color:S.textFaint}}>
+          <div style={{fontFamily:SG,fontWeight:700,fontSize:18,color:S.textDim,marginBottom:6}}>{isManual?'No articles found':'No tools found'}</div>
           <div style={{fontSize:14}}>Try a different search or filter.</div>
         </div>}
       </div>
@@ -1740,7 +1754,7 @@ function renderKbBody(text){
   });
   flush(); return out;
 }
-function KnowledgeBaseView({articles,isAdmin,onSave,onDelete}){
+function KnowledgeBaseView({articles,isAdmin,onSave,onDelete,dark}){
   const tools=(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[]);
   const [view,setView]=useState('tools');           // 'tools' | 'manual'
   const [selectedId,setSelectedId]=useState(null);
@@ -1748,7 +1762,7 @@ function KnowledgeBaseView({articles,isAdmin,onSave,onDelete}){
   const selected = selectedId ? (articles||[]).find(a=>a.id===selectedId) : null;
   return <>
     <KbLaunchpad
-      tools={tools} articles={articles||[]}
+      tools={tools} articles={articles||[]} dark={dark}
       view={view} onView={v=>{ setView(v); setSelectedId(null); }}
       selected={selected}
       onSelect={id=>setSelectedId(id)}
@@ -5604,7 +5618,7 @@ function App() {
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead} isLeadgen={!!(currentUser&&currentUser.role==='leadgen')}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
-    if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle}/>;
+    if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle} dark={darkMode}/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
     if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory}/>;
