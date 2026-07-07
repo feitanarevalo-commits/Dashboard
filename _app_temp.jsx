@@ -58,9 +58,14 @@ function canonTag(raw){
 // "Send to Close" only sends Fresh leads and flips them to Imported on success,
 // so the same lead is never pushed (and duplicated in Close) twice.
 function leadOrigin(lead){
-  // Explicit flag (e.g. a sheet's IMPORTED Yes/No column) always wins.
+  // Manual override always wins — a rep's Origin toggle (or a sheet's IMPORTED
+  // Yes/No column) sets this explicit flag.
   if(lead.imported === true) return 'Imported';
   if(lead.imported === false) return 'Fresh';
+  // Otherwise decide from Close: a lead found in the real Close DB (the dedup
+  // check tags it "Existing Leads") — or one pushed to / loaded from Close — is
+  // already on Close, so it's an existing/imported lead, not fresh.
+  if((lead.tags||[]).includes('Existing Leads')) return 'Imported';
   if(lead.importedToClose || lead.fromClose || lead.closeLeadId) return 'Imported';
   return 'Fresh';
 }
@@ -1255,9 +1260,13 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                   )}
                   {showOrigin && (
                     <td>
-                      {leadOrigin(lead)==='Fresh'
-                        ? <span className="origin-badge fresh">● Fresh</span>
-                        : <span className="origin-badge imported">↻ Imported</span>}
+                      {/* Click to override Fresh ↔ Imported (sets the explicit
+                          flag). Auto-derives from the Close DB check otherwise. */}
+                      <button type="button" className={`origin-badge origin-toggle ${leadOrigin(lead)==='Fresh'?'fresh':'imported'}`}
+                        title={`${leadOrigin(lead)} — click to mark as ${leadOrigin(lead)==='Fresh'?'Imported (already in Close)':'Fresh (not in Close)'}`}
+                        onClick={()=>patchLead(lead.id,{imported: leadOrigin(lead)==='Fresh'})}>
+                        {leadOrigin(lead)==='Fresh' ? '● Fresh' : '↻ Imported'}
+                      </button>
                     </td>
                   )}
                   {showCampaign && cols.campaign && (
