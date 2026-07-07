@@ -797,6 +797,15 @@ html[data-dark] select {
 html[data-dark] input::placeholder,
 html[data-dark] textarea::placeholder { color: var(--text-light); }
 
+/* The login split-screen is a branded, ALWAYS-light surface (dark-left / white-
+   right panels + white password modal). The catch-all above would otherwise
+   turn its inputs dark against those light panels — so pin them back to light. */
+html[data-dark] .lg-search input { background:#fff !important; color:#171522 !important; border-color:#e6e5ec !important; }
+html[data-dark] .lg-search input::placeholder { color:#9c99a8 !important; }
+html[data-dark] .lg-pw { background:#f7f7fa !important; color:#171522 !important; border-color:#e6e5ec !important; }
+html[data-dark] .lg-pw:focus { background:#fff !important; }
+html[data-dark] .lg-pw::placeholder { color:#9c99a8 !important; }
+
 /* ═══════════════════════════════════════════════════════════
    LOGIN LANDING — profile picker (design handoff, 2026-06)
    Standalone landing visuals (fixed palette, not theme vars).
