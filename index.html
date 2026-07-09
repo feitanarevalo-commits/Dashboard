@@ -12218,67 +12218,98 @@ function App() {
       addToast(`🗄 "${lead.channelName}" is in your Archive — restore it instead of re-adding`, 'info');
       return false;
     }
-    const k = leadKey(lead) + '|' + (lead.assignedTo || '');
-    if (leads.some(l => leadKey(l) + '|' + (l.assignedTo || '') === k)) {
+    // Block a genuine ACTIVE duplicate (same channel + rep, not yet contacted).
+    // A Contacted / For-Recycle copy is NOT a block — re-adding it is a recycle.
+    const activeDup = bare && leads.some(l => leadKey(l) === bare && (l.assignedTo || '') === (lead.assignedTo || '') && !(l.tags || []).includes('Contacted') && !(l.tags || []).includes('For Recycle'));
+    if (activeDup) {
       addToast(`"${lead.channelName}" is already in ${lead.assignedTo}'s list`, 'info');
       return false;
     }
-    // Warn if this channel was already CONTACTED (by anyone) and isn't due for
-    // recycling yet — so a rep doesn't re-work a lead someone contacted recently.
+    let inheritCloseId = null;
+    const replaceIds = new Set();
     if (bare) {
-      const priors = leads.filter(l => leadKey(l) === bare && (l.tags || []).includes('Contacted') && !(l.tags || []).includes('For Recycle'));
-      let best = null;
-      const consider = (d, l, fromClose) => {
-        if (d && !isNaN(d) && (!best || d > best.date)) best = {
-          date: d,
-          lead: l,
-          fromClose
+      // Same channel already Contacted / For Recycle. If it isn't due for recycling
+      // yet, warn (they can still decide). On proceed — or if it IS due — the rep's
+      // OWN previous entry is REPLACED (recycled) by this fresh add, so the Contacted
+      // tab doesn't keep a stale duplicate. Another rep's entry is left untouched.
+      const contactedAll = leads.filter(l => leadKey(l) === bare && ((l.tags || []).includes('Contacted') || (l.tags || []).includes('For Recycle')));
+      if (contactedAll.length) {
+        let best = null;
+        const consider = (d, l, fromClose) => {
+          if (d && !isNaN(d) && (!best || d > best.date)) best = {
+            date: d,
+            lead: l,
+            fromClose
+          };
         };
-      };
-      priors.forEach(l => {
-        if (l.lastContactDate) consider(new Date(l.lastContactDate), l, false);
-      });
-      // Pull the LIVE last-contact from Close for any prior with a Close id, so
-      // the day-count reflects the most recent email even if it wasn't logged here.
-      const closeIds = [...new Set(priors.map(l => l.closeLeadId).filter(Boolean))];
-      if (closeIds.length) {
-        const base = (config.supabaseUrl || '').trim();
-        if (base) {
-          try {
-            const res = await fetch(base + '/functions/v1/close-last-contact', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                leadIds: closeIds
-              })
-            }).then(r => r.json());
-            if (res && res.ok && res.contacts) {
-              priors.forEach(l => {
-                const cd = l.closeLeadId && res.contacts[l.closeLeadId];
-                if (cd) consider(new Date(cd), l, true);
-              });
-            }
-          } catch (e) {}
+        contactedAll.forEach(l => {
+          if (l.lastContactDate) consider(new Date(l.lastContactDate), l, false);
+        });
+        // Pull the LIVE last-contact from Close so the day-count reflects the most
+        // recent email even if it wasn't logged here.
+        const closeIds = [...new Set(contactedAll.map(l => l.closeLeadId).filter(Boolean))];
+        if (closeIds.length) {
+          const base = (config.supabaseUrl || '').trim();
+          if (base) {
+            try {
+              const res = await fetch(base + '/functions/v1/close-last-contact', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  leadIds: closeIds
+                })
+              }).then(r => r.json());
+              if (res && res.ok && res.contacts) {
+                contactedAll.forEach(l => {
+                  const cd = l.closeLeadId && res.contacts[l.closeLeadId];
+                  if (cd) consider(new Date(cd), l, true);
+                });
+              }
+            } catch (e) {}
+          }
         }
-      }
-      if (best) {
-        const days = Math.floor((Date.now() - best.date) / 86400000);
-        const left = recycleThresholdDays(best.lead) - days;
-        if (left > 0) {
-          const who = best.lead.assignedTo || 'another rep';
-          const camp = (best.lead.campaigns || []).join(', ') || 'no campaign';
-          const src = best.fromClose ? ' (last email from Close)' : '';
-          const ok = window.confirm(`⚠ Previously contacted\n\n"${lead.channelName}" was already contacted by ${who} on ${best.date.toISOString().split('T')[0]}${src} — ${days} day${days !== 1 ? 's' : ''} ago (${camp}).\n\nIt won't be due for recycling for another ${left} day${left !== 1 ? 's' : ''}.\n\nAdd it anyway?`);
+        let due = contactedAll.some(l => (l.tags || []).includes('For Recycle'));
+        let days = null,
+          left = null;
+        if (best) {
+          days = Math.floor((Date.now() - best.date) / 86400000);
+          const thr = recycleThresholdDays(best.lead);
+          left = thr - days;
+          if (days >= thr) due = true;
+        }
+        if (!due) {
+          const who = best ? best.lead.assignedTo || 'another rep' : 'a rep';
+          const camp = best ? (best.lead.campaigns || []).join(', ') || 'no campaign' : '';
+          const src = best && best.fromClose ? ' (last email from Close)' : '';
+          const when = best ? best.date.toISOString().split('T')[0] : 'recently';
+          const ok = window.confirm(`⚠ Previously contacted\n\n"${lead.channelName}" was contacted by ${who} on ${when}${src} — ${days} day${days !== 1 ? 's' : ''} ago (${camp}).\n\nIt isn't due for recycling for another ${left} day${left !== 1 ? 's' : ''}.\n\nAdd it anyway? This will replace the existing contacted entry.`);
           if (!ok) return false;
         }
+        // Replace THIS rep's own contacted/recycle entries (keep other reps' intact).
+        contactedAll.filter(l => (l.assignedTo || '') === (lead.assignedTo || '')).forEach(l => {
+          replaceIds.add(l.id);
+          if (l.closeLeadId && !inheritCloseId) inheritCloseId = l.closeLeadId;
+        });
       }
     }
-    setLeads(ls => [lead, ...ls]);
-    logH('➕', `Lead added manually: ${lead.channelName} → ${lead.assignedTo}`);
-    addToast(`✓ "${lead.channelName}" added to ${lead.assignedTo}`, 'success');
-    checkAndTagFromClose([lead], 'manually-added');
+
+    // Carry the Close id forward so a re-push updates the SAME Close lead (no dup).
+    const finalLead = inheritCloseId ? {
+      ...lead,
+      closeLeadId: inheritCloseId
+    } : lead;
+    setLeads(ls => [finalLead, ...ls.filter(l => !replaceIds.has(l.id))]);
+    replaceIds.forEach(id => deleteLeadFromSupabase(id));
+    if (replaceIds.size) {
+      logH('♻', `Recycled "${lead.channelName}" — replaced ${replaceIds.size} previous contacted entry → ${lead.assignedTo}`);
+      addToast(`♻ "${lead.channelName}" recycled — the previous contacted entry was replaced`, 'success');
+    } else {
+      logH('➕', `Lead added manually: ${lead.channelName} → ${lead.assignedTo}`);
+      addToast(`✓ "${lead.channelName}" added to ${lead.assignedTo}`, 'success');
+    }
+    checkAndTagFromClose([finalLead], 'manually-added');
     return true;
   }
   function clearAllLeads() {
