@@ -2493,6 +2493,7 @@ function AddLeadModal({rep,config,onAdd,onClose}) {
   const [looking,setLooking]=useState(false);
   const [lookMsg,setLookMsg]=useState('');
   const [onClose_,setOnClose_]=useState(false);   // is this channel already in Close?
+  const [saving,setSaving]=useState(false);        // add-in-progress (may do a live Close check)
   const ytWh=(config.ytLookupWebhook||'').trim();
   const checkWh=(config.closeCheckWebhook||'').trim();
   // Paste a YouTube URL -> auto-pull channel name + subs, and flag if it's already in Close.
@@ -2515,16 +2516,20 @@ function AddLeadModal({rep,config,onAdd,onClose}) {
       .catch(()=>setLookMsg("Lookup failed — fill it in manually"))
       .finally(()=>setLooking(false));
   }
-  function submit(e){ e.preventDefault(); const n=name.trim(); if(!n) return;
-    const res=onAdd({
-      id: Date.now()+Math.floor(Math.random()*1e6),
-      channelName:n, url:url.trim(), channelId, platform, niche:niche.trim(), followers:followers.trim(),
-      emails: emails.split(/[,;\s]+/).map(x=>x.trim()).filter(Boolean),
-      tags:[], campaigns:[], assignedTo:rep, dateAssigned:new Date().toISOString().split('T')[0],
-      lastContactDate:null, channels:[n], addedAt:new Date().toISOString(), source:'manual',
-    });
-    // Keep the form open if the add was blocked or the rep cancelled a warning.
-    if(res!==false) onClose();
+  async function submit(e){ e.preventDefault(); const n=name.trim(); if(!n||saving) return;
+    setSaving(true);
+    try{
+      // onAdd may run a live Close last-contact check before warning, so await it.
+      const res=await onAdd({
+        id: Date.now()+Math.floor(Math.random()*1e6),
+        channelName:n, url:url.trim(), channelId, platform, niche:niche.trim(), followers:followers.trim(),
+        emails: emails.split(/[,;\s]+/).map(x=>x.trim()).filter(Boolean),
+        tags:[], campaigns:[], assignedTo:rep, dateAssigned:new Date().toISOString().split('T')[0],
+        lastContactDate:null, channels:[n], addedAt:new Date().toISOString(), source:'manual',
+      });
+      // Keep the form open if the add was blocked or the rep cancelled a warning.
+      if(res!==false) onClose();
+    } finally { setSaving(false); }
   }
   return (
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
@@ -2556,7 +2561,7 @@ function AddLeadModal({rep,config,onAdd,onClose}) {
             <input value={emails} onChange={e=>setEmails(e.target.value)} placeholder="comma or space separated"/></div>
           <div className="modal-footer"><div/><div className="modal-footer-right">
             <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={!name.trim()}>Add Lead</button>
+            <button type="submit" className="btn btn-primary" disabled={!name.trim()||saving}>{saving?'Checking…':'Add Lead'}</button>
           </div></div>
         </form>
       </div>
@@ -5130,7 +5135,7 @@ function App() {
       })
       .catch(()=>{});
   }
-  function addLead(lead){
+  async function addLead(lead){
     const bare=leadKey(lead);
     if(bare && archivedKeysRef.current.has(bare)){ addToast(`🗄 "${lead.channelName}" is in your Archive — restore it instead of re-adding`,'info'); return false; }
     const k=leadKey(lead)+'|'+(lead.assignedTo||'');
@@ -5140,14 +5145,28 @@ function App() {
     if(bare){
       const priors=leads.filter(l=>leadKey(l)===bare && (l.tags||[]).includes('Contacted') && !(l.tags||[]).includes('For Recycle'));
       let best=null;
-      priors.forEach(l=>{ if(l.lastContactDate){ const d=new Date(l.lastContactDate); if(!isNaN(d) && (!best||d>best.date)) best={date:d,lead:l}; } });
+      const consider=(d,l,fromClose)=>{ if(d && !isNaN(d) && (!best||d>best.date)) best={date:d,lead:l,fromClose}; };
+      priors.forEach(l=>{ if(l.lastContactDate) consider(new Date(l.lastContactDate),l,false); });
+      // Pull the LIVE last-contact from Close for any prior with a Close id, so
+      // the day-count reflects the most recent email even if it wasn't logged here.
+      const closeIds=[...new Set(priors.map(l=>l.closeLeadId).filter(Boolean))];
+      if(closeIds.length){
+        const base=(config.supabaseUrl||'').trim();
+        if(base){
+          try{
+            const res=await fetch(base+'/functions/v1/close-last-contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leadIds:closeIds})}).then(r=>r.json());
+            if(res&&res.ok&&res.contacts){ priors.forEach(l=>{ const cd=l.closeLeadId&&res.contacts[l.closeLeadId]; if(cd) consider(new Date(cd),l,true); }); }
+          }catch(e){}
+        }
+      }
       if(best){
         const days=Math.floor((Date.now()-best.date)/86400000);
         const left=recycleThresholdDays(best.lead)-days;
         if(left>0){
           const who=best.lead.assignedTo||'another rep';
           const camp=(best.lead.campaigns||[]).join(', ')||'no campaign';
-          const ok=window.confirm(`⚠ Previously contacted\n\n"${lead.channelName}" was already contacted by ${who} on ${best.date.toISOString().split('T')[0]} — ${days} day${days!==1?'s':''} ago (${camp}).\n\nIt won't be due for recycling for another ${left} day${left!==1?'s':''}.\n\nAdd it anyway?`);
+          const src=best.fromClose?' (last email from Close)':'';
+          const ok=window.confirm(`⚠ Previously contacted\n\n"${lead.channelName}" was already contacted by ${who} on ${best.date.toISOString().split('T')[0]}${src} — ${days} day${days!==1?'s':''} ago (${camp}).\n\nIt won't be due for recycling for another ${left} day${left!==1?'s':''}.\n\nAdd it anyway?`);
           if(!ok) return false;
         }
       }
