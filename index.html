@@ -4768,6 +4768,132 @@ var SB = function () {
   } catch (e) {}
   return null;
 }();
+
+// ── Error reporting ───────────────────────────────────────
+// Captures client-side failures — uncaught errors, unhandled promise
+// rejections, React render crashes, and explicit reports from key operations —
+// into Supabase's error_logs so admins can pinpoint what's broken, for whom,
+// and where. Best-effort, deduped, and never throws itself.
+var ERR_USER = null; // set by <App/> so a report knows who hit it
+var _errSeen = {}; // "context|message" -> last-sent ms (dedupe)
+function reportError(context, err) {
+  try {
+    var msg = err == null ? 'unknown' : err.message || (typeof err === 'string' ? err : err.toString && err.toString()) || 'unknown';
+    var k = String(context) + '|' + msg,
+      now = Date.now();
+    if (_errSeen[k] && now - _errSeen[k] < 15000) return; // don't spam the same error
+    _errSeen[k] = now;
+    try {
+      console.warn('[error]', context, err);
+    } catch (e) {}
+    if (!SB) return;
+    SB.from('error_logs').insert({
+      context: String(context || '').slice(0, 160),
+      message: String(msg).slice(0, 600),
+      stack: (err && err.stack ? String(err.stack) : '').slice(0, 3000),
+      url: (typeof location !== 'undefined' ? String(location.href) : '').slice(0, 400),
+      user_name: ERR_USER && ERR_USER.name || null,
+      role: ERR_USER && ERR_USER.role || null,
+      user_agent: (typeof navigator !== 'undefined' ? String(navigator.userAgent) : '').slice(0, 400)
+    }).then(function () {}, function () {});
+  } catch (e) {}
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', function (e) {
+    reportError('window.error', e && e.error || e && e.message || 'error');
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    reportError('unhandledrejection', e && e.reason || 'rejection');
+  });
+}
+// React error boundary — turns a component crash into a "reload" panel (never a
+// blank page) and reports it, so one broken screen can't take down the app.
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      msg: ''
+    };
+  }
+  static getDerivedStateFromError(err) {
+    return {
+      hasError: true,
+      msg: err && err.message || 'Something went wrong'
+    };
+  }
+  componentDidCatch(err, info) {
+    reportError('render:' + (this.props.name || 'app'), err);
+  }
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    var box = {
+      maxWidth: 440,
+      textAlign: 'center',
+      background: '#fff',
+      border: '1px solid #ebeaf0',
+      borderRadius: 18,
+      padding: '36px 32px',
+      boxShadow: '0 18px 40px -18px rgba(20,18,40,.22)'
+    };
+    return React.createElement('div', {
+      style: {
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        fontFamily: "'Plus Jakarta Sans',system-ui,sans-serif",
+        background: '#f4f4f8'
+      }
+    }, React.createElement('div', {
+      style: box
+    }, React.createElement('div', {
+      style: {
+        fontSize: 40,
+        marginBottom: 10
+      }
+    }, '⚠️'), React.createElement('div', {
+      style: {
+        fontFamily: "'Space Grotesk',sans-serif",
+        fontWeight: 700,
+        fontSize: 20,
+        color: '#1f1d2b',
+        marginBottom: 8
+      }
+    }, 'Something went wrong'), React.createElement('div', {
+      style: {
+        fontSize: 13.5,
+        color: '#6b6878',
+        lineHeight: 1.55,
+        marginBottom: 6
+      }
+    }, 'This screen hit an error and couldn’t load. It’s been reported to the team automatically.'), React.createElement('div', {
+      style: {
+        fontSize: 11.5,
+        color: '#9c99a8',
+        marginBottom: 20,
+        wordBreak: 'break-word'
+      }
+    }, this.state.msg), React.createElement('button', {
+      onClick: function () {
+        try {
+          location.reload();
+        } catch (e) {}
+      },
+      style: {
+        padding: '11px 22px',
+        fontSize: 14,
+        fontWeight: 700,
+        color: '#fff',
+        background: '#5b5bd6',
+        border: 'none',
+        borderRadius: 12,
+        cursor: 'pointer'
+      }
+    }, '↻ Reload dashboard')));
+  }
+}
 function loadProfiles() {
   try {
     return JSON.parse(localStorage.getItem('profiles') || '{}') || {};
@@ -4900,7 +5026,10 @@ function loadLeadsFromSupabase() {
         error
       } = await SB.from('leads').select('id,data').eq('archived', false).range(from, from + PAGE - 1);
       if (error || !data) {
-        if (i === 0) return null;
+        if (i === 0) {
+          reportError('loadLeads', error || 'no data');
+          return null;
+        }
         break;
       }
       out.push(...data.map(r => r.data).filter(Boolean));
@@ -4909,7 +5038,10 @@ function loadLeadsFromSupabase() {
     }
     return out;
   }
-  return all().catch(() => null);
+  return all().catch(e => {
+    reportError('loadLeads', e);
+    return null;
+  });
 }
 // Archiving = a recoverable soft-remove. archived=true drops a lead from the
 // active load (and thus from every view + the 15s live-sync); restore flips it
@@ -7954,6 +8086,7 @@ function ScraperView({
       setLoading(false);
       const cors = (e && e.message || '').toLowerCase().includes('failed to fetch');
       addToast(cors ? 'Scrape blocked (CORS): the response is missing Access-Control-Allow-Origin. Make → add header key "Access-Control-Allow-Origin" = "*" in the Webhook Response module. n8n → set the Webhook node "Allowed Origins" to *.' : `Scrape failed: ${e.message}`, 'error');
+      reportError(cors ? 'scrape:CORS' : 'scrape', e);
       return;
     }
     // Save the cursor so the next run continues deeper (fresh channels). Clear
@@ -8671,6 +8804,158 @@ function ArchiveView({
     onClick: () => restore([lead.id]),
     title: "Restore this lead to the active dashboard"
   }, "♻ Restore"))))))));
+}
+
+// ─── ERROR LOG (admin) ────────────────────────────────────
+// Shows client errors captured by reportError() so admins can pinpoint what's
+// failing live — the function/context, the message, who hit it, and where.
+function ErrorLogView({
+  addToast
+}) {
+  const [rows, setRows] = useState(null); // null = loading
+  const [tick, setTick] = useState(0);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!SB) {
+      setRows([]);
+      return;
+    }
+    let stop = false;
+    setRows(null);
+    SB.from('error_logs').select('*').order('created_at', {
+      ascending: false
+    }).limit(300).then(({
+      data,
+      error
+    }) => {
+      if (!stop) setRows(error ? [] : data || []);
+    }, () => {
+      if (!stop) setRows([]);
+    });
+    return () => {
+      stop = true;
+    };
+  }, [tick]);
+  function clearAll() {
+    if (!SB || !window.confirm('Clear ALL error reports? This cannot be undone.')) return;
+    setBusy(true);
+    SB.from('error_logs').delete().gte('id', 0).then(() => {
+      setBusy(false);
+      setTick(t => t + 1);
+      if (addToast) addToast('Error log cleared', 'success');
+    }, () => {
+      setBusy(false);
+    });
+  }
+  const fmt = t => {
+    try {
+      return new Date(t).toLocaleString('en-CA', {
+        hour12: false
+      }).replace(',', '');
+    } catch (e) {
+      return t || '';
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "toolbar no-print"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "count-label"
+  }, rows == null ? 'Loading…' : `${rows.length} report${rows.length !== 1 ? 's' : ''}`), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginLeft: 'auto',
+      display: 'flex',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
+    onClick: () => setTick(t => t + 1)
+  }, "↻ Refresh"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    disabled: busy || !(rows && rows.length),
+    style: {
+      background: '#DE350B',
+      color: '#fff',
+      borderColor: '#DE350B'
+    },
+    onClick: clearAll
+  }, "🗑 Clear all"))), /*#__PURE__*/React.createElement("div", {
+    className: "table-container"
+  }, rows == null ? /*#__PURE__*/React.createElement("div", {
+    className: "empty"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "empty-icon"
+  }, "⏳"), /*#__PURE__*/React.createElement("h3", null, "Loading…")) : rows.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "empty"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "empty-icon"
+  }, "✅"), /*#__PURE__*/React.createElement("h3", null, "No errors reported"), /*#__PURE__*/React.createElement("p", null, "When something breaks in the dashboard it’ll show up here — the function, the message, who hit it, and the page.")) : /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 150
+    }
+  }, "When"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 130
+    }
+  }, "User"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 150
+    }
+  }, "Where"), /*#__PURE__*/React.createElement("th", null, "Error"))), /*#__PURE__*/React.createElement("tbody", null, rows.map(r => /*#__PURE__*/React.createElement("tr", {
+    key: r.id
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-dim)',
+      whiteSpace: 'nowrap'
+    }
+  }, fmt(r.created_at)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontSize: 12
+    }
+  }, r.user_name || /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-light)'
+    }
+  }, "—"), r.role ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: 'var(--text-light)',
+      marginLeft: 4
+    }
+  }, r.role) : null), /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontSize: 11
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "tag",
+    style: {
+      background: 'var(--bg)'
+    }
+  }, r.context || '—')), /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontSize: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 600,
+      color: 'var(--danger)',
+      wordBreak: 'break-word'
+    }
+  }, r.message), r.url && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10.5,
+      color: 'var(--text-light)',
+      marginTop: 2,
+      wordBreak: 'break-all'
+    }
+  }, String(r.url).replace(/https?:\/\/[^/]+/, '') || r.url))))))));
 }
 
 // ─── HISTORY VIEW ─────────────────────────────────────────
@@ -11288,6 +11573,10 @@ function App() {
       return null;
     }
   });
+  // Stamp error reports with who's signed in.
+  useEffect(() => {
+    ERR_USER = currentUser || null;
+  }, [currentUser]);
   // Agency folders (per-rep). Persisted to localStorage — membership is by
   // stable leadKey, so folders survive reloads even though leads are in-memory.
   const [agencies, setAgencies] = useState(() => {
@@ -12278,6 +12567,7 @@ function App() {
       if (!opts.silent) addToast(`✓ Loaded ${loaded.length} lead(s) from Close`, 'success');
     }).catch(e => {
       if (!opts.silent) addToast('Close load failed: ' + e.message, 'error');
+      reportError('loadFromClose', e);
     }).finally(() => setCloseSyncing(false));
   }
   function saveToClose() {
@@ -12324,7 +12614,10 @@ function App() {
       }
       logH('☁️', `Saved ${leads.length} lead(s) to Close`);
       addToast(`✓ Saved ${leads.length} lead(s) to Close`, 'success');
-    }).catch(e => addToast('Close save failed: ' + e.message, 'error')).finally(() => setCloseSyncing(false));
+    }).catch(e => {
+      addToast('Close save failed: ' + e.message, 'error');
+      reportError('closeSave', e);
+    }).finally(() => setCloseSyncing(false));
   }
 
   // Load shared LEADS from Supabase once on start (the team source of truth).
@@ -12516,6 +12809,7 @@ function App() {
     }).catch(e => {
       addToast(`Close.io import failed for ${rep}: ${e.message}`, 'error');
       logH('⬆', `Close.io import failed for ${rep}`);
+      reportError('importToClose:' + rep, e);
     }).finally(() => setCloseSyncing(false));
   }
 
@@ -12564,6 +12858,7 @@ function App() {
     }).catch(e => {
       addToast(`SmartReach send failed for ${rep}: ${e.message}`, 'error');
       logH('✉', `SmartReach send failed for ${rep}`);
+      reportError('importToSmartReach:' + rep, e);
     });
   }
   useEffect(() => {
@@ -12688,6 +12983,10 @@ function App() {
     id: 'archive',
     icon: '🗄',
     label: 'Archive'
+  }, {
+    id: 'errors',
+    icon: '🐞',
+    label: 'Error Log'
   }];
   const NAV_FILTER = [{
     id: 'pending',
@@ -12889,6 +13188,13 @@ function App() {
       config: config,
       currentUser: currentUser
     });
+    if (tab === 'errors') return isAdmin ? /*#__PURE__*/React.createElement(ErrorLogView, {
+      addToast: addToast
+    }) : /*#__PURE__*/React.createElement(HomeView, {
+      leads: vLeads,
+      config: config,
+      currentUser: currentUser
+    });
     if (tab === 'google-import') return /*#__PURE__*/React.createElement(GoogleImportView, {
       onImport: importLeads,
       addToast: addToast
@@ -12933,6 +13239,7 @@ function App() {
     recent: 'Recently Assigned',
     duplicates: 'Duplicate Leads',
     archive: 'Archive',
+    errors: 'Error Log',
     ...Object.fromEntries((config.campaigns || []).map(c => [c.id.toLowerCase(), `${c.label} Campaign`]))
   };
 
@@ -13186,7 +13493,7 @@ function App() {
     className: "sct-label"
   }, "Collapse")), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
-  }, "Main"), NAV_MAIN.filter(n => n.id === 'attendance' || n.id === 'archive' ? isAdmin : n.id === 'leaves' || n.id === 'knowledge' ? config.tabs[n.id] !== false : config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
+  }, "Main"), NAV_MAIN.filter(n => n.id === 'attendance' || n.id === 'archive' || n.id === 'errors' ? isAdmin : n.id === 'leaves' || n.id === 'knowledge' ? config.tabs[n.id] !== false : config.tabs[n.id]).map(n => /*#__PURE__*/React.createElement("div", {
     key: n.id,
     title: n.label,
     className: `nav-item ${tab === n.id && !showRepSelect ? 'active' : ''}`,
@@ -13340,7 +13647,9 @@ function App() {
     onDelete: delL
   }));
 }
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(ErrorBoundary, {
+  name: 'root'
+}, React.createElement(App)));
 
 })();
 </script>

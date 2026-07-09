@@ -2113,6 +2113,58 @@ var SB=(function(){
   return null;
 })();
 
+// ── Error reporting ───────────────────────────────────────
+// Captures client-side failures — uncaught errors, unhandled promise
+// rejections, React render crashes, and explicit reports from key operations —
+// into Supabase's error_logs so admins can pinpoint what's broken, for whom,
+// and where. Best-effort, deduped, and never throws itself.
+var ERR_USER=null;              // set by <App/> so a report knows who hit it
+var _errSeen={};                // "context|message" -> last-sent ms (dedupe)
+function reportError(context, err){
+  try{
+    var msg = err==null ? 'unknown'
+      : (err.message || (typeof err==='string' ? err : (err.toString && err.toString())) || 'unknown');
+    var k = String(context)+'|'+msg, now = Date.now();
+    if(_errSeen[k] && now-_errSeen[k] < 15000) return;   // don't spam the same error
+    _errSeen[k]=now;
+    try{ console.warn('[error]', context, err); }catch(e){}
+    if(!SB) return;
+    SB.from('error_logs').insert({
+      context:   String(context||'').slice(0,160),
+      message:   String(msg).slice(0,600),
+      stack:     (err && err.stack ? String(err.stack) : '').slice(0,3000),
+      url:       (typeof location!=='undefined' ? String(location.href) : '').slice(0,400),
+      user_name: (ERR_USER && ERR_USER.name) || null,
+      role:      (ERR_USER && ERR_USER.role) || null,
+      user_agent:(typeof navigator!=='undefined' ? String(navigator.userAgent) : '').slice(0,400),
+    }).then(function(){}, function(){});
+  }catch(e){}
+}
+if(typeof window!=='undefined'){
+  window.addEventListener('error', function(e){ reportError('window.error', (e && e.error) || (e && e.message) || 'error'); });
+  window.addEventListener('unhandledrejection', function(e){ reportError('unhandledrejection', (e && e.reason) || 'rejection'); });
+}
+// React error boundary — turns a component crash into a "reload" panel (never a
+// blank page) and reports it, so one broken screen can't take down the app.
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state={hasError:false, msg:''}; }
+  static getDerivedStateFromError(err){ return {hasError:true, msg:(err && err.message) || 'Something went wrong'}; }
+  componentDidCatch(err, info){ reportError('render:'+(this.props.name||'app'), err); }
+  render(){
+    if(!this.state.hasError) return this.props.children;
+    var box={maxWidth:440,textAlign:'center',background:'#fff',border:'1px solid #ebeaf0',borderRadius:18,padding:'36px 32px',boxShadow:'0 18px 40px -18px rgba(20,18,40,.22)'};
+    return React.createElement('div',{style:{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:24,fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",background:'#f4f4f8'}},
+      React.createElement('div',{style:box},
+        React.createElement('div',{style:{fontSize:40,marginBottom:10}},'⚠️'),
+        React.createElement('div',{style:{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:20,color:'#1f1d2b',marginBottom:8}},'Something went wrong'),
+        React.createElement('div',{style:{fontSize:13.5,color:'#6b6878',lineHeight:1.55,marginBottom:6}},'This screen hit an error and couldn’t load. It’s been reported to the team automatically.'),
+        React.createElement('div',{style:{fontSize:11.5,color:'#9c99a8',marginBottom:20,wordBreak:'break-word'}}, this.state.msg),
+        React.createElement('button',{onClick:function(){ try{ location.reload(); }catch(e){} }, style:{padding:'11px 22px',fontSize:14,fontWeight:700,color:'#fff',background:'#5b5bd6',border:'none',borderRadius:12,cursor:'pointer'}},'↻ Reload dashboard')
+      )
+    );
+  }
+}
+
 function loadProfiles(){ try{ return JSON.parse(localStorage.getItem('profiles')||'{}')||{}; }catch(e){ return {}; } }
 // Profiles loaded from Supabase (shared across the team), filled on app start.
 var PROFILE_CACHE={};
@@ -2182,14 +2234,14 @@ function loadLeadsFromSupabase(){
       // Archived leads are excluded from the active set (kept small = fast at
       // scale). They live on and are fetched on demand in the Archive view.
       const {data,error}=await SB.from('leads').select('id,data').eq('archived',false).range(from,from+PAGE-1);
-      if(error||!data){ if(i===0) return null; break; }
+      if(error||!data){ if(i===0){ reportError('loadLeads', error||'no data'); return null; } break; }
       out.push(...data.map(r=>r.data).filter(Boolean));
       if(data.length<PAGE) break;
       from+=PAGE;
     }
     return out;
   }
-  return all().catch(()=>null);
+  return all().catch(e=>{ reportError('loadLeads', e); return null; });
 }
 // Archiving = a recoverable soft-remove. archived=true drops a lead from the
 // active load (and thus from every view + the 15s live-sync); restore flips it
@@ -3557,6 +3609,7 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
       addToast(cors
         ? 'Scrape blocked (CORS): the response is missing Access-Control-Allow-Origin. Make → add header key "Access-Control-Allow-Origin" = "*" in the Webhook Response module. n8n → set the Webhook node "Allowed Origins" to *.'
         : `Scrape failed: ${e.message}`,'error');
+      reportError(cors?'scrape:CORS':'scrape', e);
       return;
     }
     // Save the cursor so the next run continues deeper (fresh channels). Clear
@@ -3878,6 +3931,68 @@ function ArchiveView({loadArchived,onRestore,config,campColorMap,addToast}) {
                     <td>{(lead.tags||[]).length? (lead.tags||[]).map(t=><span key={t} className="tag" style={{marginRight:4}}>{t}</span>) : <span style={{color:'var(--text-light)',fontSize:11}}>—</span>}</td>
                     <td>{lead.assignedTo? <span style={{fontWeight:600}}>{lead.assignedTo}</span> : <span style={{color:'var(--text-light)',fontSize:11}}>Unassigned</span>}</td>
                     <td className="no-print"><button className="btn btn-outline btn-sm" onClick={()=>restore([lead.id])} title="Restore this lead to the active dashboard">♻ Restore</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+      </div>
+    </div>
+  );
+}
+
+// ─── ERROR LOG (admin) ────────────────────────────────────
+// Shows client errors captured by reportError() so admins can pinpoint what's
+// failing live — the function/context, the message, who hit it, and where.
+function ErrorLogView({addToast}) {
+  const [rows,setRows]=useState(null);      // null = loading
+  const [tick,setTick]=useState(0);
+  const [busy,setBusy]=useState(false);
+  useEffect(()=>{
+    if(!SB){ setRows([]); return; }
+    let stop=false; setRows(null);
+    SB.from('error_logs').select('*').order('created_at',{ascending:false}).limit(300)
+      .then(({data,error})=>{ if(!stop) setRows(error?[]:(data||[])); }, ()=>{ if(!stop) setRows([]); });
+    return ()=>{ stop=true; };
+  },[tick]);
+  function clearAll(){
+    if(!SB || !window.confirm('Clear ALL error reports? This cannot be undone.')) return;
+    setBusy(true);
+    SB.from('error_logs').delete().gte('id',0).then(()=>{ setBusy(false); setTick(t=>t+1); if(addToast) addToast('Error log cleared','success'); }, ()=>{ setBusy(false); });
+  }
+  const fmt=t=>{ try{ return new Date(t).toLocaleString('en-CA',{hour12:false}).replace(',',''); }catch(e){ return t||''; } };
+  return (
+    <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
+      <div className="toolbar no-print">
+        <span className="count-label">{rows==null?'Loading…':`${rows.length} report${rows.length!==1?'s':''}`}</span>
+        <div style={{marginLeft:'auto',display:'flex',gap:8}}>
+          <button className="btn btn-outline btn-sm" onClick={()=>setTick(t=>t+1)}>↻ Refresh</button>
+          <button className="btn btn-sm" disabled={busy||!(rows&&rows.length)} style={{background:'#DE350B',color:'#fff',borderColor:'#DE350B'}} onClick={clearAll}>🗑 Clear all</button>
+        </div>
+      </div>
+      <div className="table-container">
+        {rows==null
+          ? <div className="empty"><div className="empty-icon">⏳</div><h3>Loading…</h3></div>
+          : rows.length===0
+            ? <div className="empty"><div className="empty-icon">✅</div><h3>No errors reported</h3><p>When something breaks in the dashboard it’ll show up here — the function, the message, who hit it, and the page.</p></div>
+            : (
+            <table>
+              <thead><tr>
+                <th style={{width:150}}>When</th>
+                <th style={{width:130}}>User</th>
+                <th style={{width:150}}>Where</th>
+                <th>Error</th>
+              </tr></thead>
+              <tbody>
+                {rows.map(r=>(
+                  <tr key={r.id}>
+                    <td style={{fontSize:11,color:'var(--text-dim)',whiteSpace:'nowrap'}}>{fmt(r.created_at)}</td>
+                    <td style={{fontSize:12}}>{r.user_name||<span style={{color:'var(--text-light)'}}>—</span>}{r.role?<span style={{fontSize:10,color:'var(--text-light)',marginLeft:4}}>{r.role}</span>:null}</td>
+                    <td style={{fontSize:11}}><span className="tag" style={{background:'var(--bg)'}}>{r.context||'—'}</span></td>
+                    <td style={{fontSize:12}}>
+                      <div style={{fontWeight:600,color:'var(--danger)',wordBreak:'break-word'}}>{r.message}</div>
+                      {r.url && <div style={{fontSize:10.5,color:'var(--text-light)',marginTop:2,wordBreak:'break-all'}}>{String(r.url).replace(/https?:\/\/[^/]+/,'')||r.url}</div>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -4914,6 +5029,8 @@ function App() {
   const [showRepSelect,setShowRepSelect]=useState(false);
   const [darkMode,setDarkMode]=useState(()=>localStorage.getItem('darkMode')==='true');
   const [currentUser,setCurrentUser]=useState(()=>{ try{return JSON.parse(localStorage.getItem('currentUser')||'null');}catch(e){return null;} });
+  // Stamp error reports with who's signed in.
+  useEffect(()=>{ ERR_USER = currentUser||null; },[currentUser]);
   // Agency folders (per-rep). Persisted to localStorage — membership is by
   // stable leadKey, so folders survive reloads even though leads are in-memory.
   const [agencies,setAgencies]=useState(()=>{ try{return JSON.parse(localStorage.getItem('agencies')||'[]');}catch(e){return [];} });
@@ -5411,7 +5528,7 @@ function App() {
         logH('☁️',`Loaded ${loaded.length} lead(s) from Close`);
         if(!opts.silent) addToast(`✓ Loaded ${loaded.length} lead(s) from Close`,'success');
       })
-      .catch(e=>{ if(!opts.silent) addToast('Close load failed: '+e.message,'error'); })
+      .catch(e=>{ if(!opts.silent) addToast('Close load failed: '+e.message,'error'); reportError('loadFromClose', e); })
       .finally(()=>setCloseSyncing(false));
   }
 
@@ -5434,7 +5551,7 @@ function App() {
         logH('☁️',`Saved ${leads.length} lead(s) to Close`);
         addToast(`✓ Saved ${leads.length} lead(s) to Close`,'success');
       })
-      .catch(e=>addToast('Close save failed: '+e.message,'error'))
+      .catch(e=>{ addToast('Close save failed: '+e.message,'error'); reportError('closeSave', e); })
       .finally(()=>setCloseSyncing(false));
   }
 
@@ -5556,7 +5673,7 @@ function App() {
         addToast(failed?`Sent ${repLeads.length-failed}/${repLeads.length} to Close.io (${failed} failed) for ${rep}`:`✓ ${repLeads.length} lead(s) sent to Close.io for ${rep}`, failed?'info':'success');
         logH('⬆',`Close.io import: ${repLeads.length-failed} lead(s) for ${rep}`);
       })
-      .catch(e=>{ addToast(`Close.io import failed for ${rep}: ${e.message}`,'error'); logH('⬆',`Close.io import failed for ${rep}`); })
+      .catch(e=>{ addToast(`Close.io import failed for ${rep}: ${e.message}`,'error'); logH('⬆',`Close.io import failed for ${rep}`); reportError('importToClose:'+rep, e); })
       .finally(()=>setCloseSyncing(false));
   }
 
@@ -5582,7 +5699,7 @@ function App() {
         const n=(resp&&typeof resp.assigned==='number'&&resp.assigned)?resp.assigned:emailable.length;
         addToast(`✓ ${n} prospect(s) added to SmartReach → ${dest}`,'success'); logH('✉',`SmartReach: ${n} → ${dest} (${rep})`);
       })
-      .catch(e=>{ addToast(`SmartReach send failed for ${rep}: ${e.message}`,'error'); logH('✉',`SmartReach send failed for ${rep}`); });
+      .catch(e=>{ addToast(`SmartReach send failed for ${rep}: ${e.message}`,'error'); logH('✉',`SmartReach send failed for ${rep}`); reportError('importToSmartReach:'+rep, e); });
   }
 
   useEffect(()=>{
@@ -5660,6 +5777,7 @@ function App() {
     {id:'knowledge',icon:'📚',label:'Knowledge Base'},
     {id:'attendance',icon:'⏱',label:'Attendance'},
     {id:'archive',icon:'🗄',label:'Archive'},
+    {id:'errors',icon:'🐞',label:'Error Log'},
   ];
   const NAV_FILTER=[
     {id:'pending',icon:'◔',label:'Pending Qualification',count:counts.pending,cls:'orange'},
@@ -5685,6 +5803,7 @@ function App() {
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
     if(tab==='duplicates') return <DuplicatesView groups={myDupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
     if(tab==='archive') return isAdmin ? <ArchiveView loadArchived={loadArchivedFromSupabase} onRestore={restoreArchived} config={config} campColorMap={campColorMap} addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
+    if(tab==='errors') return isAdmin ? <ErrorLogView addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
     if(tab==='google-import') return <GoogleImportView onImport={importLeads} addToast={addToast}/>;
     if(tab==='agency') return <AgencyView agencies={agencies} setAgencies={setAgencies} leads={vLeads} config={config} currentUser={currentUser} isAdmin={isAdmin} addToast={addToast} onImportSheet={importAgencyLeads}/>;
     if(tab==='close-data') return <CloseSearchView config={config}/>;
@@ -5693,7 +5812,7 @@ function App() {
     return null;
   }
 
-  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',errors:'Error Log',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // Gate the entire app behind login.
   const resetToken=(()=>{ try{ return new URLSearchParams(window.location.search).get('reset'); }catch(e){ return null; } })();
@@ -5808,7 +5927,7 @@ function App() {
             <span className="sct-icon">{navCollapsed?'»':'«'}</span><span className="sct-label">Collapse</span>
           </div>
           <div className="sidebar-section-label">Main</div>
-          {NAV_MAIN.filter(n=>(n.id==='attendance'||n.id==='archive')?isAdmin:((n.id==='leaves'||n.id==='knowledge')?config.tabs[n.id]!==false:config.tabs[n.id])).map(n=>(
+          {NAV_MAIN.filter(n=>(n.id==='attendance'||n.id==='archive'||n.id==='errors')?isAdmin:((n.id==='leaves'||n.id==='knowledge')?config.tabs[n.id]!==false:config.tabs[n.id])).map(n=>(
             <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
             </div>
@@ -5901,4 +6020,4 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(ErrorBoundary,{name:'root'},React.createElement(App)));
