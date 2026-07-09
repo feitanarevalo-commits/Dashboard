@@ -74,6 +74,14 @@ function isFresh(lead){ return leadOrigin(lead)==='Fresh'; }
 function isRecycled(lead){
   return (lead.tags||[]).includes('For Recycle') || lead.recycled === true;
 }
+// Recycle window (days) for a contacted lead — mirrors the Contacted tab:
+// MSN = 90 days, VVV = 30 days, otherwise a 30-day default.
+function recycleThresholdDays(lead){
+  const c=lead.campaigns||[];
+  if(c.includes('MSN')) return 90;
+  if(c.includes('VVV')) return 30;
+  return 30;
+}
 // Parse "1.5M" / "23K" / "12000" → a number for range filtering.
 function parseFollowers(v){
   if(v==null) return 0;
@@ -2508,14 +2516,15 @@ function AddLeadModal({rep,config,onAdd,onClose}) {
       .finally(()=>setLooking(false));
   }
   function submit(e){ e.preventDefault(); const n=name.trim(); if(!n) return;
-    onAdd({
+    const res=onAdd({
       id: Date.now()+Math.floor(Math.random()*1e6),
       channelName:n, url:url.trim(), channelId, platform, niche:niche.trim(), followers:followers.trim(),
       emails: emails.split(/[,;\s]+/).map(x=>x.trim()).filter(Boolean),
       tags:[], campaigns:[], assignedTo:rep, dateAssigned:new Date().toISOString().split('T')[0],
       lastContactDate:null, channels:[n], addedAt:new Date().toISOString(), source:'manual',
     });
-    onClose();
+    // Keep the form open if the add was blocked or the rep cancelled a warning.
+    if(res!==false) onClose();
   }
   return (
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
@@ -5123,13 +5132,31 @@ function App() {
   }
   function addLead(lead){
     const bare=leadKey(lead);
-    if(bare && archivedKeysRef.current.has(bare)){ addToast(`🗄 "${lead.channelName}" is in your Archive — restore it instead of re-adding`,'info'); return; }
+    if(bare && archivedKeysRef.current.has(bare)){ addToast(`🗄 "${lead.channelName}" is in your Archive — restore it instead of re-adding`,'info'); return false; }
     const k=leadKey(lead)+'|'+(lead.assignedTo||'');
-    if(leads.some(l=>leadKey(l)+'|'+(l.assignedTo||'')===k)){ addToast(`"${lead.channelName}" is already in ${lead.assignedTo}'s list`,'info'); return; }
+    if(leads.some(l=>leadKey(l)+'|'+(l.assignedTo||'')===k)){ addToast(`"${lead.channelName}" is already in ${lead.assignedTo}'s list`,'info'); return false; }
+    // Warn if this channel was already CONTACTED (by anyone) and isn't due for
+    // recycling yet — so a rep doesn't re-work a lead someone contacted recently.
+    if(bare){
+      const priors=leads.filter(l=>leadKey(l)===bare && (l.tags||[]).includes('Contacted') && !(l.tags||[]).includes('For Recycle'));
+      let best=null;
+      priors.forEach(l=>{ if(l.lastContactDate){ const d=new Date(l.lastContactDate); if(!isNaN(d) && (!best||d>best.date)) best={date:d,lead:l}; } });
+      if(best){
+        const days=Math.floor((Date.now()-best.date)/86400000);
+        const left=recycleThresholdDays(best.lead)-days;
+        if(left>0){
+          const who=best.lead.assignedTo||'another rep';
+          const camp=(best.lead.campaigns||[]).join(', ')||'no campaign';
+          const ok=window.confirm(`⚠ Previously contacted\n\n"${lead.channelName}" was already contacted by ${who} on ${best.date.toISOString().split('T')[0]} — ${days} day${days!==1?'s':''} ago (${camp}).\n\nIt won't be due for recycling for another ${left} day${left!==1?'s':''}.\n\nAdd it anyway?`);
+          if(!ok) return false;
+        }
+      }
+    }
     setLeads(ls=>[lead,...ls]);
     logH('➕',`Lead added manually: ${lead.channelName} → ${lead.assignedTo}`);
     addToast(`✓ "${lead.channelName}" added to ${lead.assignedTo}`,'success');
     checkAndTagFromClose([lead],'manually-added');
+    return true;
   }
   function clearAllLeads(){ const n=leads.length; const snapshot=[...leads]; setLeads([]); leadsSyncRef.current={}; clearAllLeadsFromSupabase(); logH('🗑',`Cleared ALL leads (${n})`,{type:'undelete',leads:snapshot}); addToast(`Cleared all ${n} lead(s)`,'error'); }
   // Fire-and-forget mirror to the leaves Google Sheet. Uses no-cors + text/plain
