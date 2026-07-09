@@ -2827,8 +2827,36 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
   }
   // Manual reset: stamp today's contact date (works for any lead, incl. ones not in Close).
   function logContact(l){ if(onSave){ onSave({...l,lastContactDate:today.toISOString().split('T')[0]}); if(addToast) addToast(`Logged a contact for "${l.channelName}" — recycle clock reset`,'success'); } }
-  // Deep-link to the lead's page in Close (only leads pushed to Close have an id).
+  // Deep-link to the lead's page in Close (only leads with a resolved Close id).
   const closeUrl=id=>id?`https://app.close.com/lead/${id}/`:null;
+
+  // Backfill the Close lead id for contacted leads that ARE in Close but don't
+  // have it stored (imported outside the dashboard, matched by email, etc.).
+  // close-check now returns the matched id (channel-id first, then email); we
+  // persist it so the lead gets the ☁ Close link AND an accurate recycle date.
+  const [closeChecked,setCloseChecked]=useState(()=>new Set());
+  const triedCloseRef=useRef(new Set());
+  const needResolve=contacted.filter(l=>!l.closeLeadId && (l.channelId||l.url||(l.emails||[]).length));
+  const needResolveKey=needResolve.map(l=>l.id).join(',');
+  useEffect(()=>{
+    const wh=(config.closeCheckWebhook||'').trim(); if(!wh) return;
+    const toTry=needResolve.filter(l=>!triedCloseRef.current.has(l.id));
+    if(!toTry.length) return;
+    toTry.forEach(l=>triedCloseRef.current.add(l.id));
+    const batch=toTry.slice(0,200);   // protect Close from big bursts
+    const markChecked=()=>setCloseChecked(prev=>{ const n=new Set(prev); batch.forEach(l=>n.add(String(l.id))); return n; });
+    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads:batch.map(l=>({key:l.id,channelId:l.channelId,url:l.url,emails:l.emails}))})})
+      .then(r=>r.json())
+      .then(resp=>{
+        const ids=(resp&&resp.ids)||{};
+        Object.keys(ids).forEach(key=>{
+          const id=ids[key]; const lead=contacted.find(l=>String(l.id)===String(key));
+          if(lead && id && !lead.closeLeadId && onSave) onSave({...lead,closeLeadId:id});
+        });
+        markChecked();
+      })
+      .catch(()=>markChecked());
+  },[needResolveKey]);
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'auto'}}>
       <div style={{padding:'16px 24px',borderBottom:'1px solid var(--border)',background:'var(--card)',display:'flex',gap:12,flexShrink:0}}>
@@ -2870,7 +2898,9 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
                   <div style={{display:'flex',gap:6,alignItems:'center',whiteSpace:'nowrap'}}>
                     {cUrl
                       ? <a href={cUrl} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-xs" title="Open this lead in Close.io to see the full record, emails & activity">☁ Close</a>
-                      : <span style={{fontSize:10.5,color:'var(--text-light)'}} title="Not yet pushed to Close">not in Close</span>}
+                      : (!l.closeLeadId && (l.channelId||l.url||(l.emails||[]).length) && !closeChecked.has(String(l.id)))
+                        ? <span style={{fontSize:10.5,color:'var(--text-light)'}} title="Looking this lead up in Close…">checking Close…</span>
+                        : <span style={{fontSize:10.5,color:'var(--text-light)'}} title="Not found in Close">not in Close</span>}
                     <button className="btn btn-ghost btn-xs" title="Log a contact today — resets the recycle clock" onClick={()=>logContact(l)}>✓ Log contact</button>
                   </div>
                 </td>
