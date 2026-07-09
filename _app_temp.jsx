@@ -5124,6 +5124,26 @@ function App() {
   const closeLoadedRef=useRef(false);
   const isAdmin=isAdminUser(currentUser);
 
+  // Unseen-error badge for admins: poll the count of error_logs newer than the
+  // last time this admin opened the Error Log, and clear it when they view it.
+  const [errUnseen,setErrUnseen]=useState(0);
+  useEffect(()=>{
+    if(!SB || !isAdmin) return;
+    let stop=false;
+    function check(){
+      let since=''; try{ since=localStorage.getItem('errLogSeen')||''; }catch(e){}
+      let q=SB.from('error_logs').select('id',{count:'exact',head:true});
+      if(since) q=q.gt('created_at',since);
+      q.then(({count})=>{ if(!stop) setErrUnseen(count||0); }, ()=>{});
+    }
+    check();
+    const iv=setInterval(check,60000);
+    return ()=>{ stop=true; clearInterval(iv); };
+  },[isAdmin]);
+  useEffect(()=>{
+    if(tab==='errors'){ try{ localStorage.setItem('errLogSeen',new Date().toISOString()); }catch(e){} setErrUnseen(0); }
+  },[tab]);
+
   function login(u){ setCurrentUser(u); localStorage.setItem('currentUser',JSON.stringify(u)); addToast(`Welcome, ${u.name}`,'success'); }
   function logout(){ endSession(); setCurrentUser(null); localStorage.removeItem('currentUser'); setActiveRep(null); setTab('home'); }
 
@@ -5930,6 +5950,7 @@ function App() {
           {NAV_MAIN.filter(n=>(n.id==='attendance'||n.id==='archive'||n.id==='errors')?isAdmin:((n.id==='leaves'||n.id==='knowledge')?config.tabs[n.id]!==false:config.tabs[n.id])).map(n=>(
             <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
+              {n.id==='errors' && errUnseen>0 && <span className="nav-badge red">{errUnseen>99?'99+':errUnseen}</span>}
             </div>
           ))}
           <div className="nav-divider"/>

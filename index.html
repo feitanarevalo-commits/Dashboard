@@ -11820,6 +11820,44 @@ function App() {
   const [closeSyncing, setCloseSyncing] = useState(false);
   const closeLoadedRef = useRef(false);
   const isAdmin = isAdminUser(currentUser);
+
+  // Unseen-error badge for admins: poll the count of error_logs newer than the
+  // last time this admin opened the Error Log, and clear it when they view it.
+  const [errUnseen, setErrUnseen] = useState(0);
+  useEffect(() => {
+    if (!SB || !isAdmin) return;
+    let stop = false;
+    function check() {
+      let since = '';
+      try {
+        since = localStorage.getItem('errLogSeen') || '';
+      } catch (e) {}
+      let q = SB.from('error_logs').select('id', {
+        count: 'exact',
+        head: true
+      });
+      if (since) q = q.gt('created_at', since);
+      q.then(({
+        count
+      }) => {
+        if (!stop) setErrUnseen(count || 0);
+      }, () => {});
+    }
+    check();
+    const iv = setInterval(check, 60000);
+    return () => {
+      stop = true;
+      clearInterval(iv);
+    };
+  }, [isAdmin]);
+  useEffect(() => {
+    if (tab === 'errors') {
+      try {
+        localStorage.setItem('errLogSeen', new Date().toISOString());
+      } catch (e) {}
+      setErrUnseen(0);
+    }
+  }, [tab]);
   function login(u) {
     setCurrentUser(u);
     localStorage.setItem('currentUser', JSON.stringify(u));
@@ -13503,7 +13541,9 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("span", {
     className: "nav-icon"
-  }, n.icon), n.label)), /*#__PURE__*/React.createElement("div", {
+  }, n.icon), n.label, n.id === 'errors' && errUnseen > 0 && /*#__PURE__*/React.createElement("span", {
+    className: "nav-badge red"
+  }, errUnseen > 99 ? '99+' : errUnseen))), /*#__PURE__*/React.createElement("div", {
     className: "nav-divider"
   }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
