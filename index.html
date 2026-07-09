@@ -6393,6 +6393,8 @@ function ContactedView({
       if (addToast) addToast(`Logged a contact for "${l.channelName}" — recycle clock reset`, 'success');
     }
   }
+  // Deep-link to the lead's page in Close (only leads pushed to Close have an id).
+  const closeUrl = id => id ? `https://app.close.com/lead/${id}/` : null;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -6453,8 +6455,8 @@ function ContactedView({
     return r && r.left <= 14 && r.left > 0;
   }).length))), /*#__PURE__*/React.createElement("table", {
     className: "leads-table"
-  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Channel"), /*#__PURE__*/React.createElement("th", null, "Campaign"), /*#__PURE__*/React.createElement("th", null, "Assigned To"), /*#__PURE__*/React.createElement("th", null, "Last Contacted"), /*#__PURE__*/React.createElement("th", null, "Days Since Contact"), /*#__PURE__*/React.createElement("th", null, "Recycle In"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, contacted.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: 7,
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Channel"), /*#__PURE__*/React.createElement("th", null, "Followers"), /*#__PURE__*/React.createElement("th", null, "Email"), /*#__PURE__*/React.createElement("th", null, "Campaign"), /*#__PURE__*/React.createElement("th", null, "Assigned To"), /*#__PURE__*/React.createElement("th", null, "Last Contacted"), /*#__PURE__*/React.createElement("th", null, "Days Since Contact"), /*#__PURE__*/React.createElement("th", null, "Recycle In"), /*#__PURE__*/React.createElement("th", null, "Actions"))), /*#__PURE__*/React.createElement("tbody", null, contacted.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: 9,
     style: {
       textAlign: 'center',
       padding: 32,
@@ -6463,10 +6465,23 @@ function ContactedView({
   }, "No contacted leads yet")), contacted.map(l => {
     const r = recycleInfo(l);
     const e = effectiveContact(l);
+    const email = (l.emails || [])[0];
+    const cUrl = closeUrl(l.closeLeadId);
     return /*#__PURE__*/React.createElement("tr", {
       key: l.id,
       className: l.campaigns.includes('MSN') && l.campaigns.includes('VVV') ? 'row-both' : l.campaigns.includes('MSN') ? 'row-msn' : l.campaigns.includes('VVV') ? 'row-vvv' : ''
-    }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("td", null, l.url ? /*#__PURE__*/React.createElement("a", {
+      href: l.url,
+      target: "_blank",
+      rel: "noopener noreferrer",
+      style: {
+        fontWeight: 600,
+        fontSize: 13,
+        color: 'var(--accent)',
+        textDecoration: 'none'
+      },
+      title: `Open ${l.channelName} on ${l.platform}`
+    }, l.channelName) : /*#__PURE__*/React.createElement("div", {
       style: {
         fontWeight: 600,
         fontSize: 13
@@ -6476,7 +6491,30 @@ function ContactedView({
         fontSize: 11,
         color: 'var(--text-dim)'
       }
-    }, l.platform)), /*#__PURE__*/React.createElement("td", null, l.campaigns.map(c => /*#__PURE__*/React.createElement("span", {
+    }, PLATFORM_ICON[l.platform], " ", l.platform, l.niche ? ` · ${l.niche}` : '')), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+      className: "followers-val"
+    }, l.followers || '—')), /*#__PURE__*/React.createElement("td", {
+      style: {
+        maxWidth: 180
+      }
+    }, email ? /*#__PURE__*/React.createElement("a", {
+      href: `mailto:${email}`,
+      style: {
+        fontSize: 11.5,
+        color: 'var(--accent)',
+        textDecoration: 'none',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        display: 'block'
+      },
+      title: email
+    }, email) : /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--text-light)',
+        fontSize: 11
+      }
+    }, "—")), /*#__PURE__*/React.createElement("td", null, l.campaigns.map(c => /*#__PURE__*/React.createElement("span", {
       key: c,
       className: "tag-badge",
       style: {
@@ -6517,11 +6555,30 @@ function ContactedView({
       style: {
         color: 'var(--text-dim)'
       }
-    }, "—")), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("button", {
+    }, "—")), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center',
+        whiteSpace: 'nowrap'
+      }
+    }, cUrl ? /*#__PURE__*/React.createElement("a", {
+      href: cUrl,
+      target: "_blank",
+      rel: "noopener noreferrer",
+      className: "btn btn-outline btn-xs",
+      title: "Open this lead in Close.io to see the full record, emails & activity"
+    }, "☁ Close") : /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10.5,
+        color: 'var(--text-light)'
+      },
+      title: "Not yet pushed to Close"
+    }, "not in Close"), /*#__PURE__*/React.createElement("button", {
       className: "btn btn-ghost btn-xs",
       title: "Log a contact today — resets the recycle clock",
       onClick: () => logContact(l)
-    }, "✓ Log contact")));
+    }, "✓ Log contact"))));
   }))));
 }
 

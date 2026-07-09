@@ -2827,6 +2827,8 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
   }
   // Manual reset: stamp today's contact date (works for any lead, incl. ones not in Close).
   function logContact(l){ if(onSave){ onSave({...l,lastContactDate:today.toISOString().split('T')[0]}); if(addToast) addToast(`Logged a contact for "${l.channelName}" — recycle clock reset`,'success'); } }
+  // Deep-link to the lead's page in Close (only leads pushed to Close have an id).
+  const closeUrl=id=>id?`https://app.close.com/lead/${id}/`:null;
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'auto'}}>
       <div style={{padding:'16px 24px',borderBottom:'1px solid var(--border)',background:'var(--card)',display:'flex',gap:12,flexShrink:0}}>
@@ -2837,23 +2839,41 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
       </div>
       <table className="leads-table">
         <thead><tr>
-          <th>Channel</th><th>Campaign</th><th>Assigned To</th>
-          <th>Last Contacted</th><th>Days Since Contact</th><th>Recycle In</th><th></th>
+          <th>Channel</th><th>Followers</th><th>Email</th><th>Campaign</th><th>Assigned To</th>
+          <th>Last Contacted</th><th>Days Since Contact</th><th>Recycle In</th><th>Actions</th>
         </tr></thead>
         <tbody>
-          {contacted.length===0&&<tr><td colSpan={7} style={{textAlign:'center',padding:32,color:'var(--text-dim)'}}>No contacted leads yet</td></tr>}
+          {contacted.length===0&&<tr><td colSpan={9} style={{textAlign:'center',padding:32,color:'var(--text-dim)'}}>No contacted leads yet</td></tr>}
           {contacted.map(l=>{
             const r=recycleInfo(l);
             const e=effectiveContact(l);
+            const email=(l.emails||[])[0];
+            const cUrl=closeUrl(l.closeLeadId);
             return(
               <tr key={l.id} className={l.campaigns.includes('MSN')&&l.campaigns.includes('VVV')?'row-both':l.campaigns.includes('MSN')?'row-msn':l.campaigns.includes('VVV')?'row-vvv':''}>
-                <td><div style={{fontWeight:600,fontSize:13}}>{l.channelName}</div><div style={{fontSize:11,color:'var(--text-dim)'}}>{l.platform}</div></td>
+                <td>
+                  {l.url
+                    ? <a href={l.url} target="_blank" rel="noopener noreferrer" style={{fontWeight:600,fontSize:13,color:'var(--accent)',textDecoration:'none'}} title={`Open ${l.channelName} on ${l.platform}`}>{l.channelName}</a>
+                    : <div style={{fontWeight:600,fontSize:13}}>{l.channelName}</div>}
+                  <div style={{fontSize:11,color:'var(--text-dim)'}}>{PLATFORM_ICON[l.platform]} {l.platform}{l.niche?` · ${l.niche}`:''}</div>
+                </td>
+                <td><span className="followers-val">{l.followers||'—'}</span></td>
+                <td style={{maxWidth:180}}>{email
+                  ? <a href={`mailto:${email}`} style={{fontSize:11.5,color:'var(--accent)',textDecoration:'none',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'block'}} title={email}>{email}</a>
+                  : <span style={{color:'var(--text-light)',fontSize:11}}>—</span>}</td>
                 <td>{l.campaigns.map(c=><span key={c} className="tag-badge" style={{background:campColorMap[c]||'var(--accent)',color:'#fff',marginRight:4}}>{c}</span>)}</td>
                 <td>{l.assignedTo||<span style={{color:'var(--text-dim)'}}>—</span>}</td>
                 <td>{e?<span>{e.date.toISOString().split('T')[0]}{e.fromClose?<span style={{fontSize:10,color:'var(--accent)',marginLeft:5}} title="Most recent email/call from Close">· Close</span>:null}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
                 <td>{r?<span style={{fontWeight:600,color:r.diff>0?'var(--text-dim)':'var(--text)'}}>{r.diff} day{r.diff!==1?'s':''}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
                 <td>{r?<span style={{fontWeight:700,color:r.color}}>{r.left<=0?'⚠ Ready to Recycle':`${r.left}d`}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
-                <td><button className="btn btn-ghost btn-xs" title="Log a contact today — resets the recycle clock" onClick={()=>logContact(l)}>✓ Log contact</button></td>
+                <td>
+                  <div style={{display:'flex',gap:6,alignItems:'center',whiteSpace:'nowrap'}}>
+                    {cUrl
+                      ? <a href={cUrl} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-xs" title="Open this lead in Close.io to see the full record, emails & activity">☁ Close</a>
+                      : <span style={{fontSize:10.5,color:'var(--text-light)'}} title="Not yet pushed to Close">not in Close</span>}
+                    <button className="btn btn-ghost btn-xs" title="Log a contact today — resets the recycle clock" onClick={()=>logContact(l)}>✓ Log contact</button>
+                  </div>
+                </td>
               </tr>
             );
           })}
