@@ -12981,8 +12981,8 @@ function App() {
     const dest = campaignLabel || 'campaign ' + campaignId;
     // The smartreach-add Edge Function takes {rep, campaign_id (cmp_…), leads},
     // creates/updates the prospects, and assigns them to the campaign. It returns
-    // {ok, created, assigned, errors}. SmartReach dedupes by email so re-sends
-    // don't duplicate.
+    // {ok, created, assigned, skipped:[{email,reason}], error}. Invalid emails are
+    // skipped (not fatal); SmartReach dedupes by email so re-sends don't duplicate.
     const payload = {
       rep,
       campaign_id: String(campaignId),
@@ -12999,10 +12999,17 @@ function App() {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }).then(resp => {
-      if (resp && resp.ok === false) throw new Error(resp.error || 'SmartReach error');
-      const n = resp && typeof resp.assigned === 'number' && resp.assigned ? resp.assigned : emailable.length;
-      addToast(`✓ ${n} prospect(s) added to SmartReach → ${dest}`, 'success');
-      logH('✉', `SmartReach: ${n} → ${dest} (${rep})`);
+      if (resp && resp.ok === false) throw new Error(resp.error || resp.errors && JSON.stringify(resp.errors).slice(0, 140) || 'SmartReach error');
+      const sent = resp && typeof resp.created === 'number' ? resp.created : emailable.length;
+      const asg = resp && typeof resp.assigned === 'number' ? resp.assigned : sent;
+      const skip = resp && Array.isArray(resp.skipped) ? resp.skipped.length : 0;
+      const n = asg || sent;
+      if (n === 0 && skip > 0) {
+        addToast(`⚠ Nothing sent to SmartReach — all ${skip} selected lead(s) had an invalid/missing email`, 'error');
+      } else {
+        addToast(`✓ ${n} prospect(s) added to SmartReach → ${dest}` + (skip ? ` · ${skip} skipped (invalid/no email)` : ''), skip ? 'info' : 'success');
+      }
+      logH('✉', `SmartReach: ${n} → ${dest} (${rep})` + (skip ? ` · ${skip} skipped` : ''));
     }).catch(e => {
       addToast(`SmartReach send failed for ${rep}: ${e.message}`, 'error');
       logH('✉', `SmartReach send failed for ${rep}`);
