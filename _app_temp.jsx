@@ -5769,13 +5769,20 @@ function App() {
         const sent=(resp&&typeof resp.created==='number')?resp.created:emailable.length;
         const asg=(resp&&typeof resp.assigned==='number')?resp.assigned:sent;
         const skip=(resp&&Array.isArray(resp.skipped))?resp.skipped.length:0;
+        const mism=(resp&&Array.isArray(resp.owner_mismatch))?resp.owner_mismatch:[];
         const n=asg||sent;
         if(n===0 && skip>0){
           addToast(`⚠ Nothing sent to SmartReach — all ${skip} selected lead(s) had an invalid/missing email`,'error');
         } else {
           addToast(`✓ ${n} prospect(s) added to SmartReach → ${dest}`+(skip?` · ${skip} skipped (invalid/no email)`:''), skip?'info':'success');
         }
-        logH('✉',`SmartReach: ${n} → ${dest} (${rep})`+(skip?` · ${skip} skipped`:''));
+        // SmartReach locks a prospect's owner to whoever imported it FIRST, so a
+        // lead already in SmartReach under another rep stays theirs. Flag those.
+        if(mism.length){
+          const owners=[...new Set(mism.map(m=>m.owner).filter(Boolean))].join(', ')||'another rep';
+          addToast(`⚠ ${mism.length} lead(s) stayed owned by ${owners} in SmartReach (imported there first) — reassign in SmartReach to move them to ${rep}`,'info');
+        }
+        logH('✉',`SmartReach: ${n} → ${dest} (${rep})`+(skip?` · ${skip} skipped`:'')+(mism.length?` · ${mism.length} kept prior owner`:''));
       })
       .catch(e=>{ addToast(`SmartReach send failed for ${rep}: ${e.message}`,'error'); logH('✉',`SmartReach send failed for ${rep}`); reportError('importToSmartReach:'+rep, e); });
   }
