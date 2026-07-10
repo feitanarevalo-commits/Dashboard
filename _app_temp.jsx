@@ -5330,14 +5330,15 @@ function App() {
     const activeDup = bare && leads.some(l=>leadKey(l)===bare && (l.assignedTo||'')===(lead.assignedTo||'') && !(l.tags||[]).includes('Contacted') && !(l.tags||[]).includes('For Recycle'));
     if(activeDup){ addToast(`"${lead.channelName}" is already in ${lead.assignedTo}'s list`,'info'); return false; }
 
-    let inheritCloseId=null; const replaceIds=new Set();
     if(bare){
-      // Same channel already Contacted / For Recycle. If it isn't due for recycling
-      // yet, warn (they can still decide). On proceed — or if it IS due — the rep's
-      // OWN previous entry is REPLACED (recycled) by this fresh add, so the Contacted
-      // tab doesn't keep a stale duplicate. Another rep's entry is left untouched.
+      // Same channel already Contacted / For Recycle. Re-adding it RECYCLES the rep's
+      // OWN existing entry IN PLACE: it stays the same lead but its recycle clock is
+      // reset (lastContactDate = today) and its details are refreshed from what was
+      // just entered — no duplicate is created. If it isn't due for recycling yet, we
+      // warn first so they can decide. Another rep's entry is left untouched.
       const contactedAll=leads.filter(l=>leadKey(l)===bare && ((l.tags||[]).includes('Contacted')||(l.tags||[]).includes('For Recycle')));
       if(contactedAll.length){
+        const mine=contactedAll.filter(l=>(l.assignedTo||'')===(lead.assignedTo||''));
         let best=null;
         const consider=(d,l,fromClose)=>{ if(d && !isNaN(d) && (!best||d>best.date)) best={date:d,lead:l,fromClose}; };
         contactedAll.forEach(l=>{ if(l.lastContactDate) consider(new Date(l.lastContactDate),l,false); });
@@ -5358,27 +5359,44 @@ function App() {
           const who=best?(best.lead.assignedTo||'another rep'):'a rep';
           const camp=best?((best.lead.campaigns||[]).join(', ')||'no campaign'):'';
           const src=best&&best.fromClose?' (last email from Close)':'';
-          const when=best?best.date.toISOString().split('T')[0]:'recently';
-          const ok=window.confirm(`⚠ Previously contacted\n\n"${lead.channelName}" was contacted by ${who} on ${when}${src} — ${days} day${days!==1?'s':''} ago (${camp}).\n\nIt isn't due for recycling for another ${left} day${left!==1?'s':''}.\n\nAdd it anyway? This will replace the existing contacted entry.`);
+          const detail=best
+            ? `was contacted by ${who} on ${best.date.toISOString().split('T')[0]}${src} — ${days} day${days!==1?'s':''} ago (${camp}).\n\nIt isn't due for recycling for another ${left} day${left!==1?'s':''}.`
+            : `is already marked Contacted by ${who}.`;
+          const action=mine.length ? 'Reset its recycle clock and update its details anyway?' : 'Add it anyway?';
+          const ok=window.confirm(`⚠ Previously contacted\n\n"${lead.channelName}" ${detail}\n\n${action}`);
           if(!ok) return false;
         }
-        // Replace THIS rep's own contacted/recycle entries (keep other reps' intact).
-        contactedAll.filter(l=>(l.assignedTo||'')===(lead.assignedTo||'')).forEach(l=>{ replaceIds.add(l.id); if(l.closeLeadId && !inheritCloseId) inheritCloseId=l.closeLeadId; });
+        if(mine.length){
+          // Recycle IN PLACE: reset the clock + refresh details on the rep's existing
+          // entry (a blank field keeps the old value); consolidate extra same-rep copies.
+          const target = (best && mine.some(l=>l.id===best.lead.id)) ? best.lead : mine[0];
+          const today=new Date().toISOString().split('T')[0];
+          const merged={ ...target,
+            channelName: (lead.channelName||'').trim()||target.channelName,
+            url: (lead.url||'').trim()||target.url,
+            channelId: lead.channelId||target.channelId,
+            platform: lead.platform||target.platform,
+            niche: (lead.niche||'').trim()||target.niche,
+            followers: (lead.followers||'').trim()||target.followers,
+            emails: (lead.emails&&lead.emails.length)?lead.emails:target.emails,
+            tags: [...(target.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'),'Contacted'],
+            lastContactDate: today,
+          };
+          const dropIds=new Set(mine.filter(l=>l.id!==target.id).map(l=>l.id));
+          setLeads(ls=>ls.map(l=>l.id===target.id?merged:l).filter(l=>!dropIds.has(l.id)));
+          dropIds.forEach(id=>deleteLeadFromSupabase(id));
+          logH('♻',`Recycled "${merged.channelName}" — recycle clock reset + details updated → ${merged.assignedTo}`);
+          addToast(`♻ "${merged.channelName}" recycled — recycle clock reset and details updated`,'success');
+          return true;
+        }
+        // Only OTHER reps have contacted it → fall through to a normal cross-rep add.
       }
     }
 
-    // Carry the Close id forward so a re-push updates the SAME Close lead (no dup).
-    const finalLead = inheritCloseId ? {...lead, closeLeadId:inheritCloseId} : lead;
-    setLeads(ls=>[finalLead, ...ls.filter(l=>!replaceIds.has(l.id))]);
-    replaceIds.forEach(id=>deleteLeadFromSupabase(id));
-    if(replaceIds.size){
-      logH('♻',`Recycled "${lead.channelName}" — replaced ${replaceIds.size} previous contacted entry → ${lead.assignedTo}`);
-      addToast(`♻ "${lead.channelName}" recycled — the previous contacted entry was replaced`,'success');
-    } else {
-      logH('➕',`Lead added manually: ${lead.channelName} → ${lead.assignedTo}`);
-      addToast(`✓ "${lead.channelName}" added to ${lead.assignedTo}`,'success');
-    }
-    checkAndTagFromClose([finalLead],'manually-added');
+    setLeads(ls=>[lead,...ls]);
+    logH('➕',`Lead added manually: ${lead.channelName} → ${lead.assignedTo}`);
+    addToast(`✓ "${lead.channelName}" added to ${lead.assignedTo}`,'success');
+    checkAndTagFromClose([lead],'manually-added');
     return true;
   }
   function clearAllLeads(){ const n=leads.length; const snapshot=[...leads]; setLeads([]); leadsSyncRef.current={}; clearAllLeadsFromSupabase(); logH('🗑',`Cleared ALL leads (${n})`,{type:'undelete',leads:snapshot}); addToast(`Cleared all ${n} lead(s)`,'error'); }
