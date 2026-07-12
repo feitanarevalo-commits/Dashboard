@@ -77,9 +77,11 @@ function isRecycled(lead){
 // Recycle window (days) for a contacted lead — mirrors the Contacted tab:
 // MSN = 90 days, VVV = 30 days, otherwise a 30-day default.
 function recycleThresholdDays(lead){
-  const c=lead.campaigns||[];
+  // Match on the campaign TEXT so "VIRALS", "VIRALS (VVV)", "VIRALS (CID)" and
+  // plain "VVV" all get the 30-day recycle; MSN gets 90; everything else 30.
+  const c=(lead.campaigns||[]).join(' ').toUpperCase();
   if(c.includes('MSN')) return 90;
-  if(c.includes('VVV')) return 30;
+  if(c.includes('VIRALS')||c.includes('VVV')) return 30;
   return 30;
 }
 // Parse "1.5M" / "23K" / "12000" → a number for range filtering.
@@ -2814,9 +2816,10 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
     const e=effectiveContact(l);
     if(!e) return null;
     const diff=Math.floor((today-e.date)/86400000);
-    if(l.campaigns.includes('VVV')){const left=30-diff;return{threshold:30,diff,left,color:left<=7?'var(--danger)':left<=14?'var(--warn)':'var(--success)'};}
-    if(l.campaigns.includes('MSN')){const left=90-diff;return{threshold:90,diff,left,color:left<=14?'var(--danger)':left<=30?'var(--warn)':'var(--success)'};}
-    return null;
+    const threshold=recycleThresholdDays(l);
+    const left=threshold-diff;
+    const nd=threshold>=90?14:7, nw=threshold>=90?30:14;
+    return{threshold,diff,left,color:left<=nd?'var(--danger)':left<=nw?'var(--warn)':'var(--success)'};
   }
   // Manual reset: stamp today's contact date (works for any lead, incl. ones not in Close).
   function logContact(l){ if(onSave){ onSave({...l,lastContactDate:today.toISOString().split('T')[0]}); if(addToast) addToast(`Logged a contact for "${l.channelName}" — recycle clock reset`,'success'); } }
@@ -5261,6 +5264,13 @@ function App() {
       updated.lastContactDate=new Date().toISOString().split('T')[0];
       addToast(`"${upd.channelName}" marked Contacted — date recorded`,'success');
     }
+    // Qualifying a recycled lead (For Recycle → Potential): it's an already-worked
+    // (Imported) lead, and re-engaging resets its recycle clock for the next cycle.
+    if(old&&old.tags.includes('For Recycle')&&upd.tags.includes('Potential')){
+      updated.imported=true;
+      updated.lastContactDate=new Date().toISOString().split('T')[0];
+      addToast(`"${upd.channelName}" re-qualified as Potential — recycle clock reset`,'success');
+    }
     setLeads(ls=>ls.map(l=>l.id===updated.id?updated:l));
     logH('✏️',`Lead "${updated.channelName}" updated`);
   }
@@ -5835,6 +5845,7 @@ function App() {
   }
 
   useEffect(()=>{
+    if(!leadsReady) return;
     function checkRecycle(){
       const now=new Date();
       setLeads(ls=>{
@@ -5842,17 +5853,17 @@ function App() {
         const updated=ls.map(l=>{
           if(!l.tags.includes('Contacted')||l.tags.includes('For Recycle')||!l.lastContactDate) return l;
           const diff=Math.floor((now-new Date(l.lastContactDate))/86400000);
-          const isVVV=l.campaigns.includes('VVV');
-          const isMSN=l.campaigns.includes('MSN');
-          const threshold=isVVV?30:isMSN?90:Infinity;
+          const threshold=recycleThresholdDays(l);
           if(diff>=threshold){
             recycled.push(l.channelName);
-            return{...l,tags:[...l.tags.filter(t=>t!=='Contacted'),'For Recycle']};
+            // Move to For Recycle and mark Imported (it's already been worked / is in Close).
+            return{...l,tags:[...l.tags.filter(t=>t!=='Contacted'),'For Recycle'],imported:true};
           }
           return l;
         });
         if(recycled.length>0){
           setHistory(h=>[{id:Date.now(),icon:'♻️',text:`Auto-recycled ${recycled.length} lead(s): ${recycled.join(', ')}`,time:now.toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:false},...h]);
+          setTimeout(()=>addToast(`♻ ${recycled.length} contacted lead(s) reached their recycle period — moved to For Recycle`,'info'),0);
         }
         return updated;
       });
@@ -5860,7 +5871,7 @@ function App() {
     checkRecycle();
     const t=setInterval(checkRecycle,3600000);
     return()=>clearInterval(t);
-  },[]);
+  },[leadsReady]);
 
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
