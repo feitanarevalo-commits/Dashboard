@@ -257,6 +257,12 @@ function parseCloseDescription(desc) {
   return out;
 }
 
+// Cross-tab duplicate index: leadKey -> [{id, rep, contacted}] for every channel
+// held by 2+ lead records. Provided at the App root so any LeadsTable row (in ANY
+// rep / lead-gen / campaign / pool tab) can flag "this channel is also being worked
+// elsewhere" without prop-drilling through every wrapper.
+const DupContext = React.createContext(null);
+
 // ─── PERMISSIONS ──────────────────────────────────────────
 function userRole(name, config) {
   const u = (config.users || []).find(x => x.name === name);
@@ -1784,6 +1790,7 @@ function LeadsTable({
   printTitle = 'Lead Report'
 }) {
   const [sel, setSel] = useState([]);
+  const dupIndex = React.useContext(DupContext) || {};
   const [searchState, setSearchState] = useState('');
   // When the parent provides search control (e.g. Scraper uses it as the
   // scrape keyword), the box is controlled by the parent; otherwise local.
@@ -2305,7 +2312,21 @@ function LeadsTable({
   }) : avatarLetter(lead.channelName)))), cols.channelName && /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
     className: `channel-name${onRowOpen ? ' channel-name-link' : ''}`,
     onClick: onRowOpen ? () => onRowOpen(lead) : undefined
-  }, lead.channelName), lead.channels && lead.channels.length > 1 && /*#__PURE__*/React.createElement("div", {
+  }, lead.channelName, (() => {
+    const recs = dupIndex[leadKey(lead)];
+    if (!recs) return null;
+    const others = recs.filter(r => r.id !== lead.id);
+    if (!others.length) return null;
+    const mine = lead.assignedTo || '';
+    const otherReps = [...new Set(others.map(r => r.rep || 'Unassigned'))];
+    // Cross-rep = at least one other holder is a DIFFERENT person.
+    const crossRep = others.some(r => (r.rep || '') !== mine);
+    const label = otherReps.join(', ');
+    return /*#__PURE__*/React.createElement("span", {
+      className: `dup-flag${crossRep ? ' dup-flag-cross' : ''}`,
+      title: `Same channel also worked by: ${label}`
+    }, "⚠ dup");
+  })()), lead.channels && lead.channels.length > 1 && /*#__PURE__*/React.createElement("div", {
     className: "channel-sub"
   }, lead.channels.length, " channels")), cols.url && /*#__PURE__*/React.createElement("td", {
     style: {
@@ -13214,6 +13235,17 @@ function App() {
   // Reps see duplicate groups that involve THEIR leads (so they're notified when
   // a channel they have is also worked by another rep); admins see all groups.
   const myDupGroups = isAdmin || !currentUser ? dupGroups : dupGroups.filter(g => g.leads.some(l => l.assignedTo === currentUser.name || l.scrapedBy === currentUser.name));
+  // Flat lookup (leadKey -> records) so every lead row, in any rep/lead-gen/campaign/
+  // pool tab, can show an inline "also worked elsewhere" flag. Built from the same
+  // global set as dupGroups, so detection is identical everywhere.
+  const dupIndex = {};
+  dupGroups.forEach(g => {
+    dupIndex[g.key] = g.leads.map(l => ({
+      id: l.id,
+      rep: l.assignedTo || '',
+      contacted: (l.tags || []).includes('Contacted') || (l.tags || []).includes('For Recycle')
+    }));
+  });
   const recentCutoff = new Date();
   recentCutoff.setDate(recentCutoff.getDate() - 7);
   // A lead is "Pending Qualification" if it carries that status tag OR it's the
@@ -13609,7 +13641,9 @@ function App() {
     config: config,
     onLogin: login
   });
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement(DupContext.Provider, {
+    value: dupIndex
+  }, /*#__PURE__*/React.createElement("div", {
     id: "root",
     style: {
       display: 'flex',
@@ -14013,7 +14047,7 @@ function App() {
     onClose: () => setSearchLead(null),
     onSave: saveL,
     onDelete: delL
-  }));
+  })));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(ErrorBoundary, {
   name: 'root'

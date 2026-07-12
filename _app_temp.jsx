@@ -198,6 +198,12 @@ function parseCloseDescription(desc){
   return out;
 }
 
+// Cross-tab duplicate index: leadKey -> [{id, rep, contacted}] for every channel
+// held by 2+ lead records. Provided at the App root so any LeadsTable row (in ANY
+// rep / lead-gen / campaign / pool tab) can flag "this channel is also being worked
+// elsewhere" without prop-drilling through every wrapper.
+const DupContext = React.createContext(null);
+
 // ─── PERMISSIONS ──────────────────────────────────────────
 function userRole(name, config){
   const u = (config.users||[]).find(x=>x.name===name);
@@ -948,6 +954,7 @@ function NoteModal({lead,onClose,onSave}){
 // ─── LEADS TABLE ──────────────────────────────────────────
 function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,hideRepFilter=false,onClaim=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
   const [sel,setSel] = useState([]);
+  const dupIndex = React.useContext(DupContext) || {};
   const [searchState,setSearchState] = useState('');
   // When the parent provides search control (e.g. Scraper uses it as the
   // scrape keyword), the box is controlled by the parent; otherwise local.
@@ -1246,7 +1253,21 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                   )}
                   {cols.channelName && (
                     <td>
-                      <div className={`channel-name${onRowOpen?' channel-name-link':''}`} onClick={onRowOpen?()=>onRowOpen(lead):undefined}>{lead.channelName}</div>
+                      <div className={`channel-name${onRowOpen?' channel-name-link':''}`} onClick={onRowOpen?()=>onRowOpen(lead):undefined}>
+                        {lead.channelName}
+                        {(()=>{
+                          const recs=dupIndex[leadKey(lead)];
+                          if(!recs) return null;
+                          const others=recs.filter(r=>r.id!==lead.id);
+                          if(!others.length) return null;
+                          const mine=lead.assignedTo||'';
+                          const otherReps=[...new Set(others.map(r=>r.rep||'Unassigned'))];
+                          // Cross-rep = at least one other holder is a DIFFERENT person.
+                          const crossRep=others.some(r=>(r.rep||'')!==mine);
+                          const label=otherReps.join(', ');
+                          return <span className={`dup-flag${crossRep?' dup-flag-cross':''}`} title={`Same channel also worked by: ${label}`}>⚠ dup</span>;
+                        })()}
+                      </div>
                       {lead.channels && lead.channels.length>1 && <div className="channel-sub">{lead.channels.length} channels</div>}
                     </td>
                   )}
@@ -5895,6 +5916,11 @@ function App() {
   // Reps see duplicate groups that involve THEIR leads (so they're notified when
   // a channel they have is also worked by another rep); admins see all groups.
   const myDupGroups = (isAdmin || !currentUser) ? dupGroups : dupGroups.filter(g=>g.leads.some(l=>l.assignedTo===currentUser.name || l.scrapedBy===currentUser.name));
+  // Flat lookup (leadKey -> records) so every lead row, in any rep/lead-gen/campaign/
+  // pool tab, can show an inline "also worked elsewhere" flag. Built from the same
+  // global set as dupGroups, so detection is identical everywhere.
+  const dupIndex={};
+  dupGroups.forEach(g=>{ dupIndex[g.key]=g.leads.map(l=>({id:l.id, rep:l.assignedTo||'', contacted:(l.tags||[]).includes('Contacted')||(l.tags||[]).includes('For Recycle')})); });
 
   const recentCutoff=new Date();recentCutoff.setDate(recentCutoff.getDate()-7);
   // A lead is "Pending Qualification" if it carries that status tag OR it's the
@@ -5985,6 +6011,7 @@ function App() {
   if(!currentUser) return <LoginScreen config={config} onLogin={login}/>;
 
   return (
+    <DupContext.Provider value={dupIndex}>
     <div id="root" style={{display:'flex',flexDirection:'column',height:'100vh'}}>
       {/* TOPBAR */}
       <div className="topbar">
@@ -6196,6 +6223,7 @@ function App() {
         onLogout={logout}/>}
       {searchLead && <LeadModal lead={searchLead} config={config} onClose={()=>setSearchLead(null)} onSave={saveL} onDelete={delL}/>}
     </div>
+    </DupContext.Provider>
   );
 }
 

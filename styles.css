@@ -270,6 +270,15 @@ tbody td { padding: 11px 16px; vertical-align: middle; color: var(--text); }
 .note-dot { position:absolute; top:-5px; right:-5px; min-width:9px; height:9px;
   border-radius:50%; background:#ef4444; box-shadow:0 0 0 2px var(--card-bg, #fff); }
 html[data-dark] .note-dot { box-shadow:0 0 0 2px var(--card-bg, #1a1b23); }
+/* Inline "this channel is also worked elsewhere" flag on a lead row. Amber = same
+   holder / pool dup; red (dup-flag-cross) = a DIFFERENT rep also has it. */
+.dup-flag { display:inline-block; margin-left:6px; font-size:9.5px; font-weight:700;
+  line-height:1; padding:2px 5px; border-radius:5px; vertical-align:middle;
+  letter-spacing:.02em; white-space:nowrap; cursor:help;
+  background:#FEF3C7; color:#92400E; }
+.dup-flag-cross { background:#FEE2E2; color:#B42318; }
+html[data-dark] .dup-flag { background:rgba(245,158,11,.18); color:#FCD34D; }
+html[data-dark] .dup-flag-cross { background:rgba(239,68,68,.18); color:#FCA5A5; }
 .thumb { width: 38px; height: 38px; border-radius: 50%; background: linear-gradient(135deg,var(--accent),var(--purple)); color: white; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; cursor: pointer; border: 2px solid var(--border); flex-shrink: 0; text-decoration: none; }
 .platform-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; color: var(--text-dim); background: var(--bg); padding: 3px 9px; border-radius: 8px; border: 1px solid var(--border); }
 .followers-val { font-weight: 600; color: var(--text); }
