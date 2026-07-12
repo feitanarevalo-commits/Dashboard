@@ -1245,6 +1245,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                     <td>
                       <div className={`channel-name${onRowOpen?' channel-name-link':''}`} onClick={onRowOpen?()=>onRowOpen(lead):undefined}>{lead.channelName}</div>
                       {lead.channels && lead.channels.length>1 && <div className="channel-sub">{lead.channels.length} channels</div>}
+                      {lead.note && <span className="note-badge" onMouseDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();setNoteLead(lead);}} title={'Note: '+String(lead.note).slice(0,140)+(String(lead.note).length>140?'…':'')}>📝 Note</span>}
                     </td>
                   )}
                   {cols.url && (
