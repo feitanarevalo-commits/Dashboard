@@ -5920,7 +5920,10 @@ function App() {
     {id:'virals',label:'VIRALS',icon:'🔥',color:'#6554C0'},
   ];
   // A pool candidate = scraper-routed to a bucket and not yet claimed by anyone.
-  const poolLeads = pid => vLeads.filter(l=>l.pool===pid && !l.assignedTo);
+  // A lead sits in its pool only while it's an untouched candidate: not claimed
+  // by a rep AND not yet sorted into a campaign. Giving it a campaign moves it
+  // out into that campaign tab; removing the campaign returns it to the pool.
+  const poolLeads = pid => vLeads.filter(l=>l.pool===pid && !l.assignedTo && (l.campaigns||[]).length===0);
 
   const NAV_MAIN=[
     {id:'home',icon:'⊟',label:'Home'},
