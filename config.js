@@ -52,6 +52,7 @@ var DEFAULT_CONFIG = {
     leaves: true, knowledge: true,
     pending: true, contacted: true,
     recycle: true, recent: true, duplicates: true, msn: true, vvv: true,
+    pools: true,
   },
 
   // Which table columns are shown by default

@@ -943,7 +943,7 @@ function NoteModal({lead,onClose,onSave}){
 }
 
 // ─── LEADS TABLE ──────────────────────────────────────────
-function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,hideRepFilter=false,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
+function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,hideRepFilter=false,onClaim=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
   const [sel,setSel] = useState([]);
   const [searchState,setSearchState] = useState('');
   // When the parent provides search control (e.g. Scraper uses it as the
@@ -1123,6 +1123,10 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
         <div className="bulk-panel no-print">
           <span style={{fontWeight:700,color:'var(--accent)',fontSize:13,whiteSpace:'nowrap'}}>✓ {sel.length} selected</span>
           <div className="toolbar-sep"/>
+          {onClaim&&<>
+            <button className="btn btn-primary btn-sm" onClick={()=>{onClaim(sel);setSel([]);}} title="Assign the selected leads to you and move them into your queue">⚡ Claim to me</button>
+            <div className="toolbar-sep"/>
+          </>}
           {feats.bulkAssign&&<>
             <span className="bulk-panel-label">Rep</span>
             <select value={bulkRep} onChange={e=>setBulkRep(e.target.value)} style={{fontSize:12,padding:'5px 10px'}}>
@@ -4780,6 +4784,9 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
     {id:'pending',label:'Pending Qualification',icon:'◔'},
     {id:'contacted',label:'Contacted Leads',icon:'✉'},{id:'recycle',label:'For Recycle',icon:'↻'},
   ].filter(p=>(config.tabs||{})[p.id]);
+  if((config.tabs||{}).pools!==false){
+    PAGE_DEFS.push({id:'pool-highticket',label:'High Ticket Pool',icon:'⚡'},{id:'pool-msn',label:'MSN Pool',icon:'📰'},{id:'pool-compilation',label:'Compilation Pool',icon:'🎞'});
+  }
   (config.campaigns||[]).forEach(c=>PAGE_DEFS.push({id:c.id.toLowerCase(),label:`${c.label} Campaign`,icon:'●'}));
   const pages=PAGE_DEFS.filter(p=>!ql||match(p.label)).map(p=>({...p,kind:'Pages',run:()=>{onNavigate(p.id);onClose();}}));
 
@@ -5861,6 +5868,17 @@ function App() {
     duplicates:myDupGroups.length,
   };
 
+  // ── Lead Pools ── the Make scraper feeds these buckets 24/7 with unclaimed
+  // candidates; any rep/lead-gen picks one, "Claims" it (→ assigned to them),
+  // then qualifies + tags it via the normal Pending Qualification flow.
+  const POOLS=[
+    {id:'highticket',label:'High Ticket',icon:'⚡',color:'#E3A008'},
+    {id:'msn',label:'MSN',icon:'📰',color:'#1366D6'},
+    {id:'compilation',label:'Compilation',icon:'🎞',color:'#6554C0'},
+  ];
+  // A pool candidate = scraper-routed to a bucket and not yet claimed by anyone.
+  const poolLeads = pid => vLeads.filter(l=>l.pool===pid && !l.assignedTo);
+
   const NAV_MAIN=[
     {id:'home',icon:'⊟',label:'Home'},
     {id:'scraper',icon:'◎',label:'Scraper'},
@@ -5903,12 +5921,17 @@ function App() {
     if(tab==='google-import') return <GoogleImportView onImport={importLeads} addToast={addToast}/>;
     if(tab==='agency') return <AgencyView agencies={agencies} setAgencies={setAgencies} leads={vLeads} config={config} currentUser={currentUser} isAdmin={isAdmin} addToast={addToast} onImportSheet={importAgencyLeads}/>;
     if(tab==='close-data') return <CloseSearchView config={config}/>;
+    if(tab && tab.startsWith('pool-')){
+      const pid=tab.slice(5);
+      const pool=POOLS.find(p=>p.id===pid);
+      if(pool) return <LeadsTable leads={poolLeads(pid)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} showAssigned showOrigin showCampaign hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename={`pool_${pid}`} printTitle={`${pool.label} Pool`}/>;
+    }
     const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);
     if(camp) return <CampaignView campaign={camp} campColor={camp.color} leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
     return null;
   }
 
-  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',errors:'Error Log',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-compilation':'Compilation Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // Gate the entire app behind login.
   const resetToken=(()=>{ try{ return new URLSearchParams(window.location.search).get('reset'); }catch(e){ return null; } })();
@@ -6037,6 +6060,19 @@ function App() {
               <span className={`nav-badge ${n.cls}`}>{n.count}</span>
             </div>
           ))}
+          {config.tabs.pools!==false && <>
+            <div className="nav-divider"/>
+            <div className="sidebar-section-label">Lead Pools</div>
+            {POOLS.map(p=>{
+              const cnt=poolLeads(p.id).length;
+              return(
+                <div key={p.id} title={`${p.label} — unclaimed scraped candidates`} className={`nav-item ${tab==='pool-'+p.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab('pool-'+p.id);}}>
+                  <span className="nav-icon" style={{color:p.color}}>{p.icon}</span>{p.label}
+                  <span className="nav-badge">{cnt}</span>
+                </div>
+              );
+            })}
+          </>}
           {(config.campaigns||[]).length>0 && <>
             <div className="nav-divider"/>
             <div className="sidebar-section-label">Campaigns</div>

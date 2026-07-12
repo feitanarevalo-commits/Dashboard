@@ -1773,6 +1773,7 @@ function LeadsTable({
   closeSend = null,
   hideExport = false,
   hideRepFilter = false,
+  onClaim = null,
   config,
   feats,
   campColorMap,
@@ -2062,7 +2063,16 @@ function LeadsTable({
     }
   }, "✓ ", sel.length, " selected"), /*#__PURE__*/React.createElement("div", {
     className: "toolbar-sep"
-  }), feats.bulkAssign && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+  }), onClaim && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    onClick: () => {
+      onClaim(sel);
+      setSel([]);
+    },
+    title: "Assign the selected leads to you and move them into your queue"
+  }, "⚡ Claim to me"), /*#__PURE__*/React.createElement("div", {
+    className: "toolbar-sep"
+  })), feats.bulkAssign && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
     className: "bulk-panel-label"
   }, "Rep"), /*#__PURE__*/React.createElement("select", {
     value: bulkRep,
@@ -10993,6 +11003,21 @@ function GlobalSearch({
     label: 'For Recycle',
     icon: '↻'
   }].filter(p => (config.tabs || {})[p.id]);
+  if ((config.tabs || {}).pools !== false) {
+    PAGE_DEFS.push({
+      id: 'pool-highticket',
+      label: 'High Ticket Pool',
+      icon: '⚡'
+    }, {
+      id: 'pool-msn',
+      label: 'MSN Pool',
+      icon: '📰'
+    }, {
+      id: 'pool-compilation',
+      label: 'Compilation Pool',
+      icon: '🎞'
+    });
+  }
   (config.campaigns || []).forEach(c => PAGE_DEFS.push({
     id: c.id.toLowerCase(),
     label: `${c.label} Campaign`,
@@ -13109,6 +13134,28 @@ function App() {
     recent: vLeads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff).length,
     duplicates: myDupGroups.length
   };
+
+  // ── Lead Pools ── the Make scraper feeds these buckets 24/7 with unclaimed
+  // candidates; any rep/lead-gen picks one, "Claims" it (→ assigned to them),
+  // then qualifies + tags it via the normal Pending Qualification flow.
+  const POOLS = [{
+    id: 'highticket',
+    label: 'High Ticket',
+    icon: '⚡',
+    color: '#E3A008'
+  }, {
+    id: 'msn',
+    label: 'MSN',
+    icon: '📰',
+    color: '#1366D6'
+  }, {
+    id: 'compilation',
+    label: 'Compilation',
+    icon: '🎞',
+    color: '#6554C0'
+  }];
+  // A pool candidate = scraper-routed to a bucket and not yet claimed by anyone.
+  const poolLeads = pid => vLeads.filter(l => l.pool === pid && !l.assignedTo);
   const NAV_MAIN = [{
     id: 'home',
     icon: '⊟',
@@ -13383,6 +13430,31 @@ function App() {
     if (tab === 'close-data') return /*#__PURE__*/React.createElement(CloseSearchView, {
       config: config
     });
+    if (tab && tab.startsWith('pool-')) {
+      const pid = tab.slice(5);
+      const pool = POOLS.find(p => p.id === pid);
+      if (pool) return /*#__PURE__*/React.createElement(LeadsTable, {
+        leads: poolLeads(pid),
+        onEdit: saveL,
+        onDelete: delL,
+        onBulkDelete: bulkDelete,
+        onArchive: archiveLeads,
+        onBulkAssign: bulkAssign,
+        onClaim: ids => {
+          if (!currentUser) return;
+          bulkAssign(ids, currentUser.name);
+        },
+        showAssigned: true,
+        showOrigin: true,
+        showCampaign: true,
+        hideRepFilter: !isAdmin,
+        config: config,
+        feats: config.features || {},
+        campColorMap: campColorMap,
+        filename: `pool_${pid}`,
+        printTitle: `${pool.label} Pool`
+      });
+    }
     const camp = (config.campaigns || []).find(c => c.id.toLowerCase() === tab);
     if (camp) return /*#__PURE__*/React.createElement(CampaignView, {
       campaign: camp,
@@ -13411,6 +13483,9 @@ function App() {
     duplicates: 'Duplicate Leads',
     archive: 'Archive',
     errors: 'Error Log',
+    'pool-highticket': 'High Ticket Pool',
+    'pool-msn': 'MSN Pool',
+    'pool-compilation': 'Compilation Pool',
     ...Object.fromEntries((config.campaigns || []).map(c => [c.id.toLowerCase(), `${c.label} Campaign`]))
   };
 
@@ -13692,7 +13767,29 @@ function App() {
     className: "nav-icon"
   }, n.icon), n.label, /*#__PURE__*/React.createElement("span", {
     className: `nav-badge ${n.cls}`
-  }, n.count))), (config.campaigns || []).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, n.count))), config.tabs.pools !== false && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "nav-divider"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-section-label"
+  }, "Lead Pools"), POOLS.map(p => {
+    const cnt = poolLeads(p.id).length;
+    return /*#__PURE__*/React.createElement("div", {
+      key: p.id,
+      title: `${p.label} — unclaimed scraped candidates`,
+      className: `nav-item ${tab === 'pool-' + p.id && !showRepSelect ? 'active' : ''}`,
+      onClick: () => {
+        setShowRepSelect(false);
+        setTab('pool-' + p.id);
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "nav-icon",
+      style: {
+        color: p.color
+      }
+    }, p.icon), p.label, /*#__PURE__*/React.createElement("span", {
+      className: "nav-badge"
+    }, cnt));
+  })), (config.campaigns || []).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "nav-divider"
   }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
