@@ -8794,7 +8794,9 @@ function LeadMgmtView({
       borderColor: '#DE350B'
     },
     onClick: () => {
-      if (window.confirm(`Delete ALL ${leads.length} lead(s) from the dashboard and the shared database?\n\nThis cannot be undone.`)) onClearAll();
+      const ans = window.prompt(`⚠ DANGER: this permanently deletes ALL ${leads.length} lead(s) from the shared database — for EVERY rep — and cannot be undone.\n\nTo confirm, type DELETE (in capitals) below:`);
+      if (ans == null) return;
+      if (ans.trim() === 'DELETE') onClearAll();else addToast('Clear All cancelled — you must type DELETE exactly to confirm', 'info');
     },
     title: "Permanently delete every lead"
   }, "🗑 Clear ALL leads")), /*#__PURE__*/React.createElement(LeadsTable, {

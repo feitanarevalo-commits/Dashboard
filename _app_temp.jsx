@@ -3921,7 +3921,7 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
           Unassigned ({unassigned.length})
         </button>
         {onClearAll && leads.length>0 && <button className="btn btn-sm" style={{marginLeft:'auto',background:'#DE350B',color:'#fff',borderColor:'#DE350B'}}
-          onClick={()=>{ if(window.confirm(`Delete ALL ${leads.length} lead(s) from the dashboard and the shared database?\n\nThis cannot be undone.`)) onClearAll(); }}
+          onClick={()=>{ const ans=window.prompt(`⚠ DANGER: this permanently deletes ALL ${leads.length} lead(s) from the shared database — for EVERY rep — and cannot be undone.\n\nTo confirm, type DELETE (in capitals) below:`); if(ans==null) return; if(ans.trim()==='DELETE') onClearAll(); else addToast('Clear All cancelled — you must type DELETE exactly to confirm','info'); }}
           title="Permanently delete every lead">🗑 Clear ALL leads</button>}
       </div>
       <LeadsTable leads={display} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onArchive={onArchive} onBulkAssign={onBulkAssign} showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap} filename="lead_management" printTitle="Lead Management Report"/>
