@@ -2850,6 +2850,30 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
       })
       .catch(()=>markChecked());
   },[needResolveKey]);
+
+  // Column-header sort + filter, same UX as the main lead table (ColHeader).
+  const [sortCol,setSortCol]=useState('');
+  const [sortDir,setSortDir]=useState('asc');
+  const [colFilter,setColFilter]=useState({});
+  const [openFilterCol,setOpenFilterCol]=useState(null);
+  function handleSort(col,dir){ setSortCol(col); setSortDir(dir||'asc'); }
+  const colHeaderProps={sortCol,sortDir,onSort:handleSort,leads:contacted,colFilter,setColFilter,openFilterCol,setOpenFilterCol};
+  const rows=contacted.filter(l=>{
+    if(colFilter.campaign){ if(colFilter.campaign==='None'){ if((l.campaigns||[]).length>0) return false; } else if(!(l.campaigns||[]).includes(colFilter.campaign)) return false; }
+    if(colFilter.assignedTo){ if(colFilter.assignedTo==='Unassigned'){ if(l.assignedTo) return false; } else if(l.assignedTo!==colFilter.assignedTo) return false; }
+    return true;
+  }).sort((a,b)=>{
+    if(!sortCol) return 0;
+    const dir=sortDir==='asc'?1:-1;
+    if(sortCol==='channelName') return dir*String(a.channelName||'').localeCompare(String(b.channelName||''));
+    if(sortCol==='assignedTo') return dir*String(a.assignedTo||'').localeCompare(String(b.assignedTo||''));
+    if(sortCol==='campaign') return dir*(a.campaigns||[]).join(',').localeCompare((b.campaigns||[]).join(','));
+    if(sortCol==='followers'){ const fa=parseInt(String(a.followers).replace(/[^0-9]/g,''))||0, fb=parseInt(String(b.followers).replace(/[^0-9]/g,''))||0; return dir*(fa-fb); }
+    if(sortCol==='lastContact'){ const da=effectiveContact(a),db=effectiveContact(b); return dir*((da?da.date.getTime():0)-(db?db.date.getTime():0)); }
+    if(sortCol==='daysSince'){ const ra=recycleInfo(a),rb=recycleInfo(b); return dir*((ra?ra.diff:-1)-(rb?rb.diff:-1)); }
+    if(sortCol==='recycleIn'){ const ra=recycleInfo(a),rb=recycleInfo(b); return dir*((ra?ra.left:99999)-(rb?rb.left:99999)); }
+    return 0;
+  });
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'auto'}}>
       <div style={{padding:'16px 24px',borderBottom:'1px solid var(--border)',background:'var(--card)',display:'flex',gap:12,flexShrink:0}}>
@@ -2860,12 +2884,19 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
       </div>
       <table className="leads-table">
         <thead><tr>
-          <th>Channel</th><th>Followers</th><th>Email</th><th>Campaign</th><th>Assigned To</th>
-          <th>Last Contacted</th><th>Days Since Contact</th><th>Recycle In</th><th>Actions</th>
+          <ColHeader col="channelName" label="Channel" {...colHeaderProps}/>
+          <ColHeader col="followers" label="Followers" {...colHeaderProps}/>
+          <th>Email</th>
+          <ColHeader col="campaign" label="Campaign" {...colHeaderProps}/>
+          <ColHeader col="assignedTo" label="Assigned To" {...colHeaderProps}/>
+          <ColHeader col="lastContact" label="Last Contacted" {...colHeaderProps}/>
+          <ColHeader col="daysSince" label="Days Since Contact" {...colHeaderProps}/>
+          <ColHeader col="recycleIn" label="Recycle In" {...colHeaderProps}/>
+          <th>Actions</th>
         </tr></thead>
         <tbody>
-          {contacted.length===0&&<tr><td colSpan={9} style={{textAlign:'center',padding:32,color:'var(--text-dim)'}}>No contacted leads yet</td></tr>}
-          {contacted.map(l=>{
+          {rows.length===0&&<tr><td colSpan={9} style={{textAlign:'center',padding:32,color:'var(--text-dim)'}}>{contacted.length===0?'No contacted leads yet':'No contacted leads match the filters'}</td></tr>}
+          {rows.map(l=>{
             const r=recycleInfo(l);
             const e=effectiveContact(l);
             const email=(l.emails||[])[0];
