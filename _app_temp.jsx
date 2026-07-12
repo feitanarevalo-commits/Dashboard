@@ -1245,7 +1245,6 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                     <td>
                       <div className={`channel-name${onRowOpen?' channel-name-link':''}`} onClick={onRowOpen?()=>onRowOpen(lead):undefined}>{lead.channelName}</div>
                       {lead.channels && lead.channels.length>1 && <div className="channel-sub">{lead.channels.length} channels</div>}
-                      {lead.note && <span className="note-badge" onMouseDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();setNoteLead(lead);}} title={'Note: '+String(lead.note).slice(0,140)+(String(lead.note).length>140?'…':'')}>📝 Note</span>}
                     </td>
                   )}
                   {cols.url && (
@@ -1301,7 +1300,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                   <td className="no-print">
                     <div style={{display:'flex',gap:5}}>
                       <button className="btn-icon" onClick={()=>onRowOpen?onRowOpen(lead):setEditLead(lead)} title={onRowOpen?'View profile':'Edit lead'}>{onRowOpen?'👁':'✏'}</button>
-                      {onEdit && <button className="btn-icon" onClick={()=>setNoteLead(lead)} style={lead.note?{color:'var(--accent)',borderColor:'var(--accent-light)',background:'var(--accent-light)'}:{}} title={lead.note?('Note: '+String(lead.note).slice(0,100)+(String(lead.note).length>100?'…':'')):'Add a note'}>📝</button>}
+                      {onEdit && <button className="btn-icon note-ind-btn" onClick={()=>setNoteLead(lead)} style={lead.note?{color:'var(--accent)',borderColor:'var(--accent-light)',background:'var(--accent-light)'}:{}} title={lead.note?('Note: '+String(lead.note).slice(0,100)+(String(lead.note).length>100?'…':'')):'Add a note'}>📝{lead.note && <span className="note-dot"/>}</button>}
                       {onDelete && <button className="btn-icon" style={{color:'var(--danger)',borderColor:'rgba(222,53,11,.25)'}} onClick={()=>{if(window.confirm(`Delete "${lead.channelName}"?`))onDelete(lead.id);}} title="Delete lead">🗑</button>}
                     </div>
                   </td>

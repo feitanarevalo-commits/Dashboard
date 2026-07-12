@@ -2304,15 +2304,7 @@ function LeadsTable({
     onClick: onRowOpen ? () => onRowOpen(lead) : undefined
   }, lead.channelName), lead.channels && lead.channels.length > 1 && /*#__PURE__*/React.createElement("div", {
     className: "channel-sub"
-  }, lead.channels.length, " channels"), lead.note && /*#__PURE__*/React.createElement("span", {
-    className: "note-badge",
-    onMouseDown: e => e.stopPropagation(),
-    onClick: e => {
-      e.stopPropagation();
-      setNoteLead(lead);
-    },
-    title: 'Note: ' + String(lead.note).slice(0, 140) + (String(lead.note).length > 140 ? '…' : '')
-  }, "📝 Note")), cols.url && /*#__PURE__*/React.createElement("td", {
+  }, lead.channels.length, " channels")), cols.url && /*#__PURE__*/React.createElement("td", {
     style: {
       maxWidth: 160
     }
@@ -2419,7 +2411,7 @@ function LeadsTable({
     onClick: () => onRowOpen ? onRowOpen(lead) : setEditLead(lead),
     title: onRowOpen ? 'View profile' : 'Edit lead'
   }, onRowOpen ? '👁' : '✏'), onEdit && /*#__PURE__*/React.createElement("button", {
-    className: "btn-icon",
+    className: "btn-icon note-ind-btn",
     onClick: () => setNoteLead(lead),
     style: lead.note ? {
       color: 'var(--accent)',
@@ -2427,7 +2419,9 @@ function LeadsTable({
       background: 'var(--accent-light)'
     } : {},
     title: lead.note ? 'Note: ' + String(lead.note).slice(0, 100) + (String(lead.note).length > 100 ? '…' : '') : 'Add a note'
-  }, "📝"), onDelete && /*#__PURE__*/React.createElement("button", {
+  }, "📝", lead.note && /*#__PURE__*/React.createElement("span", {
+    className: "note-dot"
+  })), onDelete && /*#__PURE__*/React.createElement("button", {
     className: "btn-icon",
     style: {
       color: 'var(--danger)',
