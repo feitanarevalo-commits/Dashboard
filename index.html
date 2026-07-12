@@ -28,10 +28,11 @@ const {
 
 // ─── UTILS ────────────────────────────────────────────────
 function getRowClass(lead) {
-  const c = lead.campaigns;
-  if (c.includes('MSN') && c.includes('VVV')) return 'row-both';
+  const c = lead.campaigns || [];
+  const v = c.includes('VIRALS') || c.includes('VVV');
+  if (c.includes('MSN') && v) return 'row-both';
   if (c.includes('MSN')) return 'row-msn';
-  if (c.includes('VVV')) return 'row-vvv';
+  if (v) return 'row-vvv';
   return '';
 }
 function avatarLetter(name) {
@@ -6519,9 +6520,9 @@ function ContactedView({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
-  }, "VVV (30-day recycle)"), /*#__PURE__*/React.createElement("div", {
+  }, "VIRALS (30-day recycle)"), /*#__PURE__*/React.createElement("div", {
     className: "stat-value"
-  }, contacted.filter(l => l.campaigns.includes('VVV')).length)), /*#__PURE__*/React.createElement("div", {
+  }, contacted.filter(l => l.campaigns.includes('VIRALS') || l.campaigns.includes('VVV')).length)), /*#__PURE__*/React.createElement("div", {
     className: "stat-card orange",
     style: {
       flex: 1
@@ -6589,7 +6590,7 @@ function ContactedView({
     const cUrl = closeUrl(l.closeLeadId);
     return /*#__PURE__*/React.createElement("tr", {
       key: l.id,
-      className: l.campaigns.includes('MSN') && l.campaigns.includes('VVV') ? 'row-both' : l.campaigns.includes('MSN') ? 'row-msn' : l.campaigns.includes('VVV') ? 'row-vvv' : ''
+      className: getRowClass(l)
     }, /*#__PURE__*/React.createElement("td", null, l.url ? /*#__PURE__*/React.createElement("a", {
       href: l.url,
       target: "_blank",

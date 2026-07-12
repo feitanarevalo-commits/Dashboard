@@ -150,7 +150,7 @@ var DEFAULT_CONFIG = {
   // ── Campaigns ── add as many as you need
   campaigns: [
     { id: 'MSN', label: 'MSN', color: '#1366D6' },
-    { id: 'VVV', label: 'VVV', color: '#6554C0' },
+    { id: 'VIRALS', label: 'VIRALS', color: '#6554C0' },
   ],
 
   // ── Sales Reps ── names and appearance

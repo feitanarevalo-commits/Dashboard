@@ -4,10 +4,11 @@ const { useState, useEffect, useCallback, useRef } = React;
 
 // ─── UTILS ────────────────────────────────────────────────
 function getRowClass(lead) {
-  const c = lead.campaigns;
-  if(c.includes('MSN') && c.includes('VVV')) return 'row-both';
+  const c = lead.campaigns||[];
+  const v = c.includes('VIRALS') || c.includes('VVV');
+  if(c.includes('MSN') && v) return 'row-both';
   if(c.includes('MSN')) return 'row-msn';
-  if(c.includes('VVV')) return 'row-vvv';
+  if(v) return 'row-vvv';
   return '';
 }
 function avatarLetter(name){ return name ? name[0].toUpperCase() : '?'; }
@@ -2881,7 +2882,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'auto'}}>
       <div style={{padding:'16px 24px',borderBottom:'1px solid var(--border)',background:'var(--card)',display:'flex',gap:12,flexShrink:0}}>
         <div className="stat-card accent" style={{flex:1}}><div className="stat-label">Total Contacted</div><div className="stat-value">{contacted.length}</div></div>
-        <div className="stat-card green" style={{flex:1}}><div className="stat-label">VVV (30-day recycle)</div><div className="stat-value">{contacted.filter(l=>l.campaigns.includes('VVV')).length}</div></div>
+        <div className="stat-card green" style={{flex:1}}><div className="stat-label">VIRALS (30-day recycle)</div><div className="stat-value">{contacted.filter(l=>l.campaigns.includes('VIRALS')||l.campaigns.includes('VVV')).length}</div></div>
         <div className="stat-card orange" style={{flex:1}}><div className="stat-label">MSN (90-day recycle)</div><div className="stat-value">{contacted.filter(l=>l.campaigns.includes('MSN')).length}</div></div>
         <div className="stat-card" style={{flex:1}}><div className="stat-label">Recycle Soon (&lt;14d)</div><div className="stat-value" style={{color:'var(--danger)'}}>{contacted.filter(l=>{const r=recycleInfo(l);return r&&r.left<=14&&r.left>0;}).length}</div></div>
       </div>
@@ -2905,7 +2906,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
             const email=(l.emails||[])[0];
             const cUrl=closeUrl(l.closeLeadId);
             return(
-              <tr key={l.id} className={l.campaigns.includes('MSN')&&l.campaigns.includes('VVV')?'row-both':l.campaigns.includes('MSN')?'row-msn':l.campaigns.includes('VVV')?'row-vvv':''}>
+              <tr key={l.id} className={getRowClass(l)}>
                 <td>
                   {l.url
                     ? <a href={l.url} target="_blank" rel="noopener noreferrer" style={{fontWeight:600,fontSize:13,color:'var(--accent)',textDecoration:'none'}} title={`Open ${l.channelName} on ${l.platform}`}>{l.channelName}</a>
