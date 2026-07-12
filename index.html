@@ -8700,10 +8700,10 @@ function CampaignView({
     onClick: doExportPDF
   }, "🖨 PDF"))), /*#__PURE__*/React.createElement(LeadsTable, {
     leads: display,
-    onEdit: l => {},
+    onEdit: onSave,
     onBulkAssign: onBulkAssign,
     showAssigned: true,
-    showCampaign: false,
+    showCampaign: true,
     config: config,
     feats: feats,
     campColorMap: campColorMap,
