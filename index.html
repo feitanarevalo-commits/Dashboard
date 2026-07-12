@@ -11013,9 +11013,9 @@ function GlobalSearch({
       label: 'MSN Pool',
       icon: '📰'
     }, {
-      id: 'pool-compilation',
-      label: 'Compilation Pool',
-      icon: '🎞'
+      id: 'pool-virals',
+      label: 'VIRALS Pool',
+      icon: '🔥'
     });
   }
   (config.campaigns || []).forEach(c => PAGE_DEFS.push({
@@ -13149,9 +13149,9 @@ function App() {
     icon: '📰',
     color: '#1366D6'
   }, {
-    id: 'compilation',
-    label: 'Compilation',
-    icon: '🎞',
+    id: 'virals',
+    label: 'VIRALS',
+    icon: '🔥',
     color: '#6554C0'
   }];
   // A pool candidate = scraper-routed to a bucket and not yet claimed by anyone.
@@ -13485,7 +13485,7 @@ function App() {
     errors: 'Error Log',
     'pool-highticket': 'High Ticket Pool',
     'pool-msn': 'MSN Pool',
-    'pool-compilation': 'Compilation Pool',
+    'pool-virals': 'VIRALS Pool',
     ...Object.fromEntries((config.campaigns || []).map(c => [c.id.toLowerCase(), `${c.label} Campaign`]))
   };
 

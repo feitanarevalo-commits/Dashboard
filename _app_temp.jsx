@@ -4785,7 +4785,7 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
     {id:'contacted',label:'Contacted Leads',icon:'✉'},{id:'recycle',label:'For Recycle',icon:'↻'},
   ].filter(p=>(config.tabs||{})[p.id]);
   if((config.tabs||{}).pools!==false){
-    PAGE_DEFS.push({id:'pool-highticket',label:'High Ticket Pool',icon:'⚡'},{id:'pool-msn',label:'MSN Pool',icon:'📰'},{id:'pool-compilation',label:'Compilation Pool',icon:'🎞'});
+    PAGE_DEFS.push({id:'pool-highticket',label:'High Ticket Pool',icon:'⚡'},{id:'pool-msn',label:'MSN Pool',icon:'📰'},{id:'pool-virals',label:'VIRALS Pool',icon:'🔥'});
   }
   (config.campaigns||[]).forEach(c=>PAGE_DEFS.push({id:c.id.toLowerCase(),label:`${c.label} Campaign`,icon:'●'}));
   const pages=PAGE_DEFS.filter(p=>!ql||match(p.label)).map(p=>({...p,kind:'Pages',run:()=>{onNavigate(p.id);onClose();}}));
@@ -5874,7 +5874,7 @@ function App() {
   const POOLS=[
     {id:'highticket',label:'High Ticket',icon:'⚡',color:'#E3A008'},
     {id:'msn',label:'MSN',icon:'📰',color:'#1366D6'},
-    {id:'compilation',label:'Compilation',icon:'🎞',color:'#6554C0'},
+    {id:'virals',label:'VIRALS',icon:'🔥',color:'#6554C0'},
   ];
   // A pool candidate = scraper-routed to a bucket and not yet claimed by anyone.
   const poolLeads = pid => vLeads.filter(l=>l.pool===pid && !l.assignedTo);
@@ -5931,7 +5931,7 @@ function App() {
     return null;
   }
 
-  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-compilation':'Compilation Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // Gate the entire app behind login.
   const resetToken=(()=>{ try{ return new URLSearchParams(window.location.search).get('reset'); }catch(e){ return null; } })();
