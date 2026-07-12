@@ -13099,9 +13099,11 @@ function App() {
   // A lead is "Pending Qualification" if it carries that status tag OR it's the
   // original workflow case (assigned to a rep but not yet sorted into a campaign).
   const isPendingLead = l => (l.tags || []).includes('Pending Qualification') || l.assignedTo && (l.campaigns || []).length === 0;
+  // Non-admins only see their OWN leads on scoped tabs (e.g. Pending); admins see all.
+  const canSeeLead = l => isAdmin || currentUser && l.assignedTo === currentUser.name;
   const counts = {
     potential: vLeads.filter(l => l.tags.includes('Potential')).length,
-    pending: vLeads.filter(isPendingLead).length,
+    pending: vLeads.filter(l => isPendingLead(l) && canSeeLead(l)).length,
     contacted: vLeads.filter(l => l.tags.includes('Contacted')).length,
     recycle: vLeads.filter(l => l.tags.includes('For Recycle')).length,
     recent: vLeads.filter(l => l.assignedTo && l.dateAssigned && new Date(l.dateAssigned) >= recentCutoff).length,
@@ -13281,7 +13283,7 @@ function App() {
       config: config
     });
     if (tab === 'pending') return /*#__PURE__*/React.createElement(LeadsTable, {
-      leads: vLeads.filter(isPendingLead),
+      leads: vLeads.filter(l => isPendingLead(l) && canSeeLead(l)),
       onEdit: saveL,
       onDelete: delL,
       onBulkDelete: bulkDelete,
@@ -13290,6 +13292,7 @@ function App() {
       showAssigned: true,
       showCampaign: true,
       showOrigin: true,
+      hideRepFilter: !isAdmin,
       config: config,
       feats: config.features || {},
       campColorMap: campColorMap,
