@@ -80,7 +80,7 @@ function recycleThresholdDays(lead){
   // Match on the campaign TEXT so "VIRALS", "VIRALS (VVV)", "VIRALS (CID)" and
   // plain "VVV" all get the 30-day recycle; MSN gets 90; everything else 30.
   const c=(lead.campaigns||[]).join(' ').toUpperCase();
-  if(c.includes('MSN')) return 90;
+  if(c.includes('MSN')||c.includes('MCN')) return 90;
   if(c.includes('VIRALS')||c.includes('VVV')) return 30;
   return 30;
 }
