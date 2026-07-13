@@ -13,6 +13,10 @@ function getRowClass(lead) {
 }
 function avatarLetter(name){ return name ? name[0].toUpperCase() : '?'; }
 function hasStatusTag(lead){ return STATUS_TAGS.some(t=>lead.tags.includes(t)); }
+// Any status whose text contains "contacted" (e.g. a Close "Recently Contacted"
+// status) counts as Contacted — so those leads land in the Contacted tab and run
+// on the recycle clock exactly like a plain "Contacted" lead.
+function isContacted(lead){ return !!(lead && (lead.tags||[]).some(t=>{ const s=String(t); return /contacted/i.test(s) && !/\bnot[\s-]*contacted/i.test(s); })); }
 // The taggable statuses shown on every lead picker. Driven by the admin-editable
 // config.statusTags (so "+ Add tag" in Customize actually adds a usable tag),
 // with HT always available. Falls back to the built-in STATUSES.
@@ -23,11 +27,12 @@ function statusOptions(config){
 // Status tags that have their OWN dedicated tab. A lead carrying one has "landed"
 // there and should leave the general Scraper / Lead Management lists.
 const STATUS_TAB_TAGS = ['Pending Qualification','Contacted','For Recycle'];
-function hasTabStatusTag(lead){ return STATUS_TAB_TAGS.some(t=>(lead.tags||[]).includes(t)); }
+function hasTabStatusTag(lead){ return isContacted(lead) || STATUS_TAB_TAGS.some(t=>(lead.tags||[]).includes(t)); }
 // Any status tag — built-in OR admin-added (config.statusTags). Used to drop a
 // lead from the FRESH Scraper queue the moment it's triaged with any status.
 function hasAnyStatusTag(lead, config){
   const tags=lead.tags||[];
+  if(isContacted(lead)) return true;
   if(STATUS_TAGS.some(t=>tags.includes(t))) return true;
   if(STATUS_TAB_TAGS.some(t=>tags.includes(t))) return true;
   const custom=(config&&Array.isArray(config.statusTags))?config.statusTags:[];
@@ -1864,7 +1869,7 @@ function HomeView({leads,config,currentUser}) {
       campaignStats[c.id]={
         total:cm.length,
         potential:cm.filter(l=>l.tags.includes('Potential')).length,
-        contacted:cm.filter(l=>l.tags.includes('Contacted')).length,
+        contacted:cm.filter(l=>isContacted(l)).length,
         ht:cm.filter(l=>l.tags.includes('HT')).length,
       };
     });
@@ -1874,7 +1879,7 @@ function HomeView({leads,config,currentUser}) {
       fresh:mine.filter(l=>leadOrigin(l)==='Fresh').length,
       recycled:mine.filter(l=>isRecycled(l)).length,
       potential:mine.filter(l=>l.tags.includes('Potential')).length,
-      contacted:mine.filter(l=>l.tags.includes('Contacted')).length,
+      contacted:mine.filter(l=>isContacted(l)).length,
       ht:mine.filter(l=>l.tags.includes('HT')).length,
       nq:mine.filter(l=>l.tags.includes('Not Qualified')).length,
       withEmail:mine.filter(l=>(l.emails||[]).length>0).length,
@@ -1895,7 +1900,7 @@ function HomeView({leads,config,currentUser}) {
   const freshTot=periodLeads.filter(l=>leadOrigin(l)==='Fresh').length;
   const recycledTot=periodLeads.filter(l=>isRecycled(l)).length;
   const potentialTot=periodLeads.filter(l=>l.tags.includes('Potential')).length;
-  const contactedTot=periodLeads.filter(l=>l.tags.includes('Contacted')).length;
+  const contactedTot=periodLeads.filter(l=>isContacted(l)).length;
   const withEmailTot=periodLeads.filter(l=>(l.emails||[]).length>0).length;
   const htTot=periodLeads.filter(l=>l.tags.includes('HT')).length;
   const follAll=periodLeads.map(l=>parseFollowers(l.followers)).filter(n=>n>0);
@@ -2662,7 +2667,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   // activeLeads = the rep's work queue shown in the table; once a lead is tagged
   // Contacted it leaves this queue and appears under the global Contacted tab.
   const myLeads = leads.filter(l=>l.assignedTo===rep);
-  const activeLeads = myLeads.filter(l=>!l.tags.includes('Contacted'));
+  const activeLeads = myLeads.filter(l=>!isContacted(l));
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
   const total=myLeads.length;
@@ -2678,7 +2683,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   // prospects by email on its side, so re-sends don't duplicate.
   const smartReachLeads=myLeads.filter(l=>(l.emails||[]).length>0);  // all emailable leads for this rep
   const srCount=smartReachLeads.length;
-  const contacted=myLeads.filter(l=>l.tags.includes('Contacted')).length;
+  const contacted=myLeads.filter(l=>isContacted(l)).length;
   const ht=myLeads.filter(l=>l.tags.includes('HT')).length;
   const feats=config.features||{};
 
@@ -2691,9 +2696,9 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const [showClose,setShowClose]=useState(false);
   const [showAdd,setShowAdd]=useState(false);
   const dayLeads=myLeads.filter(l=>leadDayStr(l)===quotaDay);
-  const campPotential=(campId)=>dayLeads.filter(l=>l.tags.includes('Potential')&&!l.tags.includes('Contacted')&&(l.campaigns||[]).includes(campId)).length;
-  const dayContacted=dayLeads.filter(l=>l.tags.includes('Contacted')).length;
-  const dayPotentialTotal=dayLeads.filter(l=>l.tags.includes('Potential')&&!l.tags.includes('Contacted')).length;
+  const campPotential=(campId)=>dayLeads.filter(l=>l.tags.includes('Potential')&&!isContacted(l)&&(l.campaigns||[]).includes(campId)).length;
+  const dayContacted=dayLeads.filter(l=>isContacted(l)).length;
+  const dayPotentialTotal=dayLeads.filter(l=>l.tags.includes('Potential')&&!isContacted(l)).length;
 
   const repColor=(config.repColors||{})[rep]||'#5b5bd6';
   return (
@@ -2790,7 +2795,7 @@ function RepSelectScreen({leads,config,activeRep,onSelect}) {
       </div>
       <div className="rep-grid">
         {(config.salesReps||[]).map(r=>{
-          const active=leads.filter(l=>l.assignedTo===r&&!l.tags.includes('Contacted')).length;
+          const active=leads.filter(l=>l.assignedTo===r&&!isContacted(l)).length;
           const total=leads.filter(l=>l.assignedTo===r).length;
           const isOnline=activeRep===r;
           const color=(config.repColors||{})[r]||'#6366F1';
@@ -2837,7 +2842,7 @@ function EditableContactDate({lead,effective,onCommit}){
   );
 }
 function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,campColorMap,addToast}) {
-  const contacted=leads.filter(l=>l.tags.includes('Contacted'));
+  const contacted=leads.filter(l=>isContacted(l));
   const today=new Date();
   // Pull each pushed lead's most recent CONTACT date from Close so the recycle
   // clock counts from the LAST touch, not the first-contacted date.
@@ -5417,7 +5422,7 @@ function App() {
     if(bare && archivedKeysRef.current.has(bare)){ addToast(`🗄 "${lead.channelName}" is in your Archive — restore it instead of re-adding`,'info'); return false; }
     // Block a genuine ACTIVE duplicate (same channel + rep, not yet contacted).
     // A Contacted / For-Recycle copy is NOT a block — re-adding it is a recycle.
-    const activeDup = bare && leads.some(l=>leadKey(l)===bare && (l.assignedTo||'')===(lead.assignedTo||'') && !(l.tags||[]).includes('Contacted') && !(l.tags||[]).includes('For Recycle'));
+    const activeDup = bare && leads.some(l=>leadKey(l)===bare && (l.assignedTo||'')===(lead.assignedTo||'') && !isContacted(l) && !(l.tags||[]).includes('For Recycle'));
     if(activeDup){ addToast(`"${lead.channelName}" is already in ${lead.assignedTo}'s list`,'info'); return false; }
 
     if(bare){
@@ -5426,7 +5431,7 @@ function App() {
       // reset (lastContactDate = today) and its details are refreshed from what was
       // just entered — no duplicate is created. If it isn't due for recycling yet, we
       // warn first so they can decide. Another rep's entry is left untouched.
-      const contactedAll=leads.filter(l=>leadKey(l)===bare && ((l.tags||[]).includes('Contacted')||(l.tags||[]).includes('For Recycle')));
+      const contactedAll=leads.filter(l=>leadKey(l)===bare && (isContacted(l)||(l.tags||[]).includes('For Recycle')));
       if(contactedAll.length){
         const mine=contactedAll.filter(l=>(l.assignedTo||'')===(lead.assignedTo||''));
         let best=null;
@@ -5904,7 +5909,7 @@ function App() {
       setLeads(ls=>{
         const recycled=[];
         const updated=ls.map(l=>{
-          if(!l.tags.includes('Contacted')||l.tags.includes('For Recycle')||!l.lastContactDate) return l;
+          if(!isContacted(l)||l.tags.includes('For Recycle')||!l.lastContactDate) return l;
           const diff=Math.floor((now-new Date(l.lastContactDate))/86400000);
           const threshold=recycleThresholdDays(l);
           if(diff>=threshold){
@@ -5951,7 +5956,7 @@ function App() {
   // pool tab, can show an inline "also worked elsewhere" flag. Built from the same
   // global set as dupGroups, so detection is identical everywhere.
   const dupIndex={};
-  dupGroups.forEach(g=>{ dupIndex[g.key]=g.leads.map(l=>({id:l.id, rep:l.assignedTo||'', contacted:(l.tags||[]).includes('Contacted')||(l.tags||[]).includes('For Recycle')})); });
+  dupGroups.forEach(g=>{ dupIndex[g.key]=g.leads.map(l=>({id:l.id, rep:l.assignedTo||'', contacted:isContacted(l)||(l.tags||[]).includes('For Recycle')})); });
 
   const recentCutoff=new Date();recentCutoff.setDate(recentCutoff.getDate()-7);
   // A lead is "Pending Qualification" if it carries that status tag OR it's the
@@ -5962,7 +5967,7 @@ function App() {
   const counts={
     potential:vLeads.filter(l=>l.tags.includes('Potential')).length,
     pending:vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l)).length,
-    contacted:vLeads.filter(l=>l.tags.includes('Contacted')).length,
+    contacted:vLeads.filter(l=>isContacted(l)).length,
     recycle:vLeads.filter(l=>l.tags.includes('For Recycle')).length,
     recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff).length,
     duplicates:myDupGroups.length,
@@ -6229,7 +6234,7 @@ function App() {
           <div className="sidebar-section-label">Sales Reps</div>
           {(config.salesReps||[]).map(r=>{
             // Active (non-contacted) leads — the rep's remaining work queue.
-            const cnt=vLeads.filter(l=>l.assignedTo===r && !l.tags.includes('Contacted')).length;
+            const cnt=vLeads.filter(l=>l.assignedTo===r && !isContacted(l)).length;
             return(
               <div key={r} title={r} className={`nav-item ${tab==='rep-home'&&activeRep===r?'active':''}`} onClick={()=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}>
                 <div style={{position:'relative',flexShrink:0}}>
