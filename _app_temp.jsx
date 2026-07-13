@@ -5964,8 +5964,10 @@ function App() {
   // Admins see the whole pool; a user outside the trio sees it unfiltered.
   const POOL_REPS=['Pen','Chase','Mikka'];
   const poolShareRep = l => { const k=leadKey(l)||String(l.id||''); let h=0; for(let i=0;i<k.length;i++) h=((h<<5)-h+k.charCodeAt(i))|0; return POOL_REPS[Math.abs(h)%3]; };
-  // High Ticket pool is restricted to JC (admins keep oversight).
-  const canSeeHighTicket = isAdmin || !!(currentUser && currentUser.name==='JC');
+  // JC works ONLY the High Ticket pool; the three reps (+ everyone else) work
+  // MSN/VIRALS and never see High Ticket. Admins see every pool for oversight.
+  const isJC = !!(currentUser && currentUser.name==='JC');
+  const canSeeHighTicket = isAdmin || isJC;
   // Pool leads as the current user should see them: MSN/VIRALS sliced to the
   // trio member; other pools unchanged.
   const poolTabLeads = pid => {
@@ -5974,7 +5976,8 @@ function App() {
       return ls.filter(l=>poolShareRep(l)===currentUser.name);
     return ls;
   };
-  const visiblePools = POOLS.filter(p=>p.id!=='highticket' || canSeeHighTicket);
+  const poolVisibleToUser = pid => pid==='highticket' ? canSeeHighTicket : (isAdmin || !isJC);
+  const visiblePools = POOLS.filter(p=>poolVisibleToUser(p.id));
 
   const NAV_MAIN=[
     {id:'home',icon:'⊟',label:'Home'},
@@ -6021,8 +6024,9 @@ function App() {
     if(tab && tab.startsWith('pool-')){
       const pid=tab.slice(5);
       const pool=POOLS.find(p=>p.id===pid);
-      // High Ticket is JC-only — anyone else is bounced to Home.
-      if(pid==='highticket' && !canSeeHighTicket) return <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
+      // High Ticket is JC-only; JC in turn only works High Ticket. Bounce to Home
+      // anyone who reaches a pool they shouldn't see.
+      if(!poolVisibleToUser(pid)) return <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
       if(pool) return <LeadsTable leads={poolTabLeads(pid)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} showAssigned showOrigin showCampaign hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename={`pool_${pid}`} printTitle={`${pool.label} Pool`}/>;
     }
     const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);

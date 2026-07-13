@@ -13305,8 +13305,10 @@ function App() {
     for (let i = 0; i < k.length; i++) h = (h << 5) - h + k.charCodeAt(i) | 0;
     return POOL_REPS[Math.abs(h) % 3];
   };
-  // High Ticket pool is restricted to JC (admins keep oversight).
-  const canSeeHighTicket = isAdmin || !!(currentUser && currentUser.name === 'JC');
+  // JC works ONLY the High Ticket pool; the three reps (+ everyone else) work
+  // MSN/VIRALS and never see High Ticket. Admins see every pool for oversight.
+  const isJC = !!(currentUser && currentUser.name === 'JC');
+  const canSeeHighTicket = isAdmin || isJC;
   // Pool leads as the current user should see them: MSN/VIRALS sliced to the
   // trio member; other pools unchanged.
   const poolTabLeads = pid => {
@@ -13314,7 +13316,8 @@ function App() {
     if ((pid === 'msn' || pid === 'virals') && currentUser && POOL_REPS.includes(currentUser.name)) return ls.filter(l => poolShareRep(l) === currentUser.name);
     return ls;
   };
-  const visiblePools = POOLS.filter(p => p.id !== 'highticket' || canSeeHighTicket);
+  const poolVisibleToUser = pid => pid === 'highticket' ? canSeeHighTicket : isAdmin || !isJC;
+  const visiblePools = POOLS.filter(p => poolVisibleToUser(p.id));
   const NAV_MAIN = [{
     id: 'home',
     icon: '⊟',
@@ -13592,8 +13595,9 @@ function App() {
     if (tab && tab.startsWith('pool-')) {
       const pid = tab.slice(5);
       const pool = POOLS.find(p => p.id === pid);
-      // High Ticket is JC-only — anyone else is bounced to Home.
-      if (pid === 'highticket' && !canSeeHighTicket) return /*#__PURE__*/React.createElement(HomeView, {
+      // High Ticket is JC-only; JC in turn only works High Ticket. Bounce to Home
+      // anyone who reaches a pool they shouldn't see.
+      if (!poolVisibleToUser(pid)) return /*#__PURE__*/React.createElement(HomeView, {
         leads: vLeads,
         config: config,
         currentUser: currentUser
