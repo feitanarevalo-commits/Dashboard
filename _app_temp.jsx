@@ -5950,6 +5950,14 @@ function App() {
   // by a rep AND not yet sorted into a campaign. Giving it a campaign moves it
   // out into that campaign tab; removing the campaign returns it to the pool.
   const poolLeads = pid => vLeads.filter(l=>l.pool===pid && !l.assignedTo && (l.campaigns||[]).length===0);
+  // An UNCLAIMED Make-scraper candidate (routed to a pool, nobody has claimed it,
+  // no campaign yet) lives ONLY in its pool tab. It is hidden from the Scraper
+  // tool, Previously Scraped, and Lead Management so reps aren't confused about
+  // where leads come from — they must open the pool tab, claim a candidate under
+  // their name and qualify it, which pulls it into the normal flow. Anything left
+  // unclaimed just stays in the pool while the Make scraper keeps topping it up.
+  const isPoolCandidate = l => !!l.pool && !l.assignedTo && (l.campaigns||[]).length===0;
+  const nonPoolLeads = vLeads.filter(l=>!isPoolCandidate(l));
 
   const NAV_MAIN=[
     {id:'home',icon:'⊟',label:'Home'},
@@ -5979,10 +5987,10 @@ function App() {
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
     if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle} dark={darkMode}/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
-    if(tab==='scraper') return <ScraperView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
+    if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory}/>;
-    if(tab==='prev-scraped') return <LeadsTable leads={vLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
-    if(tab==='lead-mgmt') return <LeadMgmtView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} addToast={addToast} config={config}/>;
+    if(tab==='prev-scraped') return <LeadsTable leads={nonPoolLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
+    if(tab==='lead-mgmt') return <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} addToast={addToast} config={config}/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap} addToast={addToast}/>;
     if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;
