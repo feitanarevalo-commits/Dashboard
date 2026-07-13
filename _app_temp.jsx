@@ -5958,6 +5958,23 @@ function App() {
   // unclaimed just stays in the pool while the Make scraper keeps topping it up.
   const isPoolCandidate = l => !!l.pool && !l.assignedTo && (l.campaigns||[]).length===0;
   const nonPoolLeads = vLeads.filter(l=>!isPoolCandidate(l));
+  // MSN + VIRALS pool candidates are split evenly across the three sales reps so
+  // each works a distinct, non-overlapping slice. The split is deterministic by
+  // channel key (a lead always falls to the same rep, stable across reloads).
+  // Admins see the whole pool; a user outside the trio sees it unfiltered.
+  const POOL_REPS=['Pen','Chase','Mikka'];
+  const poolShareRep = l => { const k=leadKey(l)||String(l.id||''); let h=0; for(let i=0;i<k.length;i++) h=((h<<5)-h+k.charCodeAt(i))|0; return POOL_REPS[Math.abs(h)%3]; };
+  // High Ticket pool is restricted to JC (admins keep oversight).
+  const canSeeHighTicket = isAdmin || !!(currentUser && currentUser.name==='JC');
+  // Pool leads as the current user should see them: MSN/VIRALS sliced to the
+  // trio member; other pools unchanged.
+  const poolTabLeads = pid => {
+    const ls=poolLeads(pid);
+    if((pid==='msn'||pid==='virals') && currentUser && POOL_REPS.includes(currentUser.name))
+      return ls.filter(l=>poolShareRep(l)===currentUser.name);
+    return ls;
+  };
+  const visiblePools = POOLS.filter(p=>p.id!=='highticket' || canSeeHighTicket);
 
   const NAV_MAIN=[
     {id:'home',icon:'⊟',label:'Home'},
@@ -6004,7 +6021,9 @@ function App() {
     if(tab && tab.startsWith('pool-')){
       const pid=tab.slice(5);
       const pool=POOLS.find(p=>p.id===pid);
-      if(pool) return <LeadsTable leads={poolLeads(pid)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} showAssigned showOrigin showCampaign hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename={`pool_${pid}`} printTitle={`${pool.label} Pool`}/>;
+      // High Ticket is JC-only — anyone else is bounced to Home.
+      if(pid==='highticket' && !canSeeHighTicket) return <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
+      if(pool) return <LeadsTable leads={poolTabLeads(pid)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} showAssigned showOrigin showCampaign hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename={`pool_${pid}`} printTitle={`${pool.label} Pool`}/>;
     }
     const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);
     if(camp) return <CampaignView campaign={camp} campColor={camp.color} leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
@@ -6144,8 +6163,8 @@ function App() {
           {config.tabs.pools!==false && <>
             <div className="nav-divider"/>
             <div className="sidebar-section-label">Lead Pools</div>
-            {POOLS.map(p=>{
-              const cnt=poolLeads(p.id).length;
+            {visiblePools.map(p=>{
+              const cnt=poolTabLeads(p.id).length;
               return(
                 <div key={p.id} title={`${p.label} — unclaimed scraped candidates`} className={`nav-item ${tab==='pool-'+p.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab('pool-'+p.id);}}>
                   <span className="nav-icon" style={{color:p.color}}>{p.icon}</span>{p.label}
@@ -6220,7 +6239,7 @@ function App() {
       {showChangePw && <ChangePasswordModal user={currentUser} onClose={()=>setShowChangePw(false)} addToast={addToast}/>}
       {showAdminReset && isAdmin && <AdminResetModal admin={currentUser} config={config} onClose={()=>setShowAdminReset(false)} addToast={addToast}/>}
       {showProfile && <ProfileModal user={currentUser} config={config} onClose={()=>setShowProfile(false)} addToast={addToast}/>}
-      {showSearch && <GlobalSearch leads={leads} config={config} isAdmin={isAdmin}
+      {showSearch && <GlobalSearch leads={canSeeHighTicket?leads:leads.filter(l=>!(l.pool==='highticket'&&isPoolCandidate(l)))} config={config} isAdmin={isAdmin}
         onClose={()=>setShowSearch(false)}
         onNavigate={id=>{setShowRepSelect(false);setTab(id);}}
         onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}

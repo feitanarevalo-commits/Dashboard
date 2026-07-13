@@ -13294,6 +13294,27 @@ function App() {
   // unclaimed just stays in the pool while the Make scraper keeps topping it up.
   const isPoolCandidate = l => !!l.pool && !l.assignedTo && (l.campaigns || []).length === 0;
   const nonPoolLeads = vLeads.filter(l => !isPoolCandidate(l));
+  // MSN + VIRALS pool candidates are split evenly across the three sales reps so
+  // each works a distinct, non-overlapping slice. The split is deterministic by
+  // channel key (a lead always falls to the same rep, stable across reloads).
+  // Admins see the whole pool; a user outside the trio sees it unfiltered.
+  const POOL_REPS = ['Pen', 'Chase', 'Mikka'];
+  const poolShareRep = l => {
+    const k = leadKey(l) || String(l.id || '');
+    let h = 0;
+    for (let i = 0; i < k.length; i++) h = (h << 5) - h + k.charCodeAt(i) | 0;
+    return POOL_REPS[Math.abs(h) % 3];
+  };
+  // High Ticket pool is restricted to JC (admins keep oversight).
+  const canSeeHighTicket = isAdmin || !!(currentUser && currentUser.name === 'JC');
+  // Pool leads as the current user should see them: MSN/VIRALS sliced to the
+  // trio member; other pools unchanged.
+  const poolTabLeads = pid => {
+    const ls = poolLeads(pid);
+    if ((pid === 'msn' || pid === 'virals') && currentUser && POOL_REPS.includes(currentUser.name)) return ls.filter(l => poolShareRep(l) === currentUser.name);
+    return ls;
+  };
+  const visiblePools = POOLS.filter(p => p.id !== 'highticket' || canSeeHighTicket);
   const NAV_MAIN = [{
     id: 'home',
     icon: '⊟',
@@ -13571,8 +13592,14 @@ function App() {
     if (tab && tab.startsWith('pool-')) {
       const pid = tab.slice(5);
       const pool = POOLS.find(p => p.id === pid);
+      // High Ticket is JC-only — anyone else is bounced to Home.
+      if (pid === 'highticket' && !canSeeHighTicket) return /*#__PURE__*/React.createElement(HomeView, {
+        leads: vLeads,
+        config: config,
+        currentUser: currentUser
+      });
       if (pool) return /*#__PURE__*/React.createElement(LeadsTable, {
-        leads: poolLeads(pid),
+        leads: poolTabLeads(pid),
         onEdit: saveL,
         onDelete: delL,
         onBulkDelete: bulkDelete,
@@ -13911,8 +13938,8 @@ function App() {
     className: "nav-divider"
   }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-label"
-  }, "Lead Pools"), POOLS.map(p => {
-    const cnt = poolLeads(p.id).length;
+  }, "Lead Pools"), visiblePools.map(p => {
+    const cnt = poolTabLeads(p.id).length;
     return /*#__PURE__*/React.createElement("div", {
       key: p.id,
       title: `${p.label} — unclaimed scraped candidates`,
@@ -14031,7 +14058,7 @@ function App() {
     onClose: () => setShowProfile(false),
     addToast: addToast
   }), showSearch && /*#__PURE__*/React.createElement(GlobalSearch, {
-    leads: leads,
+    leads: canSeeHighTicket ? leads : leads.filter(l => !(l.pool === 'highticket' && isPoolCandidate(l))),
     config: config,
     isAdmin: isAdmin,
     onClose: () => setShowSearch(false),
