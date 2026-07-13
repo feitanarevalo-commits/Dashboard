@@ -2687,6 +2687,12 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const srCount=smartReachLeads.length;
   const contacted=myLeads.filter(l=>isContacted(l)).length;
   const ht=myLeads.filter(l=>l.tags.includes('HT')).length;
+  // Lead-gen credit: leads this person qualified and handed off to the sales team.
+  // qualifiedBy survives the reassignment, so a lead-gen's performance is measured
+  // by how many qualified leads they SOURCED, not by what's currently assigned to
+  // them (which the auto-assign empties out).
+  const handedOff=leads.filter(l=>l.qualifiedBy===rep);
+  const handedOffCount=handedOff.length;
   const feats=config.features||{};
 
   // Daily quota tracker: for the selected day, how many open (still Potential,
@@ -2711,7 +2717,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
           <div className="rep-view-title">{rep}'s Dashboard</div>
           <div className="rep-view-sub">
             {getProfile(rep).title ? <><b>{getProfile(rep).title}</b> · </> : null}
-            {total} lead{total!==1?'s':''} · {active} active
+            {total} lead{total!==1?'s':''} · {active} active{(isLeadgen||handedOffCount>0)?` · ${handedOffCount} qualified & handed off`:''}
           </div>
         </div>
         <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',justifyContent:'flex-end'}}>
@@ -2755,6 +2761,9 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
         <div className="stat-card" style={{flex:1,minWidth:138}} title="Fresh Potential leads not yet on Close — the import queue"><div className="stat-label">Fresh (to import)</div><div className="stat-value">{fresh}</div></div>
         <div className="stat-card" style={{flex:1,minWidth:138}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
         <div className="stat-card orange" style={{flex:1,minWidth:138}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
+        {(isLeadgen||handedOffCount>0) && <div className="stat-card purple" style={{flex:1,minWidth:138}}
+          title={`Leads ${rep} qualified and handed to the sales team — credited to ${rep} even after they were reassigned.${handedOffCount?'  → '+['Rein','Mikka','Chase','Pen'].map(r=>`${r} ${handedOff.filter(l=>l.assignedTo===r).length}`).join(' · '):''}`}>
+          <div className="stat-label">Qualified &amp; Handed Off</div><div className="stat-value">{handedOffCount}</div></div>}
       </div>
       {/* Potential cards — full-width row so they align in columns with the top stats */}
       <div className="rep-quota-row no-print" style={{display:'flex',gap:10,padding:'0 24px 12px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>
@@ -5411,7 +5420,10 @@ function App() {
     // Fresh and imported each round-robin independently so both are balanced per rep.
     let fi=0; fresh.forEach(l=>{ const rep=REST[fi++%REST.length]; map[l.id]=rep; tally[rep]++; });
     let ii=0; imported.forEach(l=>{ const rep=REST[ii++%REST.length]; map[l.id]=rep; tally[rep]++; });
-    setLeads(ls=>ls.map(l=> map[l.id] ? {...l,assignedTo:map[l.id],dateAssigned:l.dateAssigned||today} : l));
+    // Credit JC (the lead-gen who sourced/qualified it) via qualifiedBy — this
+    // survives the reassignment so his lead-gen KPI stays accurate even though the
+    // lead now belongs to a sales rep. Assignment date resets to the handoff day.
+    setLeads(ls=>ls.map(l=> map[l.id] ? {...l,assignedTo:map[l.id],dateAssigned:today,qualifiedBy:l.qualifiedBy||l.assignedTo,handedOffAt:today} : l));
     addToast(`Distributed JC's Potential leads → Rein ${tally.Rein} (high-ticket) · Mikka ${tally.Mikka} · Chase ${tally.Chase} · Pen ${tally.Pen}`,'success');
     logH('⚡',`Auto-assigned ${targets.length} JC Potential leads — high-ticket→Rein, rest→Mikka/Chase/Pen`);
   }
@@ -5672,7 +5684,8 @@ function App() {
       thumbnail: x.thumbnail || '', channelId: x.channelId || '',
       tags, campaigns,
       assignedTo: x.assignedTo || getCf('rep') || meta.rep || null, dateAssigned: x.dateAssigned || getCf('assigned') || meta.assigned || null,
-      lastContactDate: x.lastContactDate || null, contactDateManual: x.contactDateManual || false, channels: Array.isArray(x.channels)?x.channels:[],
+      lastContactDate: x.lastContactDate || null, contactDateManual: x.contactDateManual || false,
+      qualifiedBy: x.qualifiedBy || null, handedOffAt: x.handedOffAt || null, channels: Array.isArray(x.channels)?x.channels:[],
       links: Array.isArray(x.links)?x.links:[],
       addedAt: x.addedAt || null,
       agency: x.agency || null,
