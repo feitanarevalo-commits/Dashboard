@@ -6769,15 +6769,19 @@ function ContactedView({
         color: 'var(--text-light)',
         fontSize: 11
       }
-    }, "—")), /*#__PURE__*/React.createElement("td", null, l.campaigns.map(c => /*#__PURE__*/React.createElement("span", {
+    }, "—")), /*#__PURE__*/React.createElement("td", null, l.campaigns.length ? l.campaigns.map(c => /*#__PURE__*/React.createElement("span", {
       key: c,
-      className: "tag-badge",
       style: {
-        background: campColorMap[c] || 'var(--accent)',
-        color: '#fff',
-        marginRight: 4
+        color: campColorMap[c] || 'var(--accent)',
+        fontWeight: 700,
+        fontSize: 12,
+        marginRight: 8
       }
-    }, c))), /*#__PURE__*/React.createElement("td", null, l.assignedTo || /*#__PURE__*/React.createElement("span", {
+    }, c)) : /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--text-dim)'
+      }
+    }, "—")), /*#__PURE__*/React.createElement("td", null, l.assignedTo || /*#__PURE__*/React.createElement("span", {
       style: {
         color: 'var(--text-dim)'
       }

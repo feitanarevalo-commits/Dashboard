@@ -2976,7 +2976,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
                 <td style={{maxWidth:180}}>{email
                   ? <a href={`mailto:${email}`} style={{fontSize:11.5,color:'var(--accent)',textDecoration:'none',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'block'}} title={email}>{email}</a>
                   : <span style={{color:'var(--text-light)',fontSize:11}}>—</span>}</td>
-                <td>{l.campaigns.map(c=><span key={c} className="tag-badge" style={{background:campColorMap[c]||'var(--accent)',color:'#fff',marginRight:4}}>{c}</span>)}</td>
+                <td>{l.campaigns.length?l.campaigns.map(c=><span key={c} style={{color:campColorMap[c]||'var(--accent)',fontWeight:700,fontSize:12,marginRight:8}}>{c}</span>):<span style={{color:'var(--text-dim)'}}>—</span>}</td>
                 <td>{l.assignedTo||<span style={{color:'var(--text-dim)'}}>—</span>}</td>
                 <td><EditableContactDate lead={l} effective={e} onCommit={v=>setContactDate(l,v)}/></td>
                 <td>{r?<span style={{fontWeight:600,color:r.diff>0?'var(--text-dim)':'var(--text)'}}>{r.diff} day{r.diff!==1?'s':''}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
