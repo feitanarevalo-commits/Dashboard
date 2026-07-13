@@ -117,6 +117,36 @@ function canonTag(raw) {
   };
   return MAP[k] || s;
 }
+// Map an imported campaign value onto one of the dashboard's CONFIGURED campaigns,
+// so a sheet that says "Virals" (or "viral", "vvv") resolves to the real campaign
+// id "VIRALS (VVV)" instead of adding a second stray tag. Unknown values are kept
+// verbatim. Matches by: exact (normalized) id/label, then id-prefix either way,
+// then the viral/vvv brand family, then substring.
+function canonCampaign(raw, campaigns) {
+  const v = String(raw || '').trim();
+  if (!v) return '';
+  const list = Array.isArray(campaigns) ? campaigns : [];
+  const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const nv = norm(v);
+  if (!nv) return v;
+  const exact = list.find(c => norm(c.id) === nv || norm(c.label) === nv);
+  if (exact) return exact.id;
+  const pre = list.find(c => {
+    const n = norm(c.id);
+    return n && (n.startsWith(nv) || nv.startsWith(n));
+  });
+  if (pre) return pre.id;
+  if (/viral|vvv/.test(nv)) {
+    const vir = list.find(c => /viral|vvv/.test(norm(c.id)));
+    if (vir) return vir.id;
+  }
+  const inc = list.find(c => {
+    const n = norm(c.id);
+    return n && (n.includes(nv) || nv.includes(n));
+  });
+  if (inc) return inc.id;
+  return v;
+}
 
 // ─── LEAD ORIGIN: Fresh vs Imported (re: Close.io) ─────────
 // Fresh   = NOT yet on Close — still needs to be imported. The import queue.
@@ -12790,6 +12820,12 @@ function App() {
     } catch (e) {}
   }
   function importLeads(newLeads) {
+    // Canonicalize imported campaign values to the configured campaign ids (e.g.
+    // "Virals" -> "VIRALS (VVV)") and de-dupe, so leads don't end up double-tagged.
+    newLeads = (newLeads || []).map(l => ({
+      ...l,
+      campaigns: [...new Set((l.campaigns || []).map(c => canonCampaign(c, config.campaigns || [])).filter(Boolean))]
+    }));
     // Dedupe per (channel + rep): skip a lead only if the SAME rep already has
     // that channel. The same channel under a DIFFERENT rep is kept on purpose,
     // so the Duplicates tab can flag that two reps are working the same lead.
