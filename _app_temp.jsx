@@ -3979,9 +3979,9 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
         <button className={`btn btn-sm ${repView==='unassigned'?'btn-danger':'btn-outline'}`} onClick={()=>setRepView(v=>v==='unassigned'?'':'unassigned')} style={repView==='unassigned'?{}:{borderColor:'var(--warn)',color:'var(--warn)'}}>
           Unassigned ({unassigned.length})
         </button>
-        {onAutoAssignJC && (()=>{ const jcN=leads.filter(l=>l.assignedTo==='JC').length; return (
+        {onAutoAssignJC && (()=>{ const jcN=leads.filter(l=>l.assignedTo==='JC' && (l.tags||[]).includes('Potential')).length; return (
           <button className="btn btn-sm btn-primary" style={{marginLeft:8}} disabled={!jcN}
-            title="Distribute JC's leads to the sales team — high-ticket leads → Rein, everything else split evenly across Mikka / Chase / Pen"
+            title="Distribute JC's qualified (Potential) leads — high-ticket → Rein, everything else split evenly (fresh & imported balanced) across Mikka / Chase / Pen"
             onClick={onAutoAssignJC}>⚡ Auto-assign JC's leads{jcN?` (${jcN})`:''}</button>
         ); })()}
         {onClearAll && leads.length>0 && <button className="btn btn-sm" style={{marginLeft:'auto',background:'#DE350B',color:'#fff',borderColor:'#DE350B'}}
@@ -5390,22 +5390,30 @@ function App() {
     addToast(`♻ Restored ${arr.length} lead(s) from Archive`,'success');
   }
   function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
-  // Distribute lead-gen JC's leads to the sales team. RULE: high-ticket leads all
-  // go to Rein; every other lead is split EVENLY (round-robin) across Mikka,
-  // Chase and Pen. Acts on everything currently assigned to JC.
+  // Distribute lead-gen JC's QUALIFIED (Potential-tagged) leads to the sales team.
+  // RULE: high-ticket Potentials all go to Rein; every other Potential is split
+  // EVENLY across Mikka, Chase and Pen — with fresh and imported balanced
+  // SEPARATELY so each rep gets an even mix of both.
+  function jcPotentialLeads(){ return leads.filter(l=>l.assignedTo==='JC' && (l.tags||[]).includes('Potential')); }
   function autoAssignJC(){
     const REST=['Mikka','Chase','Pen'];
     const isHT = l => l.pool==='highticket' || (l.tags||[]).includes('HT') || parseFollowers(l.followers)>=500000;
-    const targets = leads.filter(l=>l.assignedTo==='JC');
-    if(!targets.length){ addToast('No leads currently assigned to JC to distribute','info'); return; }
-    const htN=targets.filter(isHT).length, restN=targets.length-htN;
-    if(!window.confirm(`Distribute ${targets.length} of JC's lead(s)?\n\n• ${htN} high-ticket → Rein\n• ${restN} other lead(s) → split evenly across Mikka / Chase / Pen`)) return;
+    const targets = jcPotentialLeads();
+    if(!targets.length){ addToast("No qualified (Potential) leads under JC to distribute",'info'); return; }
+    const ht = targets.filter(isHT);
+    const nonHT = targets.filter(l=>!isHT(l));
+    const fresh = nonHT.filter(l=>leadOrigin(l)==='Fresh');
+    const imported = nonHT.filter(l=>leadOrigin(l)!=='Fresh');
+    if(!window.confirm(`Distribute ${targets.length} of JC's qualified (Potential) lead(s)?\n\n• ${ht.length} high-ticket → Rein\n• ${nonHT.length} other (${fresh.length} fresh + ${imported.length} imported) → split evenly across Mikka / Chase / Pen`)) return;
     const today=new Date().toISOString().split('T')[0];
-    let ri=0; const map={}; const tally={Rein:0,Mikka:0,Chase:0,Pen:0};
-    targets.forEach(l=>{ const rep=isHT(l)?'Rein':REST[ri++%REST.length]; map[l.id]=rep; tally[rep]=(tally[rep]||0)+1; });
+    const map={}; const tally={Rein:0,Mikka:0,Chase:0,Pen:0};
+    ht.forEach(l=>{ map[l.id]='Rein'; tally.Rein++; });
+    // Fresh and imported each round-robin independently so both are balanced per rep.
+    let fi=0; fresh.forEach(l=>{ const rep=REST[fi++%REST.length]; map[l.id]=rep; tally[rep]++; });
+    let ii=0; imported.forEach(l=>{ const rep=REST[ii++%REST.length]; map[l.id]=rep; tally[rep]++; });
     setLeads(ls=>ls.map(l=> map[l.id] ? {...l,assignedTo:map[l.id],dateAssigned:l.dateAssigned||today} : l));
-    addToast(`Distributed JC's leads → Rein ${tally.Rein} (high-ticket) · Mikka ${tally.Mikka} · Chase ${tally.Chase} · Pen ${tally.Pen}`,'success');
-    logH('⚡',`Auto-assigned ${targets.length} JC leads — high-ticket→Rein, rest→Mikka/Chase/Pen`);
+    addToast(`Distributed JC's Potential leads → Rein ${tally.Rein} (high-ticket) · Mikka ${tally.Mikka} · Chase ${tally.Chase} · Pen ${tally.Pen}`,'success');
+    logH('⚡',`Auto-assigned ${targets.length} JC Potential leads — high-ticket→Rein, rest→Mikka/Chase/Pen`);
   }
   function bulkDelete(ids){
     if(!ids||!ids.length) return;
