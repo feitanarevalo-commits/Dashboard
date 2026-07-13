@@ -3953,7 +3953,7 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
 }
 
 // ─── LEAD MGMT VIEW ───────────────────────────────────────
-function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onClearAll,addToast,config}) {
+function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onClearAll,onAutoAssignJC,addToast,config}) {
   const [repView,setRepView]=useState('');
   const feats=config.features||{};
   const campColorMap={};
@@ -3979,6 +3979,11 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
         <button className={`btn btn-sm ${repView==='unassigned'?'btn-danger':'btn-outline'}`} onClick={()=>setRepView(v=>v==='unassigned'?'':'unassigned')} style={repView==='unassigned'?{}:{borderColor:'var(--warn)',color:'var(--warn)'}}>
           Unassigned ({unassigned.length})
         </button>
+        {onAutoAssignJC && (()=>{ const jcN=leads.filter(l=>l.assignedTo==='JC').length; return (
+          <button className="btn btn-sm btn-primary" style={{marginLeft:8}} disabled={!jcN}
+            title="Distribute JC's leads to the sales team — high-ticket leads → Rein, everything else split evenly across Mikka / Chase / Pen"
+            onClick={onAutoAssignJC}>⚡ Auto-assign JC's leads{jcN?` (${jcN})`:''}</button>
+        ); })()}
         {onClearAll && leads.length>0 && <button className="btn btn-sm" style={{marginLeft:'auto',background:'#DE350B',color:'#fff',borderColor:'#DE350B'}}
           onClick={()=>{ const ans=window.prompt(`⚠ DANGER: this permanently deletes ALL ${leads.length} lead(s) from the shared database — for EVERY rep — and cannot be undone.\n\nTo confirm, type DELETE (in capitals) below:`); if(ans==null) return; if(ans.trim()==='DELETE') onClearAll(); else addToast('Clear All cancelled — you must type DELETE exactly to confirm','info'); }}
           title="Permanently delete every lead">🗑 Clear ALL leads</button>}
@@ -5385,6 +5390,23 @@ function App() {
     addToast(`♻ Restored ${arr.length} lead(s) from Archive`,'success');
   }
   function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
+  // Distribute lead-gen JC's leads to the sales team. RULE: high-ticket leads all
+  // go to Rein; every other lead is split EVENLY (round-robin) across Mikka,
+  // Chase and Pen. Acts on everything currently assigned to JC.
+  function autoAssignJC(){
+    const REST=['Mikka','Chase','Pen'];
+    const isHT = l => l.pool==='highticket' || (l.tags||[]).includes('HT') || parseFollowers(l.followers)>=500000;
+    const targets = leads.filter(l=>l.assignedTo==='JC');
+    if(!targets.length){ addToast('No leads currently assigned to JC to distribute','info'); return; }
+    const htN=targets.filter(isHT).length, restN=targets.length-htN;
+    if(!window.confirm(`Distribute ${targets.length} of JC's lead(s)?\n\n• ${htN} high-ticket → Rein\n• ${restN} other lead(s) → split evenly across Mikka / Chase / Pen`)) return;
+    const today=new Date().toISOString().split('T')[0];
+    let ri=0; const map={}; const tally={Rein:0,Mikka:0,Chase:0,Pen:0};
+    targets.forEach(l=>{ const rep=isHT(l)?'Rein':REST[ri++%REST.length]; map[l.id]=rep; tally[rep]=(tally[rep]||0)+1; });
+    setLeads(ls=>ls.map(l=> map[l.id] ? {...l,assignedTo:map[l.id],dateAssigned:l.dateAssigned||today} : l));
+    addToast(`Distributed JC's leads → Rein ${tally.Rein} (high-ticket) · Mikka ${tally.Mikka} · Chase ${tally.Chase} · Pen ${tally.Pen}`,'success');
+    logH('⚡',`Auto-assigned ${targets.length} JC leads — high-ticket→Rein, rest→Mikka/Chase/Pen`);
+  }
   function bulkDelete(ids){
     if(!ids||!ids.length) return;
     // Non-admins can only bulk-delete leads they own; skip the rest.
@@ -6048,7 +6070,7 @@ function App() {
     if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={nonPoolLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
-    if(tab==='lead-mgmt') return <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} addToast={addToast} config={config}/>;
+    if(tab==='lead-mgmt') return <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} onAutoAssignJC={(isAdmin||(currentUser&&currentUser.name==='JC'))?autoAssignJC:null} addToast={addToast} config={config}/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap} addToast={addToast}/>;
     if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;
