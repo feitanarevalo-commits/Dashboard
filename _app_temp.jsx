@@ -4189,10 +4189,16 @@ function ErrorLogView({addToast}) {
 function HistoryView({history,addToast,feats,onRestore}) {
   return (
     <div className="history-list">
+      {(!history || history.length===0) && (
+        <div style={{padding:'40px 24px',textAlign:'center',color:'var(--text-dim)'}}>
+          <div style={{fontSize:15,fontWeight:600,color:'var(--text)'}}>No activity recorded yet</div>
+          <div style={{fontSize:13,marginTop:6}}>Scraping, imports, edits, assignments, sends and deletes across the team will show up here.</div>
+        </div>
+      )}
       {history.map(e=>(
         <div className="history-item" key={e.id}>
           <div className="history-icon-wrap">{e.icon}</div>
-          <div className="history-text">{e.text}</div>
+          <div className="history-text">{e.text}{e.actor?<span style={{color:'var(--text-dim)',fontWeight:600}}> · {e.actor}</span>:''}</div>
           <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,flexShrink:0}}>
             <div className="history-time">{e.time}</div>
             {e.restorable && e.restore && <button className="btn btn-ghost btn-xs" title={`Re-add the deleted lead(s)`} onClick={()=>onRestore&&onRestore(e)}>↩ Restore</button>}
@@ -5387,7 +5393,13 @@ function App() {
     if(!isAdmin && !ownsLead(l)){ addToast('You can only delete your own leads','error'); return; }
     setLeads(ls=>ls.filter(x=>x.id!==id));deleteLeadFromSupabase(id);logH('🗑',`Lead "${l?.channelName}" deleted`,l?{type:'undelete',leads:[l]}:null);addToast(`"${l?.channelName}" deleted`,'error');
   }
-  function logH(icon,text,restore){setHistory(h=>[{id:Date.now()+'_'+Math.floor(Math.random()*1e6),icon,text,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:!!restore,restore:restore||null},...h]);}
+  function logH(icon,text,restore){
+    const actor=(currentUser&&currentUser.name)||'';
+    setHistory(h=>[{id:Date.now()+'_'+Math.floor(Math.random()*1e6),icon,text,actor,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:!!restore,restore:restore||null},...h]);
+    // Persist to the shared activity log (team-wide, survives reloads; restore
+    // payloads stay session-only). Fire-and-forget so it never blocks the UI.
+    try{ if(SB) SB.from('activity_log').insert({actor,icon,text}).then(()=>{},()=>{}); }catch(e){}
+  }
   // Undo a delete recorded in history: re-add the removed lead(s) to the pool and
   // re-persist them to Supabase (dedup by id). Only "undelete" entries carry a
   // restore payload, so only those show a Restore button.
@@ -5887,6 +5899,10 @@ function App() {
     });
     // Load the archived channel keys so scraper/import dedup stays archive-aware.
     loadArchivedKeysFromSupabase().then(keys=>{ if(Array.isArray(keys)) archivedKeysRef.current=new Set(keys); });
+    // Load the shared, persisted activity history (team-wide) so the History tab
+    // shows real activity instead of an empty in-memory list.
+    try{ if(SB) SB.from('activity_log').select('id,created_at,actor,icon,text').order('created_at',{ascending:false}).limit(200)
+      .then(({data})=>{ if(Array.isArray(data)&&data.length) setHistory(data.map(r=>({id:'db_'+r.id, icon:r.icon||'•', text:r.text||'', actor:r.actor||'', time:new Date(r.created_at).toLocaleString('en-CA',{hour12:false}).replace(',',''), restorable:false}))); }, ()=>{}); }catch(e){}
   },[]);
 
   // Persist lead changes to Supabase (debounced, upsert-only — deletes go through

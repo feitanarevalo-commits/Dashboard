@@ -9372,14 +9372,36 @@ function HistoryView({
 }) {
   return /*#__PURE__*/React.createElement("div", {
     className: "history-list"
-  }, history.map(e => /*#__PURE__*/React.createElement("div", {
+  }, (!history || history.length === 0) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '40px 24px',
+      textAlign: 'center',
+      color: 'var(--text-dim)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 600,
+      color: 'var(--text)'
+    }
+  }, "No activity recorded yet"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      marginTop: 6
+    }
+  }, "Scraping, imports, edits, assignments, sends and deletes across the team will show up here.")), history.map(e => /*#__PURE__*/React.createElement("div", {
     className: "history-item",
     key: e.id
   }, /*#__PURE__*/React.createElement("div", {
     className: "history-icon-wrap"
   }, e.icon), /*#__PURE__*/React.createElement("div", {
     className: "history-text"
-  }, e.text), /*#__PURE__*/React.createElement("div", {
+  }, e.text, e.actor ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-dim)',
+      fontWeight: 600
+    }
+  }, " · ", e.actor) : ''), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -12369,16 +12391,27 @@ function App() {
     addToast(`"${l?.channelName}" deleted`, 'error');
   }
   function logH(icon, text, restore) {
+    const actor = currentUser && currentUser.name || '';
     setHistory(h => [{
       id: Date.now() + '_' + Math.floor(Math.random() * 1e6),
       icon,
       text,
+      actor,
       time: new Date().toLocaleString('en-CA', {
         hour12: false
       }).replace(',', ''),
       restorable: !!restore,
       restore: restore || null
     }, ...h]);
+    // Persist to the shared activity log (team-wide, survives reloads; restore
+    // payloads stay session-only). Fire-and-forget so it never blocks the UI.
+    try {
+      if (SB) SB.from('activity_log').insert({
+        actor,
+        icon,
+        text
+      }).then(() => {}, () => {});
+    } catch (e) {}
   }
   // Undo a delete recorded in history: re-add the removed lead(s) to the pool and
   // re-persist them to Supabase (dedup by id). Only "undelete" entries carry a
@@ -13269,6 +13302,26 @@ function App() {
     loadArchivedKeysFromSupabase().then(keys => {
       if (Array.isArray(keys)) archivedKeysRef.current = new Set(keys);
     });
+    // Load the shared, persisted activity history (team-wide) so the History tab
+    // shows real activity instead of an empty in-memory list.
+    try {
+      if (SB) SB.from('activity_log').select('id,created_at,actor,icon,text').order('created_at', {
+        ascending: false
+      }).limit(200).then(({
+        data
+      }) => {
+        if (Array.isArray(data) && data.length) setHistory(data.map(r => ({
+          id: 'db_' + r.id,
+          icon: r.icon || '•',
+          text: r.text || '',
+          actor: r.actor || '',
+          time: new Date(r.created_at).toLocaleString('en-CA', {
+            hour12: false
+          }).replace(',', ''),
+          restorable: false
+        })));
+      }, () => {});
+    } catch (e) {}
   }, []);
 
   // Persist lead changes to Supabase (debounced, upsert-only — deletes go through
