@@ -2811,6 +2811,31 @@ function RepSelectScreen({leads,config,activeRep,onSelect}) {
 }
 
 // ─── CONTACTED VIEW ──────────────────────────────────────
+// Editable "Last Contacted" cell — click the date to correct it (e.g. to match
+// what Close shows) so the recycle clock counts from the right day.
+function EditableContactDate({lead,effective,onCommit}){
+  const cur = effective ? effective.date.toISOString().split('T')[0] : '';
+  const [editing,setEditing]=useState(false);
+  const [val,setVal]=useState(cur);
+  useEffect(()=>{ if(!editing) setVal(cur); },[cur,editing]);
+  const todayStr=new Date().toISOString().split('T')[0];
+  function commit(){ setEditing(false); const v=(val||'').trim(); if(v && v!==cur) onCommit(v); }
+  if(editing){
+    return <input type="date" value={val} max={todayStr} autoFocus
+      onChange={e=>setVal(e.target.value)} onBlur={commit}
+      onKeyDown={e=>{ if(e.key==='Enter') commit(); if(e.key==='Escape'){ setVal(cur); setEditing(false); } }}
+      style={{fontSize:12,padding:'2px 4px',border:'1px solid var(--accent)',borderRadius:4,background:'var(--card)',color:'var(--text)'}}/>;
+  }
+  return (
+    <span onClick={()=>setEditing(true)} title="Click to correct the last-contacted date"
+      style={{cursor:'pointer',borderBottom:'1px dashed var(--text-light)',paddingBottom:1,whiteSpace:'nowrap'}}>
+      {effective ? effective.date.toISOString().split('T')[0] : <span style={{color:'var(--accent)'}}>+ set date</span>}
+      {effective && effective.manual ? <span style={{fontSize:10,color:'var(--warn)',marginLeft:5}} title="Manually corrected">· manual</span>
+        : effective && effective.fromClose ? <span style={{fontSize:10,color:'var(--accent)',marginLeft:5}} title="Most recent email/call from Close">· Close</span> : null}
+      <span style={{fontSize:10,color:'var(--text-light)',marginLeft:4}}>✎</span>
+    </span>
+  );
+}
 function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,campColorMap,addToast}) {
   const contacted=leads.filter(l=>l.tags.includes('Contacted'));
   const today=new Date();
@@ -2828,6 +2853,9 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
   // Effective "last contact" = the most recent of Close's last touch and the
   // manually-logged date. Returns {date, fromClose}.
   function effectiveContact(l){
+    // A manually-corrected date is AUTHORITATIVE — reps set it when Close and the
+    // dashboard disagree, so it overrides the auto-pulled Close date entirely.
+    if(l.contactDateManual && l.lastContactDate){ return {date:new Date(l.lastContactDate), fromClose:false, manual:true}; }
     let best=null, fromClose=false;
     const cc=l.closeLeadId&&closeContacts[l.closeLeadId];
     if(cc){ best=new Date(cc); fromClose=true; }
@@ -2844,7 +2872,10 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
     return{threshold,diff,left,color:left<=nd?'var(--danger)':left<=nw?'var(--warn)':'var(--success)'};
   }
   // Manual reset: stamp today's contact date (works for any lead, incl. ones not in Close).
-  function logContact(l){ if(onSave){ onSave({...l,lastContactDate:today.toISOString().split('T')[0]}); if(addToast) addToast(`Logged a contact for "${l.channelName}" — recycle clock reset`,'success'); } }
+  function logContact(l){ if(onSave){ onSave({...l,lastContactDate:today.toISOString().split('T')[0],contactDateManual:false}); if(addToast) addToast(`Logged a contact for "${l.channelName}" — recycle clock reset`,'success'); } }
+  // Rep manually corrects the last-contacted date (e.g. to match Close). Marks it
+  // as a manual override so it drives the recycle clock instead of the Close date.
+  function setContactDate(l,dateStr){ if(onSave && dateStr){ onSave({...l,lastContactDate:dateStr,contactDateManual:true}); if(addToast) addToast(`Last-contacted date set to ${dateStr} for "${l.channelName}"`,'success'); } }
   // Deep-link to the lead's page in Close (only leads with a resolved Close id).
   const closeUrl=id=>id?`https://app.close.com/lead/${id}/`:null;
 
@@ -2940,7 +2971,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
                   : <span style={{color:'var(--text-light)',fontSize:11}}>—</span>}</td>
                 <td>{l.campaigns.map(c=><span key={c} className="tag-badge" style={{background:campColorMap[c]||'var(--accent)',color:'#fff',marginRight:4}}>{c}</span>)}</td>
                 <td>{l.assignedTo||<span style={{color:'var(--text-dim)'}}>—</span>}</td>
-                <td>{e?<span>{e.date.toISOString().split('T')[0]}{e.fromClose?<span style={{fontSize:10,color:'var(--accent)',marginLeft:5}} title="Most recent email/call from Close">· Close</span>:null}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
+                <td><EditableContactDate lead={l} effective={e} onCommit={v=>setContactDate(l,v)}/></td>
                 <td>{r?<span style={{fontWeight:600,color:r.diff>0?'var(--text-dim)':'var(--text)'}}>{r.diff} day{r.diff!==1?'s':''}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
                 <td>{r?<span style={{fontWeight:700,color:r.color}}>{r.left<=0?'⚠ Ready to Recycle':`${r.left}d`}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>
                 <td>
@@ -5604,7 +5635,7 @@ function App() {
       thumbnail: x.thumbnail || '', channelId: x.channelId || '',
       tags, campaigns,
       assignedTo: x.assignedTo || getCf('rep') || meta.rep || null, dateAssigned: x.dateAssigned || getCf('assigned') || meta.assigned || null,
-      lastContactDate: x.lastContactDate || null, channels: Array.isArray(x.channels)?x.channels:[],
+      lastContactDate: x.lastContactDate || null, contactDateManual: x.contactDateManual || false, channels: Array.isArray(x.channels)?x.channels:[],
       links: Array.isArray(x.links)?x.links:[],
       addedAt: x.addedAt || null,
       agency: x.agency || null,

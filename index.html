@@ -6320,6 +6320,85 @@ function RepSelectScreen({
 }
 
 // ─── CONTACTED VIEW ──────────────────────────────────────
+// Editable "Last Contacted" cell — click the date to correct it (e.g. to match
+// what Close shows) so the recycle clock counts from the right day.
+function EditableContactDate({
+  lead,
+  effective,
+  onCommit
+}) {
+  const cur = effective ? effective.date.toISOString().split('T')[0] : '';
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(cur);
+  useEffect(() => {
+    if (!editing) setVal(cur);
+  }, [cur, editing]);
+  const todayStr = new Date().toISOString().split('T')[0];
+  function commit() {
+    setEditing(false);
+    const v = (val || '').trim();
+    if (v && v !== cur) onCommit(v);
+  }
+  if (editing) {
+    return /*#__PURE__*/React.createElement("input", {
+      type: "date",
+      value: val,
+      max: todayStr,
+      autoFocus: true,
+      onChange: e => setVal(e.target.value),
+      onBlur: commit,
+      onKeyDown: e => {
+        if (e.key === 'Enter') commit();
+        if (e.key === 'Escape') {
+          setVal(cur);
+          setEditing(false);
+        }
+      },
+      style: {
+        fontSize: 12,
+        padding: '2px 4px',
+        border: '1px solid var(--accent)',
+        borderRadius: 4,
+        background: 'var(--card)',
+        color: 'var(--text)'
+      }
+    });
+  }
+  return /*#__PURE__*/React.createElement("span", {
+    onClick: () => setEditing(true),
+    title: "Click to correct the last-contacted date",
+    style: {
+      cursor: 'pointer',
+      borderBottom: '1px dashed var(--text-light)',
+      paddingBottom: 1,
+      whiteSpace: 'nowrap'
+    }
+  }, effective ? effective.date.toISOString().split('T')[0] : /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--accent)'
+    }
+  }, "+ set date"), effective && effective.manual ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: 'var(--warn)',
+      marginLeft: 5
+    },
+    title: "Manually corrected"
+  }, "· manual") : effective && effective.fromClose ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: 'var(--accent)',
+      marginLeft: 5
+    },
+    title: "Most recent email/call from Close"
+  }, "· Close") : null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: 'var(--text-light)',
+      marginLeft: 4
+    }
+  }, "✎"));
+}
 function ContactedView({
   leads,
   onSave,
@@ -6356,6 +6435,15 @@ function ContactedView({
   // Effective "last contact" = the most recent of Close's last touch and the
   // manually-logged date. Returns {date, fromClose}.
   function effectiveContact(l) {
+    // A manually-corrected date is AUTHORITATIVE — reps set it when Close and the
+    // dashboard disagree, so it overrides the auto-pulled Close date entirely.
+    if (l.contactDateManual && l.lastContactDate) {
+      return {
+        date: new Date(l.lastContactDate),
+        fromClose: false,
+        manual: true
+      };
+    }
     let best = null,
       fromClose = false;
     const cc = l.closeLeadId && closeContacts[l.closeLeadId];
@@ -6395,9 +6483,22 @@ function ContactedView({
     if (onSave) {
       onSave({
         ...l,
-        lastContactDate: today.toISOString().split('T')[0]
+        lastContactDate: today.toISOString().split('T')[0],
+        contactDateManual: false
       });
       if (addToast) addToast(`Logged a contact for "${l.channelName}" — recycle clock reset`, 'success');
+    }
+  }
+  // Rep manually corrects the last-contacted date (e.g. to match Close). Marks it
+  // as a manual override so it drives the recycle clock instead of the Close date.
+  function setContactDate(l, dateStr) {
+    if (onSave && dateStr) {
+      onSave({
+        ...l,
+        lastContactDate: dateStr,
+        contactDateManual: true
+      });
+      if (addToast) addToast(`Last-contacted date set to ${dateStr} for "${l.channelName}"`, 'success');
     }
   }
   // Deep-link to the lead's page in Close (only leads with a resolved Close id).
@@ -6668,18 +6769,11 @@ function ContactedView({
       style: {
         color: 'var(--text-dim)'
       }
-    }, "—")), /*#__PURE__*/React.createElement("td", null, e ? /*#__PURE__*/React.createElement("span", null, e.date.toISOString().split('T')[0], e.fromClose ? /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 10,
-        color: 'var(--accent)',
-        marginLeft: 5
-      },
-      title: "Most recent email/call from Close"
-    }, "· Close") : null) : /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: 'var(--text-dim)'
-      }
-    }, "—")), /*#__PURE__*/React.createElement("td", null, r ? /*#__PURE__*/React.createElement("span", {
+    }, "—")), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(EditableContactDate, {
+      lead: l,
+      effective: e,
+      onCommit: v => setContactDate(l, v)
+    })), /*#__PURE__*/React.createElement("td", null, r ? /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 600,
         color: r.diff > 0 ? 'var(--text-dim)' : 'var(--text)'
@@ -12728,6 +12822,7 @@ function App() {
       assignedTo: x.assignedTo || getCf('rep') || meta.rep || null,
       dateAssigned: x.dateAssigned || getCf('assigned') || meta.assigned || null,
       lastContactDate: x.lastContactDate || null,
+      contactDateManual: x.contactDateManual || false,
       channels: Array.isArray(x.channels) ? x.channels : [],
       links: Array.isArray(x.links) ? x.links : [],
       addedAt: x.addedAt || null,
