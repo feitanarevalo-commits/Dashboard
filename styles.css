@@ -265,6 +265,11 @@ tbody tr.row-both { border-left: 3px solid var(--ht); }
 tbody td { padding: 11px 16px; vertical-align: middle; color: var(--text); }
 .channel-name { font-weight: 600; font-size: 13px; color: var(--text); }
 .channel-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+/* "Already in Close" marker under the channel name (replaces the old status tag) */
+.in-close-badge { display:inline-block; margin-top:3px; font-size:10px; font-weight:700;
+  letter-spacing:.02em; padding:1px 7px; border-radius:20px; white-space:nowrap;
+  background:#EAE6FF; color:#6554C0; }
+html[data-dark] .in-close-badge { background:rgba(101,84,192,.22); color:#C7BEFF; }
 /* Red "has a note" badge on the 📝 button, styled like the notification bell badge */
 .note-ind-btn { position:relative; }
 .note-dot { position:absolute; top:-5px; right:-5px; min-width:9px; height:9px;

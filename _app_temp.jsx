@@ -17,6 +17,11 @@ function hasStatusTag(lead){ return STATUS_TAGS.some(t=>lead.tags.includes(t)); 
 // status) counts as Contacted — so those leads land in the Contacted tab and run
 // on the recycle clock exactly like a plain "Contacted" lead.
 function isContacted(lead){ return !!(lead && (lead.tags||[]).some(t=>{ const s=String(t); return /contacted/i.test(s) && !/\bnot[\s-]*contacted/i.test(s); })); }
+// Already present in the Close CRM. Tracked as a FLAG (not a status tag) so it
+// shows as a badge under the channel name and marks origin=Imported, while the
+// lead keeps its real status tag (e.g. Potential). Legacy 'Existing Leads' tag
+// still counts for older leads that haven't been migrated.
+function isInClose(lead){ return !!(lead && (lead.inClose || lead.fromClose || lead.closeLeadId || (lead.tags||[]).includes('Existing Leads'))); }
 // The taggable statuses shown on every lead picker. Driven by the admin-editable
 // config.statusTags (so "+ Add tag" in Customize actually adds a usable tag),
 // with HT always available. Falls back to the built-in STATUSES.
@@ -71,7 +76,7 @@ function leadOrigin(lead){
   // Otherwise decide from Close: a lead found in the real Close DB (the dedup
   // check tags it "Existing Leads") — or one pushed to / loaded from Close — is
   // already on Close, so it's an existing/imported lead, not fresh.
-  if((lead.tags||[]).includes('Existing Leads')) return 'Imported';
+  if(lead.inClose || (lead.tags||[]).includes('Existing Leads')) return 'Imported';
   if(lead.importedToClose || lead.fromClose || lead.closeLeadId) return 'Imported';
   return 'Fresh';
 }
@@ -1273,6 +1278,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                           return <span className={`dup-flag${crossRep?' dup-flag-cross':''}`} title={`Same channel also worked by: ${label}`}>⚠ dup</span>;
                         })()}
                       </div>
+                      {isInClose(lead) && <div className="in-close-badge" title="This channel already exists in your Close CRM">☁ In Close</div>}
                       {lead.channels && lead.channels.length>1 && <div className="channel-sub">{lead.channels.length} channels</div>}
                     </td>
                   )}
@@ -1312,7 +1318,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                   )}
                   {showCampaign && cols.campaign && (
                     <td>
-                      <InlinePicker type="campaign" selected={lead.campaigns} options={(config.campaigns||[]).map(c=>c.id)} campColorMap={campColorMap}
+                      <InlinePicker type="campaign" selected={lead.campaigns} options={[...new Set([...(config.campaigns||[]).map(c=>c.id), ...(lead.campaigns||[])])]} campColorMap={campColorMap}
                         onChange={campaigns=>patchLead(lead.id,{campaigns})}/>
                     </td>
                   )}
@@ -3790,8 +3796,8 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
         const cr=await fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads:kept.map((l,i)=>({key:i,channelId:l.channelId,url:l.url,emails:l.emails}))})});
         const resp=await cr.json();
         const ex=new Set((resp&&resp.existing)||[]);
-        // Tag the in-Close channels rather than dropping them.
-        const tagged=kept.map((l,i)=> ex.has(i) ? {...l, tags:[...(l.tags||[]),'Existing Leads']} : l);
+        // Flag the in-Close channels (badge under the channel name) rather than dropping or tagging them.
+        const tagged=kept.map((l,i)=> ex.has(i) ? {...l, inClose:true} : l);
         finish(tagged, ex.size);
       }catch(e){ finish(kept,0); }
     } else { finish(kept,0); }
@@ -5455,9 +5461,12 @@ function App() {
         const ex=new Set(resp.existing||[]);
         const matchedKeys=new Set(batch.filter((l,i)=>ex.has(i)).map(leadKey).filter(Boolean));
         if(!matchedKeys.size){ addToast(`✓ None of the ${sourceLabel} lead(s) are in Close — all fresh`,'success'); return; }
-        setLeads(existing=>existing.map(l=> (matchedKeys.has(leadKey(l)) && !(l.tags||[]).includes('Existing Leads')) ? {...l,tags:[...(l.tags||[]),'Existing Leads']} : l));
-        logH('☁',`Close dedup: ${matchedKeys.size} ${sourceLabel} lead(s) already in Close — tagged "Existing Leads"`);
-        addToast(`⚠ ${matchedKeys.size} ${sourceLabel} lead(s) already in Close — tagged "Existing Leads"`,'info');
+        // Mark them as already-in-Close via a FLAG (not a tag) — this shows as a
+        // badge under the channel name and sets origin=Imported, while the lead
+        // keeps its real status tag (e.g. Potential).
+        setLeads(existing=>existing.map(l=> (matchedKeys.has(leadKey(l)) && !l.inClose) ? {...l,inClose:true} : l));
+        logH('☁',`Close dedup: ${matchedKeys.size} ${sourceLabel} lead(s) already in Close — marked Imported`);
+        addToast(`⚠ ${matchedKeys.size} ${sourceLabel} lead(s) already in Close — marked Imported (shown under the channel name)`,'info');
       })
       .catch(()=>{});
   }
@@ -5717,7 +5726,7 @@ function App() {
       tags, campaigns,
       assignedTo: x.assignedTo || getCf('rep') || meta.rep || null, dateAssigned: x.dateAssigned || getCf('assigned') || meta.assigned || null,
       lastContactDate: x.lastContactDate || null, contactDateManual: x.contactDateManual || false,
-      qualifiedBy: x.qualifiedBy || null, handedOffAt: x.handedOffAt || null, channels: Array.isArray(x.channels)?x.channels:[],
+      qualifiedBy: x.qualifiedBy || null, handedOffAt: x.handedOffAt || null, inClose: x.inClose || false, channels: Array.isArray(x.channels)?x.channels:[],
       links: Array.isArray(x.links)?x.links:[],
       addedAt: x.addedAt || null,
       agency: x.agency || null,
