@@ -3978,7 +3978,7 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
           {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={doExportPDF}>🖨 PDF</button>}
         </div>
       </div>
-      <LeadsTable leads={display} onEdit={onSave} onBulkAssign={onBulkAssign} showAssigned showCampaign config={config} feats={feats} campColorMap={campColorMap} filename={`${campaign.id}_leads`} printTitle={`${campaign.label} Campaign Report`}/>
+      <LeadsTable leads={display} onEdit={onSave} onBulkAssign={onBulkAssign} showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap} filename={`${campaign.id}_leads`} printTitle={`${campaign.label} Campaign Report`}/>
     </div>
   );
 }
