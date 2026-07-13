@@ -5977,10 +5977,12 @@ function RepDashboard({
   // SmartReach campaign picker: per-rep static list from config (July 3 setup).
   const srCampaignOpts = config.smartReachCampaigns && config.smartReachCampaigns[rep] || [];
   // myLeads = everything assigned to the rep (drives the stat cards & counts).
-  // activeLeads = the rep's work queue shown in the table; once a lead is tagged
-  // Contacted it leaves this queue and appears under the global Contacted tab.
+  // activeLeads = the rep's work queue shown in the table. A lead that has
+  // "landed" in a dedicated status tab — Pending Qualification, Contacted, or
+  // For Recycle — leaves this queue and is worked from that tab instead, so the
+  // rep dashboard only holds leads still needing triage (Potential/HT/untagged).
   const myLeads = leads.filter(l => l.assignedTo === rep);
-  const activeLeads = myLeads.filter(l => !isContacted(l));
+  const activeLeads = myLeads.filter(l => !hasTabStatusTag(l));
   const campColorMap = {};
   (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
   const total = myLeads.length;
