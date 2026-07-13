@@ -12777,36 +12777,80 @@ function App() {
     } catch (e) {}
   }
   function importLeads(newLeads) {
-    setLeads(existing => {
-      // Dedupe per (channel + rep): skip a lead only if the SAME rep already has
-      // that channel. The same channel under a DIFFERENT rep is kept on purpose,
-      // so the Duplicates tab can flag that two reps are working the same lead.
-      const seen = new Set(existing.map(l => leadKey(l) + '|' + (l.assignedTo || '')));
-      const arch = archivedKeysRef.current;
-      const fresh = [];
-      let skippedArch = 0;
-      newLeads.forEach(l => {
-        const bare = leadKey(l);
-        if (bare && arch.has(bare)) {
-          skippedArch++;
-          return;
-        } // archived channel — don't resurface
-        const k = bare + '|' + (l.assignedTo || '');
-        if (bare && seen.has(k)) return; // same channel already under this rep
-        seen.add(k);
-        fresh.push({
-          ...l,
-          source: 'import'
-        });
+    // Dedupe per (channel + rep): skip a lead only if the SAME rep already has
+    // that channel. The same channel under a DIFFERENT rep is kept on purpose,
+    // so the Duplicates tab can flag that two reps are working the same lead.
+    const seen = new Set(leads.map(l => leadKey(l) + '|' + (l.assignedTo || '')));
+    const arch = archivedKeysRef.current;
+    const fresh = [];
+    let skippedArch = 0;
+    newLeads.forEach(l => {
+      const bare = leadKey(l);
+      if (bare && arch.has(bare)) {
+        skippedArch++;
+        return;
+      } // archived channel — don't resurface
+      const k = bare + '|' + (l.assignedTo || '');
+      if (bare && seen.has(k)) return; // same channel already under this rep
+      seen.add(k);
+      fresh.push({
+        ...l,
+        source: 'import'
       });
-      const skipped = newLeads.length - fresh.length - skippedArch;
-      logH('📊', `Google Sheets import: ${fresh.length} lead(s) added${skipped > 0 ? ` · ${skipped} same-rep duplicate(s) skipped` : ''}${skippedArch > 0 ? ` · ${skippedArch} in archive skipped` : ''}`);
-      if (skippedArch > 0) addToast(`🗄 ${skippedArch} imported channel(s) are in your Archive — skipped`, 'info');
-      return [...existing, ...fresh];
     });
+    const skipped = newLeads.length - fresh.length - skippedArch;
+    setLeads(existing => [...existing, ...fresh]);
+    logH('📊', `Google Sheets import: ${fresh.length} lead(s) added${skipped > 0 ? ` · ${skipped} same-rep duplicate(s) skipped` : ''}${skippedArch > 0 ? ` · ${skippedArch} in archive skipped` : ''}`);
+    if (skippedArch > 0) addToast(`🗄 ${skippedArch} imported channel(s) are in your Archive — skipped`, 'info');
     autoFileAgencies(newLeads); // any rows with an "agency" column drop into that Agency folder
     setTab('lead-mgmt');
     checkAndTagFromClose(newLeads, 'imported'); // flag any that already exist in Close
+    enrichFromUrls(fresh); // auto-fetch follower counts for rows that have a URL but no followers
+  }
+  // Auto-enrich imported leads: for any lead that has a channel URL but no follower
+  // count, resolve it via yt-lookup (keyless HTML scrape — no API quota) and fill
+  // in followers + channelId (+ name if the row had none). Throttled so a big
+  // import doesn't hammer YouTube; only fills BLANKS, never overwrites given values.
+  async function enrichFromUrls(list) {
+    const wh = (config.ytLookupWebhook || '').trim();
+    if (!wh || !Array.isArray(list) || !list.length) return;
+    const targets = list.filter(l => l.url && !String(l.followers || '').trim());
+    if (!targets.length) return;
+    addToast(`Fetching channel details for ${targets.length} lead(s) with a URL…`, 'info');
+    let ok = 0;
+    const CONC = 4;
+    for (let i = 0; i < targets.length; i += CONC) {
+      const batch = targets.slice(i, i + CONC);
+      await Promise.all(batch.map(async l => {
+        try {
+          const r = await fetch(wh, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              url: l.url
+            })
+          });
+          const j = await r.json().catch(() => ({}));
+          if (j && j.ok) {
+            const subs = String(j.subs || '').trim(),
+              cid = String(j.channelId || '').trim(),
+              nm = String(j.name || '').trim();
+            if (subs || cid || nm) {
+              ok++;
+              setLeads(ls => ls.map(x => x.id === l.id ? {
+                ...x,
+                followers: subs || x.followers,
+                channelId: x.channelId || cid,
+                channelName: nm && (!x.channelName || /^Row \d+$/.test(x.channelName)) ? nm : x.channelName
+              } : x));
+            }
+          }
+        } catch (e) {}
+      }));
+    }
+    addToast(`✓ Fetched channel details for ${ok}/${targets.length} lead(s)`, ok ? 'success' : 'info');
   }
 
   // Agency Sheets import: add the parsed leads to the global pool (deduped per
