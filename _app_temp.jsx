@@ -3952,7 +3952,11 @@ function DuplicatesView({groups,config,onSave,onDelete,addToast}) {
 
 // ─── CAMPAIGN VIEW ────────────────────────────────────────
 function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,config}) {
-  const filtered=leads.filter(l=>l.campaigns.includes(campaign.id));
+  // A campaign tab holds only the campaign's ACTIVE leads (Potential / untagged).
+  // Once a lead lands in a dedicated status tab — Pending Qualification, Contacted
+  // (incl. Recently Contacted), or For Recycle — it's worked from that tab and
+  // leaves the campaign list so the two don't show the same lead twice.
+  const filtered=leads.filter(l=>l.campaigns.includes(campaign.id) && !hasTabStatusTag(l));
   const [repFilter,setRepFilter]=useState('');
   const display=repFilter?filtered.filter(l=>l.assignedTo===repFilter):filtered;
   const feats=config.features||{};
