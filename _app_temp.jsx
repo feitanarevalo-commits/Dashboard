@@ -5888,6 +5888,11 @@ function App() {
     const CLOSE_WEBHOOK=(config.closeWebhook||'').trim();
     if(!CLOSE_WEBHOOK || CLOSE_WEBHOOK.includes('your-')){ addToast('Set the Close Save Webhook in ⚙ Customize first','info'); return; }
     if(!repLeads || !repLeads.length){ addToast(`No leads to send for ${rep}`,'info'); return; }
+    // Confirmation guard — sending creates real records in Close, so a single
+    // stray click shouldn't fire it. Show exactly what will go and require a yes.
+    const preview=repLeads.slice(0,6).map(l=>'• '+(l.channelName||'(unnamed)')).join('\n');
+    const more=repLeads.length>6?`\n…and ${repLeads.length-6} more`:'';
+    if(!window.confirm(`Send ${repLeads.length} lead(s) to Close.io for ${rep}?\n\n${preview}${more}\n\n⚠ This CREATES them as leads in your Close CRM. Only continue if you're ready to import — otherwise cancel.`)) return;
     // Plain field shape for the Close push Edge Function (it builds the Close
     // body + custom fields server-side). Status is NOT sent — reps set it in
     // Close manually. The function returns each lead's Close id so we can store
