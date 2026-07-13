@@ -1295,6 +1295,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                         })()}
                       </div>
                       {isInClose(lead) && <div className="in-close-badge" title="This channel already exists in your Close CRM">☁ In Close</div>}
+                      {lead.urlBroken && <div className="url-broken-badge" title="This channel URL returned 404 / no longer exists — find the correct URL">⚠ bad link</div>}
                       {lead.channels && lead.channels.length>1 && <div className="channel-sub">{lead.channels.length} channels</div>}
                     </td>
                   )}
@@ -3988,7 +3989,7 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
 }
 
 // ─── LEAD MGMT VIEW ───────────────────────────────────────
-function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onClearAll,onAutoAssignJC,addToast,config}) {
+function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onClearAll,onAutoAssignJC,onVerifyUrls,addToast,config}) {
   const [repView,setRepView]=useState('');
   const feats=config.features||{};
   const campColorMap={};
@@ -4018,6 +4019,10 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
           <button className="btn btn-sm btn-primary" style={{marginLeft:8}} disabled={!jcN}
             title="Distribute JC's qualified (Potential) leads — high-ticket → Rein, everything else split evenly (fresh & imported balanced) across Mikka / Chase / Pen"
             onClick={onAutoAssignJC}>⚡ Auto-assign JC's leads{jcN?` (${jcN})`:''}</button>
+        ); })()}
+        {onVerifyUrls && (()=>{ const bad=leads.filter(l=>l.urlBroken).length; return (
+          <button className="btn btn-sm btn-outline" style={{marginLeft:8}} onClick={onVerifyUrls}
+            title="Check every YouTube URL still resolves; fills missing follower counts and flags broken links (⚠ bad link)">🔗 Verify URLs{bad?` · ⚠ ${bad} broken`:''}</button>
         ); })()}
         {onClearAll && leads.length>0 && <button className="btn btn-sm" style={{marginLeft:'auto',background:'#DE350B',color:'#fff',borderColor:'#DE350B'}}
           onClick={()=>{ const ans=window.prompt(`⚠ DANGER: this permanently deletes ALL ${leads.length} lead(s) from the shared database — for EVERY rep — and cannot be undone.\n\nTo confirm, type DELETE (in capitals) below:`); if(ans==null) return; if(ans.trim()==='DELETE') onClearAll(); else addToast('Clear All cancelled — you must type DELETE exactly to confirm','info'); }}
@@ -5639,40 +5644,45 @@ function App() {
     autoFileAgencies(newLeads);   // any rows with an "agency" column drop into that Agency folder
     setTab('lead-mgmt');
     checkAndTagFromClose(newLeads,'imported');   // flag any that already exist in Close
-    enrichFromUrls(fresh);        // auto-fetch follower counts for rows that have a URL but no followers
+    verifyUrls(fresh);            // verify each URL works + auto-fetch follower counts; flag broken links
   }
-  // Auto-enrich imported leads: for any lead that has a channel URL but no follower
-  // count, resolve it via yt-lookup (keyless HTML scrape — no API quota) and fill
-  // in followers + channelId (+ name if the row had none). Throttled so a big
-  // import doesn't hammer YouTube; only fills BLANKS, never overwrites given values.
-  async function enrichFromUrls(list){
+  // Verify + enrich leads by their channel URL via yt-lookup (keyless HTML scrape,
+  // no API quota). For each lead with a URL: if it resolves, fill in followers +
+  // channelId (+ name if the row had none) and clear any broken flag; if the URL
+  // 404s / the channel doesn't exist, mark urlBroken so a reps sees a "bad link"
+  // badge. Throttled (4 concurrent) so it doesn't hammer YouTube.
+  async function verifyUrls(list){
     const wh=(config.ytLookupWebhook||'').trim();
     if(!wh || !Array.isArray(list) || !list.length) return;
-    const targets=list.filter(l=>l.url && !String(l.followers||'').trim());
-    if(!targets.length) return;
-    addToast(`Fetching channel details for ${targets.length} lead(s) with a URL…`,'info');
-    let ok=0; const CONC=4;
+    const targets=list.filter(l=>l.url && /youtu\.?be/i.test(l.url));
+    if(!targets.length){ addToast('No YouTube URLs to verify','info'); return; }
+    addToast(`Verifying ${targets.length} channel URL(s)…`,'info');
+    let good=0, broken=0; const CONC=4;
     for(let i=0;i<targets.length;i+=CONC){
       const batch=targets.slice(i,i+CONC);
       await Promise.all(batch.map(async l=>{
         try{
           const r=await fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:l.url})});
           const j=await r.json().catch(()=>({}));
-          if(j && j.ok){
-            const subs=String(j.subs||'').trim(), cid=String(j.channelId||'').trim(), nm=String(j.name||'').trim();
-            if(subs||cid||nm){
-              ok++;
-              setLeads(ls=>ls.map(x=>x.id===l.id?{...x,
-                followers: subs||x.followers,
-                channelId: x.channelId||cid,
-                channelName: (nm && (!x.channelName || /^Row \d+$/.test(x.channelName)))?nm:x.channelName,
-              }:x));
-            }
+          if(!j || j.ok===false) return;   // lookup itself failed — leave the lead as-is
+          const subs=String(j.subs||'').trim(), cid=String(j.channelId||'').trim(), nm=String(j.name||'').trim();
+          const dead = j.notFound || (!cid && !subs && !nm);
+          if(dead){
+            broken++;
+            setLeads(ls=>ls.map(x=>x.id===l.id?{...x, urlBroken:true}:x));
+          } else {
+            good++;
+            setLeads(ls=>ls.map(x=>x.id===l.id?{...x,
+              followers: String(x.followers||'').trim()?x.followers:(subs||x.followers),
+              channelId: x.channelId||cid,
+              channelName: (nm && (!x.channelName || /^Row \d+$/.test(x.channelName)))?nm:x.channelName,
+              urlBroken: false,
+            }:x));
           }
         }catch(e){}
       }));
     }
-    addToast(`✓ Fetched channel details for ${ok}/${targets.length} lead(s)`, ok?'success':'info');
+    addToast(`✓ URLs verified — ${good} working${broken?` · ⚠ ${broken} broken (flagged "bad link")`:''}`, broken?'info':'success');
   }
 
   // Agency Sheets import: add the parsed leads to the global pool (deduped per
@@ -5749,7 +5759,7 @@ function App() {
       tags, campaigns,
       assignedTo: x.assignedTo || getCf('rep') || meta.rep || null, dateAssigned: x.dateAssigned || getCf('assigned') || meta.assigned || null,
       lastContactDate: x.lastContactDate || null, contactDateManual: x.contactDateManual || false,
-      qualifiedBy: x.qualifiedBy || null, handedOffAt: x.handedOffAt || null, inClose: x.inClose || false, channels: Array.isArray(x.channels)?x.channels:[],
+      qualifiedBy: x.qualifiedBy || null, handedOffAt: x.handedOffAt || null, inClose: x.inClose || false, urlBroken: x.urlBroken || false, channels: Array.isArray(x.channels)?x.channels:[],
       links: Array.isArray(x.links)?x.links:[],
       addedAt: x.addedAt || null,
       agency: x.agency || null,
@@ -6160,7 +6170,7 @@ function App() {
     if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={nonPoolLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
-    if(tab==='lead-mgmt') return <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} onAutoAssignJC={(isAdmin||(currentUser&&currentUser.name==='JC'))?autoAssignJC:null} addToast={addToast} config={config}/>;
+    if(tab==='lead-mgmt') return <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} onAutoAssignJC={(isAdmin||(currentUser&&currentUser.name==='JC'))?autoAssignJC:null} onVerifyUrls={isAdmin?(()=>verifyUrls(nonPoolLeads)):null} addToast={addToast} config={config}/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap} addToast={addToast}/>;
     if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;

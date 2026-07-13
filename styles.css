@@ -270,6 +270,10 @@ tbody td { padding: 11px 16px; vertical-align: middle; color: var(--text); }
   letter-spacing:.02em; padding:1px 7px; border-radius:20px; white-space:nowrap;
   background:#EAE6FF; color:#6554C0; }
 html[data-dark] .in-close-badge { background:rgba(101,84,192,.22); color:#C7BEFF; }
+/* "Broken channel URL" marker under the channel name */
+.url-broken-badge { display:inline-block; margin-top:3px; font-size:10px; font-weight:700;
+  padding:1px 7px; border-radius:20px; white-space:nowrap; background:#FEE2E2; color:#B42318; }
+html[data-dark] .url-broken-badge { background:rgba(239,68,68,.2); color:#FCA5A5; }
 /* Red "has a note" badge on the 📝 button, styled like the notification bell badge */
 .note-ind-btn { position:relative; }
 .note-dot { position:absolute; top:-5px; right:-5px; min-width:9px; height:9px;
