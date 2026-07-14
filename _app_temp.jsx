@@ -2808,7 +2808,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
       <LeadsTable
         leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap}
-        smartReachSend={isLeadgen?null:{ campaigns:srCampaignOpts, onSend:(leads,campId,campLabel)=>importToSmartReach(rep,leads,campId,campLabel) }}
+        smartReachSend={null}   /* SmartReach API auto-send removed — the team uses the manual "⬇ SmartReach CSV" import (the SmartReach API can't set prospect ownership on push) */
         closeSend={isLeadgen?null:{ onSend:(ls)=>importToClose(rep,ls) }}
         hideExport
         filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
