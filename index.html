@@ -6276,18 +6276,9 @@ function RepDashboard({
     className: "btn btn-outline btn-sm",
     onClick: () => setShowAdd(true),
     title: `Manually add a lead under ${rep}`
-  }, "➕ Add Lead"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-outline btn-sm",
-    onClick: () => setShowClose(true),
-    title: `View ${rep}'s leads in Close.io (assigned to them)`
-  }, "📁 Close Leads"), /*#__PURE__*/React.createElement("div", {
+  }, "➕ Add Lead"), /*#__PURE__*/React.createElement("div", {
     className: "export-group"
-  }, feats.exportCSV && !isLeadgen && /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-outline btn-sm",
-    disabled: !fresh,
-    onClick: () => exportCloseCSV(freshPotential, `${rep}_close_import.csv`),
-    title: "Download a Close.io-ready CSV of the Fresh Potential leads to import in Close (already-imported leads are skipped)"
-  }, "⬇ Close CSV"), feats.exportCSV && !isLeadgen && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("select", {
+  }, feats.exportCSV && !isLeadgen && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("select", {
     value: srCsvCampaign,
     onChange: e => setSrCsvCampaign(e.target.value),
     title: "Filter the SmartReach CSV by campaign (blank = all Potential/HT leads with an email)",

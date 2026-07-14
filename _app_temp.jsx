@@ -2812,12 +2812,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
           </button>}
           <button className="btn btn-outline btn-sm" onClick={()=>setShowAdd(true)}
             title={`Manually add a lead under ${rep}`}>➕ Add Lead</button>
-          <button className="btn btn-outline btn-sm" onClick={()=>setShowClose(true)}
-            title={`View ${rep}'s leads in Close.io (assigned to them)`}>📁 Close Leads</button>
           <div className="export-group">
-            {feats.exportCSV && !isLeadgen && <button className="btn btn-outline btn-sm" disabled={!fresh}
-              onClick={()=>exportCloseCSV(freshPotential,`${rep}_close_import.csv`)}
-              title="Download a Close.io-ready CSV of the Fresh Potential leads to import in Close (already-imported leads are skipped)">⬇ Close CSV</button>}
             {feats.exportCSV && !isLeadgen && <>
               <select value={srCsvCampaign} onChange={e=>setSrCsvCampaign(e.target.value)}
                 title="Filter the SmartReach CSV by campaign (blank = all Potential/HT leads with an email)"
