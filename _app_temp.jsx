@@ -1519,6 +1519,21 @@ function CloseSearchView({config}) {
   const [searched,setSearched]=useState(false);
   const [total,setTotal]=useState(0);
   const wh=(config.closeSearchWebhook||'').trim();
+  // "See more" — expand one row to show the lead's recent Close conversation.
+  const convWh=((config.supabaseUrl||'').trim())+'/functions/v1/close-conversation';
+  const [openId,setOpenId]=useState(null);   // accordion: at most one open
+  const [convos,setConvos]=useState({});      // leadId -> {loading, items, error}
+  function toggleConvo(id){
+    if(openId===id){ setOpenId(null); return; }
+    setOpenId(id);
+    if(!convos[id]){
+      setConvos(c=>({...c,[id]:{loading:true}}));
+      fetch(convWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leadId:id})})
+        .then(r=>r.json())
+        .then(d=>setConvos(c=>({...c,[id]:{loading:false,items:(d&&d.items)||[],error:(d&&d.ok===false)?(d.error||'failed'):null}})))
+        .catch(e=>setConvos(c=>({...c,[id]:{loading:false,items:[],error:String(e)}})));
+    }
+  }
   // Each search gets a sequence number; only the LATEST one's response is applied.
   // This makes rapid/back-to-back searches (and a cleared box mid-flight) safe —
   // an older, slower response can never clobber a newer search's results. Each
@@ -1554,15 +1569,43 @@ function CloseSearchView({config}) {
             <thead><tr><th style={th}>Lead / Channel</th><th style={th}>Followers</th><th style={th}>Niche</th><th style={th}>Status</th><th style={th}>Last Contacted</th><th style={th}>Handled By</th><th style={th}>Assigned</th><th style={th}></th></tr></thead>
             <tbody>{leads.map(l=>{
               const neg=isNegCloseStatus(l.status);
-              return (<tr key={l.id}>
+              const open=openId===l.id;
+              const conv=convos[l.id];
+              return (<React.Fragment key={l.id}>
+              <tr style={open?{background:'var(--accent-light)'}:undefined}>
                 <td style={td}>{l.channelName||l.name}{l.url?<a href={l.url} target="_blank" rel="noreferrer" title={l.url} style={{marginLeft:6,fontSize:11,textDecoration:'none'}}>↗</a>:null}</td>
                 <td style={td}>{l.followers||'—'}</td><td style={td}>{l.niche||'—'}</td>
                 <td style={td}>{l.status?<span style={{padding:'2px 8px',borderRadius:999,fontSize:11,fontWeight:600,whiteSpace:'nowrap',background:neg?'#FFEBE6':'var(--accent-light)',color:neg?'#DE350B':'var(--accent)'}}>{neg?'⚠ ':''}{l.status}</span>:'—'}</td>
                 <td style={td}>{l.lastContacted?<div><div style={{whiteSpace:'nowrap'}}>{fmtCloseDate(l.lastContacted)}{l.lastContactType?<span style={{color:'var(--text-dim)'}}> · {l.lastContactType}</span>:''}</div>{l.leadReplied?<div style={{fontSize:11,color:'var(--success)',whiteSpace:'nowrap'}}>↩ lead replied {fmtCloseDate(l.leadReplied)}</div>:null}</div>:<span style={{color:'var(--text-light)'}}>never</span>}</td>
                 <td style={td}>{l.handledBy||'—'}</td>
                 <td style={td}>{l.assignedTo||'—'}</td>
-                <td style={td}>{l.closeUrl?<a href={l.closeUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{fontSize:11}}>Open ↗</a>:null}</td>
-              </tr>);
+                <td style={{...td,whiteSpace:'nowrap'}}>
+                  <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>toggleConvo(l.id)} title="Show this lead's recent Close conversation">{open?'Hide ▲':'See more ▾'}</button>
+                  {l.closeUrl?<a href={l.closeUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{fontSize:11,marginLeft:4}}>Open ↗</a>:null}
+                </td>
+              </tr>
+              {open && <tr><td colSpan={8} style={{padding:0,background:'var(--bg)',borderBottom:'1px solid var(--border)'}}>
+                <div style={{padding:'10px 16px'}}>
+                  <div style={{fontSize:11,fontWeight:700,color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'.03em',marginBottom:6}}>Recent conversation (Close)</div>
+                  {conv&&conv.loading&&<div style={{fontSize:12,color:'var(--text-dim)'}}>Loading last conversation…</div>}
+                  {conv&&conv.error&&<div style={{fontSize:12,color:'var(--danger)'}}>Couldn't load conversation: {conv.error}</div>}
+                  {conv&&!conv.loading&&!conv.error&&(conv.items||[]).length===0&&<div style={{fontSize:12,color:'var(--text-dim)'}}>No emails, calls or notes recorded in Close for this lead.</div>}
+                  {conv&&(conv.items||[]).map((it,idx)=>{
+                    const incoming=it.direction==='incoming';
+                    const col=incoming?'var(--success)':(it.type==='Note'?'var(--warn)':'var(--accent)');
+                    const dirLabel=incoming?'← reply':it.direction==='outgoing'?'→ sent':(it.direction||'');
+                    return (<div key={idx} style={{borderLeft:`3px solid ${col}`,padding:'6px 10px',margin:'6px 0',background:'var(--card)',borderRadius:6}}>
+                      <div style={{fontSize:11,color:'var(--text-dim)',display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+                        <span style={{fontWeight:700,color:col}}>{it.type}{dirLabel?` · ${dirLabel}`:''}</span>
+                        <span>{fmtCloseDate(it.date)}</span>{it.by?<span>· {it.by}</span>:null}
+                      </div>
+                      {it.subject&&<div style={{fontWeight:600,fontSize:12.5,marginTop:2}}>{it.subject}</div>}
+                      {it.snippet&&<div style={{fontSize:12,color:'var(--text)',marginTop:2,whiteSpace:'pre-wrap',maxHeight:130,overflow:'auto',lineHeight:1.5}}>{it.snippet}</div>}
+                    </div>);
+                  })}
+                </div>
+              </td></tr>}
+              </React.Fragment>);
             })}</tbody>
           </table>}
         </div>
