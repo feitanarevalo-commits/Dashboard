@@ -6198,9 +6198,12 @@ function RepDashboard({
   const [showClose, setShowClose] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const dayLeads = myLeads.filter(l => leadDayStr(l) === quotaDay);
-  const campPotential = campId => dayLeads.filter(l => l.tags.includes('Potential') && !isContacted(l) && (l.campaigns || []).includes(campId)).length;
   const dayContacted = dayLeads.filter(l => isContacted(l)).length;
-  const dayPotentialTotal = dayLeads.filter(l => l.tags.includes('Potential') && !isContacted(l)).length;
+  // ALL-TIME open potentials per campaign — the rep's real current pipeline. These
+  // sum to the "Potential" card so every number on the dashboard is consistent
+  // with the rep's actual leads (not scoped to a single day).
+  const openPotential = campId => potentialLeads.filter(l => !isContacted(l) && (l.campaigns || []).includes(campId)).length;
+  const openTotalAll = potentialLeads.filter(l => !isContacted(l)).length;
   const repColor = (config.repColors || {})[rep] || '#5b5bd6';
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6302,12 +6305,12 @@ function RepDashboard({
       fontSize: 13,
       letterSpacing: '-.01em'
     }
-  }, "📅 Daily Quota"), /*#__PURE__*/React.createElement("span", {
+  }, "📅 Contacted by day"), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 10,
       color: 'var(--text-dim)'
     }
-  }, "open potentials per campaign")), /*#__PURE__*/React.createElement("input", {
+  }, "date sets the \"Contacted\" count · potentials below are your full pipeline")), /*#__PURE__*/React.createElement("input", {
     type: "date",
     value: quotaDay,
     max: todayStr,
@@ -6414,7 +6417,8 @@ function RepDashboard({
       flex: 1,
       minWidth: 118,
       borderLeft: `3px solid ${c.color}`
-    }
+    },
+    title: `${rep}'s open (uncontacted) Potential leads in ${c.label}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
   }, c.label, " Potentials"), /*#__PURE__*/React.createElement("div", {
@@ -6422,17 +6426,18 @@ function RepDashboard({
     style: {
       color: c.color
     }
-  }, campPotential(c.id)))), /*#__PURE__*/React.createElement("div", {
+  }, openPotential(c.id)))), /*#__PURE__*/React.createElement("div", {
     className: "stat-card",
     style: {
       flex: 1,
       minWidth: 118
-    }
+    },
+    title: "All open Potential leads (sums to the campaign cards)"
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
   }, "Open Total"), /*#__PURE__*/React.createElement("div", {
     className: "stat-value"
-  }, dayPotentialTotal)), /*#__PURE__*/React.createElement("div", {
+  }, openTotalAll)), /*#__PURE__*/React.createElement("div", {
     className: "stat-card",
     style: {
       flex: 1,

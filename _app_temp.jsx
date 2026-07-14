@@ -2770,9 +2770,12 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const [showClose,setShowClose]=useState(false);
   const [showAdd,setShowAdd]=useState(false);
   const dayLeads=myLeads.filter(l=>leadDayStr(l)===quotaDay);
-  const campPotential=(campId)=>dayLeads.filter(l=>l.tags.includes('Potential')&&!isContacted(l)&&(l.campaigns||[]).includes(campId)).length;
   const dayContacted=dayLeads.filter(l=>isContacted(l)).length;
-  const dayPotentialTotal=dayLeads.filter(l=>l.tags.includes('Potential')&&!isContacted(l)).length;
+  // ALL-TIME open potentials per campaign — the rep's real current pipeline. These
+  // sum to the "Potential" card so every number on the dashboard is consistent
+  // with the rep's actual leads (not scoped to a single day).
+  const openPotential=(campId)=>potentialLeads.filter(l=>!isContacted(l)&&(l.campaigns||[]).includes(campId)).length;
+  const openTotalAll=potentialLeads.filter(l=>!isContacted(l)).length;
 
   const repColor=(config.repColors||{})[rep]||'#5b5bd6';
   return (
@@ -2813,8 +2816,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
       <div className="no-print" style={{padding:'10px 24px 8px',flexShrink:0,background:'var(--bg)'}}>
         <div style={{display:'inline-flex',alignItems:'center',gap:10,padding:'8px 12px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',color:'var(--text)'}}>
           <div style={{display:'flex',flexDirection:'column',gap:1}}>
-            <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'-.01em'}}>📅 Daily Quota</span>
-            <span style={{fontSize:10,color:'var(--text-dim)'}}>open potentials per campaign</span>
+            <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'-.01em'}}>📅 Contacted by day</span>
+            <span style={{fontSize:10,color:'var(--text-dim)'}}>date sets the "Contacted" count · potentials below are your full pipeline</span>
           </div>
           <input type="date" value={quotaDay} max={todayStr} onChange={e=>setQuotaDay(e.target.value||todayStr)}
             style={{padding:'6px 10px',border:'1px solid var(--border)',borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)',fontFamily:'inherit'}}/>
@@ -2834,14 +2837,14 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
       {/* Potential cards — full-width row so they align in columns with the top stats */}
       <div className="rep-quota-row no-print" style={{display:'flex',gap:10,padding:'0 24px 12px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>
         {(config.campaigns||[]).map(c=>(
-          <div key={c.id} className="stat-card" style={{flex:1,minWidth:118,borderLeft:`3px solid ${c.color}`}}>
+          <div key={c.id} className="stat-card" style={{flex:1,minWidth:118,borderLeft:`3px solid ${c.color}`}} title={`${rep}'s open (uncontacted) Potential leads in ${c.label}`}>
             <div className="stat-label">{c.label} Potentials</div>
-            <div className="stat-value" style={{color:c.color}}>{campPotential(c.id)}</div>
+            <div className="stat-value" style={{color:c.color}}>{openPotential(c.id)}</div>
           </div>
         ))}
-        <div className="stat-card" style={{flex:1,minWidth:118}}>
+        <div className="stat-card" style={{flex:1,minWidth:118}} title="All open Potential leads (sums to the campaign cards)">
           <div className="stat-label">Open Total</div>
-          <div className="stat-value">{dayPotentialTotal}</div>
+          <div className="stat-value">{openTotalAll}</div>
         </div>
         <div className="stat-card" style={{flex:1,minWidth:118}}>
           <div className="stat-label">Contacted {quotaDay===todayStr?'Today':'That Day'}</div>
