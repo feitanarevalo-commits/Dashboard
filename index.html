@@ -6180,9 +6180,11 @@ function RepDashboard({
   const active = total;
   const potentialLeads = myLeads.filter(l => l.tags.includes('Potential')); // campaign-ready set
   const potential = potentialLeads.length;
-  // Only FRESH Potential leads (not yet on Close) get pushed — Imported ones are
-  // already in Close, so re-sending would duplicate them.
-  const freshPotential = potentialLeads.filter(isFresh);
+  // Only FRESH workable leads (not yet on Close) get pushed — Imported ones are
+  // already in Close, so re-sending would duplicate them. WORKABLE = Potential OR
+  // HT, so a high-ticket rep (e.g. Rein) can import their fresh HT leads too, not
+  // just Potential-tagged ones.
+  const freshPotential = myLeads.filter(l => isWorkable(l) && isFresh(l));
   const fresh = freshPotential.length;
   // SmartReach gets EVERY emailable lead under the rep (any status, fresh or
   // imported) — unlike Close, which only takes Fresh leads. SmartReach dedupes
