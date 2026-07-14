@@ -2757,7 +2757,11 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   // SmartReach gets EVERY emailable lead under the rep (any status, fresh or
   // imported) — unlike Close, which only takes Fresh leads. SmartReach dedupes
   // prospects by email on its side, so re-sends don't duplicate.
-  const smartReachLeads=myLeads.filter(l=>(l.emails||[]).length>0);  // all emailable leads for this rep
+  const [srCsvCampaign,setSrCsvCampaign]=useState('');   // SmartReach CSV campaign filter ('' = all campaigns)
+  // SmartReach CSV = the rep's workable (Potential/HT) leads that have an email,
+  // optionally scoped to ONE campaign. No filter → all of them.
+  const smartReachBase=myLeads.filter(l=>(l.emails||[]).length>0 && isWorkable(l));
+  const smartReachLeads=srCsvCampaign?smartReachBase.filter(l=>(l.campaigns||[]).includes(srCsvCampaign)):smartReachBase;
   const srCount=smartReachLeads.length;
   const contacted=myLeads.filter(l=>isContacted(l)).length;
   const ht=myLeads.filter(l=>l.tags.includes('HT')).length;
@@ -2811,9 +2815,17 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             {feats.exportCSV && !isLeadgen && <button className="btn btn-outline btn-sm" disabled={!fresh}
               onClick={()=>exportCloseCSV(freshPotential,`${rep}_close_import.csv`)}
               title="Download a Close.io-ready CSV of the Fresh Potential leads to import in Close (already-imported leads are skipped)">⬇ Close CSV</button>}
-            {feats.exportCSV && !isLeadgen && <button className="btn btn-outline btn-sm" disabled={!srCount}
-              onClick={()=>exportSmartReachCSV(smartReachLeads,`${rep}_smartreach.csv`)}
-              title="Download a SmartReach CSV (channel name + email only) of all this rep's emailable leads">⬇ SmartReach CSV</button>}
+            {feats.exportCSV && !isLeadgen && <>
+              <select value={srCsvCampaign} onChange={e=>setSrCsvCampaign(e.target.value)}
+                title="Filter the SmartReach CSV by campaign (blank = all Potential/HT leads with an email)"
+                style={{padding:'6px 8px',borderRadius:8,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text)',fontSize:12,fontFamily:'inherit'}}>
+                <option value="">SmartReach: all campaigns</option>
+                {(config.campaigns||[]).map(c=><option key={c.id} value={c.id}>SmartReach: {c.label} only</option>)}
+              </select>
+              <button className="btn btn-outline btn-sm" disabled={!srCount}
+                onClick={()=>exportSmartReachCSV(smartReachLeads,`${rep}${srCsvCampaign?'_'+srCsvCampaign.replace(/[^\w]+/g,''):''}_smartreach.csv`)}
+                title={`Download a SmartReach CSV (channel + email) of ${rep}'s ${srCsvCampaign?srCsvCampaign+' ':''}Potential/HT leads that have an email (${srCount})`}>⬇ SmartReach CSV{srCount?` (${srCount})`:''}</button>
+            </>}
             {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(myLeads,`${rep}_leads.csv`)}>⬇ Export CSV</button>}
             {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={()=>exportPDF(rep)}>🖨 Export PDF</button>}
           </div>
