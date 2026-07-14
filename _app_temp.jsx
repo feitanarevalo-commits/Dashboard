@@ -2814,9 +2814,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             title={`Manually add a lead under ${rep}`}>➕ Add Lead</button>
           <div className="export-group">
             {feats.exportCSV && !isLeadgen && <>
-              <select value={srCsvCampaign} onChange={e=>setSrCsvCampaign(e.target.value)}
-                title="Filter the SmartReach CSV by campaign (blank = all Potential/HT leads with an email)"
-                style={{padding:'6px 8px',borderRadius:8,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text)',fontSize:12,fontFamily:'inherit'}}>
+              <select value={srCsvCampaign} onChange={e=>setSrCsvCampaign(e.target.value)} className="hdr-select"
+                title="Filter the SmartReach CSV by campaign (blank = all Potential/HT leads with an email)">
                 <option value="">SmartReach: all campaigns</option>
                 {(config.campaigns||[]).map(c=><option key={c.id} value={c.id}>SmartReach: {c.label} only</option>)}
               </select>

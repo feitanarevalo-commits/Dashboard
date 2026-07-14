@@ -6281,16 +6281,8 @@ function RepDashboard({
   }, feats.exportCSV && !isLeadgen && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("select", {
     value: srCsvCampaign,
     onChange: e => setSrCsvCampaign(e.target.value),
-    title: "Filter the SmartReach CSV by campaign (blank = all Potential/HT leads with an email)",
-    style: {
-      padding: '6px 8px',
-      borderRadius: 8,
-      border: '1px solid var(--border)',
-      background: 'var(--bg)',
-      color: 'var(--text)',
-      fontSize: 12,
-      fontFamily: 'inherit'
-    }
+    className: "hdr-select",
+    title: "Filter the SmartReach CSV by campaign (blank = all Potential/HT leads with an email)"
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
   }, "SmartReach: all campaigns"), (config.campaigns || []).map(c => /*#__PURE__*/React.createElement("option", {

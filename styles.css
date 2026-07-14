@@ -496,6 +496,10 @@ textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91,91,2
 
 /* ── EXPORT ── */
 .export-group { display: flex; gap: 6px; }
+/* Campaign filter dropdown in the rep header — matches the outline buttons */
+.rep-view-header .hdr-select { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); color: #fff; border-radius: 10px; padding: 8px 10px; font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer; transition: all .15s; }
+.rep-view-header .hdr-select:hover { background: rgba(91,91,214,.32); border-color: rgba(166,166,255,.5); }
+.hdr-select option { color: var(--text); background: var(--card); font-weight: 500; }
 
 /* ── PROGRESS CHART ── */
 .ring-wrap { display: flex; gap: 20px; align-items: center; }
