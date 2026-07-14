@@ -4011,7 +4011,7 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
   // Once a lead lands in a dedicated status tab — Pending Qualification, Contacted
   // (incl. Recently Contacted), or For Recycle — it's worked from that tab and
   // leaves the campaign list so the two don't show the same lead twice.
-  const filtered=leads.filter(l=>l.campaigns.includes(campaign.id) && !hasTabStatusTag(l));
+  const filtered=leads.filter(l=>l.campaigns.includes(campaign.id) && isWorkable(l));
   const [repFilter,setRepFilter]=useState('');
   const display=repFilter?filtered.filter(l=>l.assignedTo===repFilter):filtered;
   const feats=config.features||{};
@@ -6412,7 +6412,7 @@ function App() {
             <div className="sidebar-section-label">Campaigns</div>
             {(config.campaigns||[]).map(c=>{
               const id=c.id.toLowerCase();
-              const cnt=vLeads.filter(l=>l.campaigns.includes(c.id)).length;
+              const cnt=vLeads.filter(l=>l.campaigns.includes(c.id) && isWorkable(l)).length;
               return(
                 <div key={id} title={c.label} className={`nav-item ${tab===id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(id);}}>
                   <span className="nav-icon" style={{color:c.color}}>●</span>{c.label}

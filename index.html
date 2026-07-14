@@ -8985,7 +8985,7 @@ function CampaignView({
   // Once a lead lands in a dedicated status tab — Pending Qualification, Contacted
   // (incl. Recently Contacted), or For Recycle — it's worked from that tab and
   // leaves the campaign list so the two don't show the same lead twice.
-  const filtered = leads.filter(l => l.campaigns.includes(campaign.id) && !hasTabStatusTag(l));
+  const filtered = leads.filter(l => l.campaigns.includes(campaign.id) && isWorkable(l));
   const [repFilter, setRepFilter] = useState('');
   const display = repFilter ? filtered.filter(l => l.assignedTo === repFilter) : filtered;
   const feats = config.features || {};
@@ -14503,7 +14503,7 @@ function App() {
     className: "sidebar-section-label"
   }, "Campaigns"), (config.campaigns || []).map(c => {
     const id = c.id.toLowerCase();
-    const cnt = vLeads.filter(l => l.campaigns.includes(c.id)).length;
+    const cnt = vLeads.filter(l => l.campaigns.includes(c.id) && isWorkable(l)).length;
     return /*#__PURE__*/React.createElement("div", {
       key: id,
       title: c.label,
