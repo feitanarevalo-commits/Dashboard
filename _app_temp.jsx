@@ -17,6 +17,10 @@ function hasStatusTag(lead){ return STATUS_TAGS.some(t=>lead.tags.includes(t)); 
 // status) counts as Contacted — so those leads land in the Contacted tab and run
 // on the recycle clock exactly like a plain "Contacted" lead.
 function isContacted(lead){ return !!(lead && (lead.tags||[]).some(t=>{ const s=String(t); return /contacted/i.test(s) && !/\bnot[\s-]*contacted/i.test(s); })); }
+// Directly "Contacted" — a fresh contact the rep made, EXCLUDING the imported
+// "Recently Contacted" Close status. Used by the rep's daily "Contacted (today)"
+// counter so it reflects work done that day, not pre-contacted imports.
+function isDirectContacted(lead){ return !!(lead && (lead.tags||[]).some(t=>{ const s=String(t); return /contacted/i.test(s) && !/\bnot[\s-]*contacted/i.test(s) && !/recently[\s-]*contacted/i.test(s); })); }
 // Already present in the Close CRM. Tracked as a FLAG (not a status tag) so it
 // shows as a badge under the channel name and marks origin=Imported, while the
 // lead keeps its real status tag (e.g. Potential). Legacy 'Existing Leads' tag
@@ -2785,7 +2789,10 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const [showClose,setShowClose]=useState(false);
   const [showAdd,setShowAdd]=useState(false);
   const dayLeads=myLeads.filter(l=>leadDayStr(l)===quotaDay);
-  const dayContacted=dayLeads.filter(l=>isContacted(l)).length;
+  // "Contacted (today)" = leads the rep freshly tagged "Contacted" ON the selected
+  // day. Scoped by lastContactDate (stamped when the "Contacted" tag is applied),
+  // NOT the assignment day, and it excludes imported "Recently Contacted" leads.
+  const dayContacted=myLeads.filter(l=>isDirectContacted(l) && String(l.lastContactDate||'').slice(0,10)===quotaDay).length;
   // ALL-TIME open potentials per campaign — the rep's real current pipeline. These
   // sum to the "Potential" card so every number on the dashboard is consistent
   // with the rep's actual leads (not scoped to a single day).
