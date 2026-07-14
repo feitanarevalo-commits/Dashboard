@@ -296,6 +296,20 @@ function ymdLocal(d){
   const x=new Date(d); if(isNaN(x)) return '';
   return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
 }
+// Parse any date value to a LOCAL calendar day (midnight local time). A bare
+// "YYYY-MM-DD" is treated as a local day — NOT UTC — which avoids the western-
+// timezone off-by-one that made the recycle countdown drift and mis-count.
+function toLocalDay(v){
+  if(v==null||v==='') return null;
+  if(v instanceof Date){ return isNaN(v)?null:new Date(v.getFullYear(),v.getMonth(),v.getDate()); }
+  const s=String(v).trim();
+  const m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return new Date(+m[1],+m[2]-1,+m[3]);
+  const d=new Date(s); return isNaN(d)?null:new Date(d.getFullYear(),d.getMonth(),d.getDate());
+}
+// Whole calendar days between two dates (a → b), timezone-safe. Returns null if
+// either can't be parsed. Stable within a day (no time-of-day drift).
+function dayDiff(a,b){ const x=toLocalDay(a),y=toLocalDay(b); if(!x||!y) return null; return Math.round((y-x)/86400000); }
 // The calendar day a lead belongs to for daily tracking: the day it was
 // assigned to the rep (a plain YYYY-MM-DD string, used as-is), else the day it
 // was added/scraped. Returns '' if neither is known.
@@ -671,7 +685,7 @@ function ContextMenu({x,y,lead,sel,allLeads,config,campColorMap,onEdit,onDelete,
         let u={...l};
         if(patch.tags!==undefined) u.tags=patch.tags(l.tags);
         if(patch.campaigns!==undefined) u.campaigns=patch.campaigns(l.campaigns);
-        if(patch.assignedTo!==undefined){u.assignedTo=patch.assignedTo;u.dateAssigned=new Date().toISOString().split('T')[0];}
+        if(patch.assignedTo!==undefined){u.assignedTo=patch.assignedTo;u.dateAssigned=ymdLocal(new Date());}
         onEdit(u);
       });
     }
@@ -2966,11 +2980,11 @@ function RepSelectScreen({leads,config,activeRep,onSelect}) {
 // Editable "Last Contacted" cell — click the date to correct it (e.g. to match
 // what Close shows) so the recycle clock counts from the right day.
 function EditableContactDate({lead,effective,onCommit}){
-  const cur = effective ? effective.date.toISOString().split('T')[0] : '';
+  const cur = effective ? ymdLocal(effective.date) : '';
   const [editing,setEditing]=useState(false);
   const [val,setVal]=useState(cur);
   useEffect(()=>{ if(!editing) setVal(cur); },[cur,editing]);
-  const todayStr=new Date().toISOString().split('T')[0];
+  const todayStr=ymdLocal(new Date());
   function commit(){ setEditing(false); const v=(val||'').trim(); if(v && v!==cur) onCommit(v); }
   if(editing){
     return <input type="date" value={val} max={todayStr} autoFocus
@@ -2981,7 +2995,7 @@ function EditableContactDate({lead,effective,onCommit}){
   return (
     <span onClick={()=>setEditing(true)} title="Click to correct the last-contacted date"
       style={{cursor:'pointer',borderBottom:'1px dashed var(--text-light)',paddingBottom:1,whiteSpace:'nowrap'}}>
-      {effective ? effective.date.toISOString().split('T')[0] : <span style={{color:'var(--accent)'}}>+ set date</span>}
+      {effective ? ymdLocal(effective.date) : <span style={{color:'var(--accent)'}}>+ set date</span>}
       {effective && effective.manual ? <span style={{fontSize:10,color:'var(--warn)',marginLeft:5}} title="Manually corrected">· manual</span>
         : effective && effective.fromClose ? <span style={{fontSize:10,color:'var(--accent)',marginLeft:5}} title="Most recent email/call from Close">· Close</span> : null}
       <span style={{fontSize:10,color:'var(--text-light)',marginLeft:4}}>✎</span>
@@ -3007,24 +3021,25 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
   function effectiveContact(l){
     // A manually-corrected date is AUTHORITATIVE — reps set it when Close and the
     // dashboard disagree, so it overrides the auto-pulled Close date entirely.
-    if(l.contactDateManual && l.lastContactDate){ return {date:new Date(l.lastContactDate), fromClose:false, manual:true}; }
+    if(l.contactDateManual && l.lastContactDate){ const d=toLocalDay(l.lastContactDate); return d?{date:d, fromClose:false, manual:true}:null; }
     let best=null, fromClose=false;
     const cc=l.closeLeadId&&closeContacts[l.closeLeadId];
-    if(cc){ best=new Date(cc); fromClose=true; }
-    if(l.lastContactDate){ const d=new Date(l.lastContactDate); if(!best||d>best){ best=d; fromClose=false; } }
+    if(cc){ const d=toLocalDay(cc); if(d){ best=d; fromClose=true; } }
+    if(l.lastContactDate){ const d=toLocalDay(l.lastContactDate); if(d && (!best||d>best)){ best=d; fromClose=false; } }
     return best?{date:best,fromClose}:null;
   }
   function recycleInfo(l){
     const e=effectiveContact(l);
     if(!e) return null;
-    const diff=Math.floor((today-e.date)/86400000);
+    const diff=dayDiff(e.date, today);   // whole calendar days, timezone-safe
+    if(diff==null) return null;
     const threshold=recycleThresholdDays(l);
     const left=threshold-diff;
     const nd=threshold>=90?14:7, nw=threshold>=90?30:14;
     return{threshold,diff,left,color:left<=nd?'var(--danger)':left<=nw?'var(--warn)':'var(--success)'};
   }
   // Manual reset: stamp today's contact date (works for any lead, incl. ones not in Close).
-  function logContact(l){ if(onSave){ onSave({...l,lastContactDate:today.toISOString().split('T')[0],contactDateManual:false}); if(addToast) addToast(`Logged a contact for "${l.channelName}" — recycle clock reset`,'success'); } }
+  function logContact(l){ if(onSave){ onSave({...l,lastContactDate:ymdLocal(today),contactDateManual:false}); if(addToast) addToast(`Logged a contact for "${l.channelName}" — recycle clock reset`,'success'); } }
   // Rep manually corrects the last-contacted date (e.g. to match Close). Marks it
   // as a manual override so it drives the recycle clock instead of the Close date.
   function setContactDate(l,dateStr){ if(onSave && dateStr){ onSave({...l,lastContactDate:dateStr,contactDateManual:true}); if(addToast) addToast(`Last-contacted date set to ${dateStr} for "${l.channelName}"`,'success'); } }
@@ -5483,16 +5498,16 @@ function App() {
     let updated={...upd};
     // Any lead with a rep must carry a dateAssigned, else it's invisible to the
     // date-based Home KPIs. Stamp today if a rep is set but the date is missing.
-    if(updated.assignedTo && !updated.dateAssigned) updated.dateAssigned=new Date().toISOString().split('T')[0];
+    if(updated.assignedTo && !updated.dateAssigned) updated.dateAssigned=ymdLocal(new Date());
     if(old&&!old.tags.includes('Contacted')&&upd.tags.includes('Contacted')){
-      updated.lastContactDate=new Date().toISOString().split('T')[0];
+      updated.lastContactDate=ymdLocal(new Date());
       addToast(`"${upd.channelName}" marked Contacted — date recorded`,'success');
     }
     // Qualifying a recycled lead (For Recycle → Potential): it's an already-worked
     // (Imported) lead, and re-engaging resets its recycle clock for the next cycle.
     if(old&&old.tags.includes('For Recycle')&&upd.tags.includes('Potential')){
       updated.imported=true;
-      updated.lastContactDate=new Date().toISOString().split('T')[0];
+      updated.lastContactDate=ymdLocal(new Date());
       addToast(`"${upd.channelName}" re-qualified as Potential — recycle clock reset`,'success');
     }
     setLeads(ls=>ls.map(l=>l.id===updated.id?updated:l));
@@ -5668,7 +5683,7 @@ function App() {
           // Recycle IN PLACE: reset the clock + refresh details on the rep's existing
           // entry (a blank field keeps the old value); consolidate extra same-rep copies.
           const target = (best && mine.some(l=>l.id===best.lead.id)) ? best.lead : mine[0];
-          const today=new Date().toISOString().split('T')[0];
+          const today=ymdLocal(new Date());
           const merged={ ...target,
             channelName: (lead.channelName||'').trim()||target.channelName,
             url: (lead.url||'').trim()||target.url,
