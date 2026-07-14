@@ -151,7 +151,7 @@ h1, h2, h3, h4, h5, h6, .display { font-family: 'Space Grotesk', 'Plus Jakarta S
 
 /* ── SIDEBAR ── */
 .sidebar { width: 220px; min-width: 220px; background: var(--sidebar); border-right: 1px solid var(--sidebar-border); display: flex; flex-direction: column; overflow-y: auto; }
-.sidebar-section-label { font-size: 10px; font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.07em; margin: 14px 10px 6px; padding: 5px 10px 5px 9px; background: var(--accent-light); border-left: 3px solid var(--accent); border-radius: 6px; }
+.sidebar-section-label { font-size: 11px; font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; padding: 16px 16px 6px; }
 .nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 12px; margin: 1px 8px; color: var(--sidebar-text); cursor: pointer; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background .15s; user-select: none; }
 .nav-item:hover { background: var(--sidebar-hover); color: #111827; }
 .nav-item.active { background: var(--sidebar-active); color: var(--sidebar-text-active); font-weight: 600; }
@@ -184,7 +184,7 @@ h1, h2, h3, h4, h5, h6, .display { font-family: 'Space Grotesk', 'Plus Jakarta S
 .sidebar.collapsed .nav-divider { margin: 4px 14px; }
 .sidebar.collapsed:hover .nav-item { font-size: 13px; justify-content: flex-start; }
 .sidebar.collapsed:hover .sidebar-collapse-toggle { justify-content: flex-start; }
-.sidebar.collapsed:hover .sidebar-section-label { opacity: 1; height: auto; padding: 5px 10px 5px 9px; margin: 14px 10px 6px; overflow: visible; }
+.sidebar.collapsed:hover .sidebar-section-label { opacity: 1; height: auto; padding: 16px 16px 6px; overflow: visible; }
 .sidebar.collapsed:hover .nav-badge { opacity: 1; height: auto; overflow: visible; }
 .sidebar.collapsed:hover .nav-badge { padding: 1px 7px; }
 .sidebar.collapsed:hover .nav-item .rep-avatar { width: 20px !important; height: 20px !important; }
