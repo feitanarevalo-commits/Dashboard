@@ -2793,84 +2793,127 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const openTotalAll=potentialLeads.filter(l=>!isContacted(l)).length;
 
   const repColor=(config.repColors||{})[rep]||'#5b5bd6';
+  // ── Redesigned rep header (compact dark top zone) ──
+  const SG="'Space Grotesk',sans-serif";
+  const [menuOpen,setMenuOpen]=useState(false);
+  const menuRef=useRef(null);
+  useEffect(()=>{
+    if(!menuOpen) return;
+    const onDoc=e=>{ if(menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    const onKey=e=>{ if(e.key==='Escape') setMenuOpen(false); };
+    document.addEventListener('mousedown',onDoc); document.addEventListener('keydown',onKey);
+    return ()=>{ document.removeEventListener('mousedown',onDoc); document.removeEventListener('keydown',onKey); };
+  },[menuOpen]);
+  // One row in the Actions dropdown (light popover). Closes the menu on click.
+  function menuRow(icon,label,onClick,opts){
+    const o=opts||{}; const disabled=!!o.disabled;
+    return (
+      <button key={label} disabled={disabled}
+        onClick={()=>{ if(disabled) return; if(onClick) onClick(); setMenuOpen(false); }}
+        onMouseEnter={e=>{ if(!disabled) e.currentTarget.style.background='#f4f4f6'; }}
+        onMouseLeave={e=>{ e.currentTarget.style.background='transparent'; }}
+        style={{display:'flex',alignItems:'center',gap:10,width:'100%',textAlign:'left',padding:'9px 11px',borderRadius:8,background:'transparent',border:'none',fontSize:13,fontFamily:'inherit',color:disabled?'#c4c4cc':(o.danger?'#dc2626':'#18181b'),cursor:disabled?'not-allowed':'pointer'}}>
+        <span style={{width:16,textAlign:'center',flexShrink:0}}>{icon}</span>{label}
+      </button>
+    );
+  }
+  // Horizontal metric strip (replaces the old two stat-card rows). Fixed rep
+  // metrics, then one tile per campaign (open potentials), plus a lead-gen
+  // "handed off" tally when relevant. All numbers reuse the counts computed above.
+  const stripMetrics=[
+    {label:'Total',chip:'#818cf8',val:'#c7d2fe',value:total,title:`${rep}'s workable leads = Potential + High Ticket (${totalAssigned} total assigned incl. pending/contacted)`},
+    {label:'Potential',chip:'#34d399',val:'#a7f3d0',value:potential},
+    {label:'Fresh',chip:'#a1a1aa',val:'#e4e4e7',value:fresh,title:'Fresh Potential/HT leads not yet on Close — the import queue'},
+    {label:quotaDay===todayStr?'Contacted (today)':'Contacted (that day)',chip:'#e4e4e7',val:'#ffffff',value:dayContacted,title:'Contacted count for the day picked in the row below'},
+    {label:'High Ticket',chip:'#fb923c',val:'#fed7aa',value:ht},
+    ...(config.campaigns||[]).map(c=>({label:c.label,chip:c.color,val:c.color,value:openPotential(c.id),title:`${rep}'s open (uncontacted) Potential leads in ${c.label}`})),
+  ];
+  if(isLeadgen||handedOffCount>0) stripMetrics.push({label:'Handed Off',chip:'#a78bfa',val:'#ddd6fe',value:handedOffCount,title:`Leads ${rep} qualified & handed to the sales team — credited to ${rep} even after reassignment`});
+  const srFilename=`${rep}${srCsvCampaign?'_'+srCsvCampaign.replace(/[^\w]+/g,''):''}_smartreach.csv`;
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
-      <div className="rep-view-header no-print" style={{'--rep-color':repColor}}>
-        <RepAvatar rep={rep} config={config} size={46} online bgOverride={repColor}/>
-        <div style={{minWidth:0}}>
-          <div className="rep-view-title">{rep}'s Dashboard</div>
-          <div className="rep-view-sub">
-            {getProfile(rep).title ? <><b>{getProfile(rep).title}</b> · </> : null}
-            {total} lead{total!==1?'s':''}{contacted?` · ${contacted} contacted`:''}{(isLeadgen||handedOffCount>0)?` · ${handedOffCount} qualified & handed off`:''}
+      <header className="no-print" style={{background:'#0d0d12',color:'#fff',padding:'14px 28px 16px',flexShrink:0}}>
+        {/* row 1 — profile + primary/secondary actions */}
+        <div style={{display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
+          <div style={{display:'flex',alignItems:'center',gap:13,minWidth:0}}>
+            <RepAvatar rep={rep} config={config} size={44} online bgOverride={repColor}/>
+            <div style={{minWidth:0}}>
+              <div style={{fontFamily:SG,fontSize:20,fontWeight:700,letterSpacing:'-.02em',lineHeight:1.1,color:'#fff'}}>{rep}'s Dashboard</div>
+              <div style={{marginTop:3,fontSize:12.5,color:'#a1a1ac',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                {getProfile(rep).title?<span style={{fontWeight:600,color:'#d4d4d8'}}>{getProfile(rep).title}</span>:null}
+                <span>{total} lead{total!==1?'s':''}</span>
+                <span style={{width:3,height:3,borderRadius:'50%',background:'#52525b'}}></span>
+                <span>{contacted} contacted</span>
+                {(isLeadgen||handedOffCount>0)?<><span style={{width:3,height:3,borderRadius:'50%',background:'#52525b'}}></span><span>{handedOffCount} handed off</span></>:null}
+              </div>
+            </div>
+          </div>
+          <div style={{flex:1,minWidth:12}}></div>
+          {feats.exportCSV && !isLeadgen && (
+            <div style={{display:'flex',alignItems:'center',gap:6}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,background:'#17171f',border:'1px solid #26262f',borderRadius:9,padding:'0 10px',height:34}}>
+                <span style={{width:7,height:7,borderRadius:'50%',background:'#818cf8',flexShrink:0}}></span>
+                <select value={srCsvCampaign} onChange={e=>setSrCsvCampaign(e.target.value)}
+                  title="Choose which campaign to export to SmartReach (blank = all Potential/HT leads with an email)"
+                  style={{background:'transparent',border:'none',color:'#d4d4d8',fontSize:13,fontFamily:'inherit',cursor:'pointer',outline:'none'}}>
+                  <option value="">SmartReach: all campaigns</option>
+                  {(config.campaigns||[]).map(c=><option key={c.id} value={c.id}>SmartReach: {c.label} only</option>)}
+                </select>
+              </div>
+              <button onClick={()=>exportSmartReachCSV(smartReachLeads,srFilename)} disabled={!srCount}
+                aria-label="Download SmartReach CSV"
+                title={srCount?`Download the SmartReach CSV of ${rep}'s ${srCsvCampaign?srCsvCampaign+' ':''}Potential/HT leads that have an email (${srCount})`:'No emailable Potential/HT leads to export for this selection'}
+                style={{display:'flex',alignItems:'center',gap:5,height:34,padding:'0 12px',background:srCount?'#17171f':'#141419',border:'1px solid #26262f',borderRadius:9,color:srCount?'#d4d4d8':'#52525b',fontSize:13,fontWeight:600,fontFamily:'inherit',cursor:srCount?'pointer':'not-allowed'}}>
+                ⬇{srCount?` ${srCount}`:''}
+              </button>
+            </div>
+          )}
+          <button onClick={()=>setShowAdd(true)} title={`Manually add a lead under ${rep}`}
+            style={{display:'flex',alignItems:'center',gap:7,background:'#4f46e5',border:'none',color:'#fff',fontSize:13,fontWeight:600,padding:'0 15px',height:34,borderRadius:9,cursor:'pointer',fontFamily:'inherit'}}>
+            <span style={{fontSize:16,lineHeight:0}}>+</span> Add Lead
+          </button>
+          <div style={{position:'relative'}} ref={menuRef}>
+            <button onClick={()=>setMenuOpen(o=>!o)} aria-label="More actions" aria-expanded={menuOpen}
+              style={{display:'flex',alignItems:'center',gap:7,background:menuOpen?'#1f1f29':'#17171f',border:'1px solid #26262f',color:'#d4d4d8',fontSize:13,fontWeight:500,padding:'0 13px',height:34,borderRadius:9,cursor:'pointer',fontFamily:'inherit'}}>
+              Actions <span style={{fontSize:11,color:'#71717a'}}>▾</span>
+            </button>
+            {menuOpen && (
+              <div style={{position:'absolute',top:'calc(100% + 8px)',right:0,background:'#fff',border:'1px solid #e4e4e7',borderRadius:12,boxShadow:'0 16px 40px -12px rgba(0,0,0,.35)',padding:6,minWidth:214,zIndex:60,display:'flex',flexDirection:'column',gap:1}}>
+                {!isLeadgen && menuRow('⬆',`Send ${fresh} to Close.io`,()=>importToClose(rep,freshPotential),{disabled:!fresh})}
+                {feats.exportCSV && menuRow('⬇','Export CSV',()=>exportCSV(myLeads,`${rep}_leads.csv`))}
+                {feats.exportPDF && menuRow('🖨','Export PDF',()=>exportPDF(rep))}
+                <div style={{height:1,background:'#ececef',margin:'5px 4px'}}></div>
+                {menuRow('←','Back to Home',onBack)}
+              </div>
+            )}
           </div>
         </div>
-        <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',justifyContent:'flex-end'}}>
-          {!isLeadgen && <button className="btn btn-primary btn-sm" disabled={!fresh}
-            onClick={()=>importToClose(rep,freshPotential)}
-            title={fresh?`Send ${rep}'s ${fresh} Fresh Potential lead(s) to Close.io (already-imported leads are skipped)`:(potential?'All Potential leads are already imported to Close':'No Potential leads to send yet')}>
-            ⬆ Send {fresh} to Close.io
-          </button>}
-          <button className="btn btn-outline btn-sm" onClick={()=>setShowAdd(true)}
-            title={`Manually add a lead under ${rep}`}>➕ Add Lead</button>
-          <div className="export-group">
-            {feats.exportCSV && !isLeadgen && <>
-              <select value={srCsvCampaign} onChange={e=>setSrCsvCampaign(e.target.value)} className="hdr-select"
-                title="Filter the SmartReach CSV by campaign (blank = all Potential/HT leads with an email)">
-                <option value="">SmartReach: all campaigns</option>
-                {(config.campaigns||[]).map(c=><option key={c.id} value={c.id}>SmartReach: {c.label} only</option>)}
-              </select>
-              <button className="btn btn-outline btn-sm" disabled={!srCount}
-                onClick={()=>exportSmartReachCSV(smartReachLeads,`${rep}${srCsvCampaign?'_'+srCsvCampaign.replace(/[^\w]+/g,''):''}_smartreach.csv`)}
-                title={`Download a SmartReach CSV (channel + email) of ${rep}'s ${srCsvCampaign?srCsvCampaign+' ':''}Potential/HT leads that have an email (${srCount})`}>⬇ SmartReach CSV{srCount?` (${srCount})`:''}</button>
-            </>}
-            {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(myLeads,`${rep}_leads.csv`)}>⬇ Export CSV</button>}
-            {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={()=>exportPDF(rep)}>🖨 Export PDF</button>}
-          </div>
-          <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button>
+        {/* row 2 — metric strip */}
+        <div style={{display:'flex',background:'#141419',border:'1px solid #23232c',borderRadius:13,overflow:'hidden',marginTop:15,flexWrap:'wrap'}}>
+          {stripMetrics.map((m,i)=>(
+            <div key={m.label} title={m.title||''} style={{flex:'1 1 110px',minWidth:100,padding:'13px 16px',borderRight:i<stripMetrics.length-1?'1px solid #1f1f27':'none'}}>
+              <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:6,minWidth:0}}>
+                <span style={{width:8,height:8,borderRadius:3,background:m.chip,flexShrink:0}}></span>
+                <span style={{fontSize:10.5,textTransform:'uppercase',letterSpacing:'.06em',color:'#8b8b96',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.label}</span>
+              </div>
+              <div style={{fontFamily:SG,fontSize:23,fontWeight:700,color:m.val,lineHeight:1}}>{m.value}</div>
+            </div>
+          ))}
         </div>
-      </div>
-      {/* Daily Quota + date on top; the two stat-card rows sit below it, aligned */}
-      <div className="no-print" style={{padding:'10px 24px 8px',flexShrink:0,background:'var(--bg)'}}>
-        <div style={{display:'inline-flex',alignItems:'center',gap:10,padding:'8px 12px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',color:'var(--text)'}}>
-          <div style={{display:'flex',flexDirection:'column',gap:1}}>
-            <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:13,letterSpacing:'-.01em'}}>📅 Contacted by day</span>
-            <span style={{fontSize:10,color:'var(--text-dim)'}}>date sets the "Contacted" count · potentials below are your full pipeline</span>
-          </div>
+        {/* row 3 — date context (drives the Contacted metric) */}
+        <div style={{display:'flex',alignItems:'center',gap:14,fontSize:12.5,marginTop:12,flexWrap:'wrap'}}>
+          <span style={{color:'#d4d4d8',fontWeight:500}}>🗓 Contacted by day</span>
+          <span style={{color:'#71717a'}}>date sets the “Contacted” count · potentials are your full pipeline</span>
+          <div style={{flex:1,minWidth:8}}></div>
           <input type="date" value={quotaDay} max={todayStr} onChange={e=>setQuotaDay(e.target.value||todayStr)}
-            style={{padding:'6px 10px',border:'1px solid var(--border)',borderRadius:8,fontSize:12,background:'var(--bg)',color:'var(--text)',fontFamily:'inherit'}}/>
-          <button className="btn btn-ghost btn-sm" onClick={()=>setQuotaDay(todayStr)} disabled={quotaDay===todayStr}>Today</button>
+            style={{background:'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'6px 11px',color:'#d4d4d8',fontSize:12.5,fontFamily:'inherit',colorScheme:'dark'}}/>
+          <button onClick={()=>setQuotaDay(todayStr)} disabled={quotaDay===todayStr}
+            style={{background:'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'6px 13px',color:quotaDay===todayStr?'#52525b':'#d4d4d8',fontSize:12.5,fontFamily:'inherit',cursor:quotaDay===todayStr?'default':'pointer'}}>Today</button>
         </div>
-      </div>
-      <div className="rep-stats-row" style={{display:'flex',gap:10,padding:'0 24px 6px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>
-        <div className="stat-card accent" style={{flex:1,minWidth:138}} title={`${rep}'s workable leads = Potential + High Ticket. (${totalAssigned} total assigned incl. pending/contacted.)`}><div className="stat-label">Total</div><div className="stat-value">{total}</div></div>
-        <div className="stat-card green" style={{flex:1,minWidth:138}}><div className="stat-label">Potential</div><div className="stat-value">{potential}</div></div>
-        <div className="stat-card" style={{flex:1,minWidth:138}} title="Fresh Potential leads not yet on Close — the import queue"><div className="stat-label">Fresh (to import)</div><div className="stat-value">{fresh}</div></div>
-        <div className="stat-card" style={{flex:1,minWidth:138}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
-        <div className="stat-card orange" style={{flex:1,minWidth:138}}><div className="stat-label">High Ticket</div><div className="stat-value">{ht}</div></div>
-        {(isLeadgen||handedOffCount>0) && <div className="stat-card purple" style={{flex:1,minWidth:138}}
-          title={`Leads ${rep} qualified and handed to the sales team — credited to ${rep} even after they were reassigned.${handedOffCount?'  → '+['Rein','Mikka','Chase','Pen'].map(r=>`${r} ${handedOff.filter(l=>l.assignedTo===r).length}`).join(' · '):''}`}>
-          <div className="stat-label">Qualified &amp; Handed Off</div><div className="stat-value">{handedOffCount}</div></div>}
-      </div>
-      {/* Potential cards — full-width row so they align in columns with the top stats */}
-      <div className="rep-quota-row no-print" style={{display:'flex',gap:10,padding:'0 24px 12px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>
-        {(config.campaigns||[]).map(c=>(
-          <div key={c.id} className="stat-card" style={{flex:1,minWidth:118,borderLeft:`3px solid ${c.color}`}} title={`${rep}'s open (uncontacted) Potential leads in ${c.label}`}>
-            <div className="stat-label">{c.label} Potentials</div>
-            <div className="stat-value" style={{color:c.color}}>{openPotential(c.id)}</div>
-          </div>
-        ))}
-        <div className="stat-card" style={{flex:1,minWidth:118}} title="All open Potential leads (sums to the campaign cards)">
-          <div className="stat-label">Open Total</div>
-          <div className="stat-value">{openTotalAll}</div>
-        </div>
-        <div className="stat-card" style={{flex:1,minWidth:118}}>
-          <div className="stat-label">Contacted {quotaDay===todayStr?'Today':'That Day'}</div>
-          <div className="stat-value" style={{color:'var(--accent)'}}>{dayContacted}</div>
-        </div>
-      </div>
+      </header>
       <LeadsTable
         leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
-        showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap}
+        showAssigned showCampaign showOrigin hideRepFilter config={config} feats={feats} campColorMap={campColorMap}
         smartReachSend={null}   /* SmartReach API auto-send removed — the team uses the manual "⬇ SmartReach CSV" import (the SmartReach API can't set prospect ownership on push) */
         closeSend={isLeadgen?null:{ onSend:(ls)=>importToClose(rep,ls) }}
         hideExport
