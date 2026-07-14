@@ -22,6 +22,10 @@ function isContacted(lead){ return !!(lead && (lead.tags||[]).some(t=>{ const s=
 // lead keeps its real status tag (e.g. Potential). Legacy 'Existing Leads' tag
 // still counts for older leads that haven't been migrated.
 function isInClose(lead){ return !!(lead && (lead.inClose || lead.fromClose || lead.closeLeadId || (lead.tags||[]).includes('Existing Leads'))); }
+// A rep's "workable" lead — what counts toward their lead count: only Potential
+// or High Ticket (HT). Pending Qualification, Contacted and For Recycle are NOT
+// counted even though they're assigned to the rep — they live in their own tabs.
+function isWorkable(lead){ return !!(lead && ((lead.tags||[]).includes('Potential') || (lead.tags||[]).includes('HT'))); }
 // The taggable statuses shown on every lead picker. Driven by the admin-editable
 // config.statusTags (so "+ Add tag" in Customize actually adds a usable tag),
 // with HT always available. Falls back to the built-in STATUSES.
@@ -2738,8 +2742,12 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const activeLeads = myLeads.filter(l=>!hasTabStatusTag(l));
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
-  const total=myLeads.length;
-  const active=activeLeads.length;
+  // The rep's lead count = only Potential + HT (their workable pipeline). Pending
+  // Qualification / Contacted / For Recycle are assigned to them but NOT counted
+  // here — they have their own tabs. (totalAssigned kept for reference/tooltips.)
+  const totalAssigned=myLeads.length;
+  const total=myLeads.filter(isWorkable).length;
+  const active=total;
   const potentialLeads=myLeads.filter(l=>l.tags.includes('Potential'));   // campaign-ready set
   const potential=potentialLeads.length;
   // Only FRESH Potential leads (not yet on Close) get pushed — Imported ones are
@@ -2786,7 +2794,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
           <div className="rep-view-title">{rep}'s Dashboard</div>
           <div className="rep-view-sub">
             {getProfile(rep).title ? <><b>{getProfile(rep).title}</b> · </> : null}
-            {total} lead{total!==1?'s':''} · {active} active{(isLeadgen||handedOffCount>0)?` · ${handedOffCount} qualified & handed off`:''}
+            {total} lead{total!==1?'s':''}{contacted?` · ${contacted} contacted`:''}{(isLeadgen||handedOffCount>0)?` · ${handedOffCount} qualified & handed off`:''}
           </div>
         </div>
         <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',justifyContent:'flex-end'}}>
@@ -2825,7 +2833,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
         </div>
       </div>
       <div className="rep-stats-row" style={{display:'flex',gap:10,padding:'0 24px 6px',flexShrink:0,background:'var(--bg)',flexWrap:'wrap'}}>
-        <div className="stat-card accent" style={{flex:1,minWidth:138}}><div className="stat-label">Total</div><div className="stat-value">{total}</div></div>
+        <div className="stat-card accent" style={{flex:1,minWidth:138}} title={`${rep}'s workable leads = Potential + High Ticket. (${totalAssigned} total assigned incl. pending/contacted.)`}><div className="stat-label">Total</div><div className="stat-value">{total}</div></div>
         <div className="stat-card green" style={{flex:1,minWidth:138}}><div className="stat-label">Potential</div><div className="stat-value">{potential}</div></div>
         <div className="stat-card" style={{flex:1,minWidth:138}} title="Fresh Potential leads not yet on Close — the import queue"><div className="stat-label">Fresh (to import)</div><div className="stat-value">{fresh}</div></div>
         <div className="stat-card" style={{flex:1,minWidth:138}}><div className="stat-label">Contacted</div><div className="stat-value">{contacted}</div></div>
@@ -2875,7 +2883,7 @@ function RepSelectScreen({leads,config,activeRep,onSelect}) {
       </div>
       <div className="rep-grid">
         {(config.salesReps||[]).map(r=>{
-          const active=leads.filter(l=>l.assignedTo===r&&!isContacted(l)).length;
+          const active=leads.filter(l=>l.assignedTo===r&&isWorkable(l)).length;
           const total=leads.filter(l=>l.assignedTo===r).length;
           const isOnline=activeRep===r;
           const color=(config.repColors||{})[r]||'#6366F1';
@@ -6420,7 +6428,7 @@ function App() {
           <div className="sidebar-section-label">Sales Reps</div>
           {(config.salesReps||[]).map(r=>{
             // Active (non-contacted) leads — the rep's remaining work queue.
-            const cnt=vLeads.filter(l=>l.assignedTo===r && !isContacted(l)).length;
+            const cnt=vLeads.filter(l=>l.assignedTo===r && isWorkable(l)).length;
             return(
               <div key={r} title={r} className={`nav-item ${tab==='rep-home'&&activeRep===r?'active':''}`} onClick={()=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}>
                 <div style={{position:'relative',flexShrink:0}}>

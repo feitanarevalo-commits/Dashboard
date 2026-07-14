@@ -57,6 +57,12 @@ function isContacted(lead) {
 function isInClose(lead) {
   return !!(lead && (lead.inClose || lead.fromClose || lead.closeLeadId || (lead.tags || []).includes('Existing Leads')));
 }
+// A rep's "workable" lead — what counts toward their lead count: only Potential
+// or High Ticket (HT). Pending Qualification, Contacted and For Recycle are NOT
+// counted even though they're assigned to the rep — they live in their own tabs.
+function isWorkable(lead) {
+  return !!(lead && ((lead.tags || []).includes('Potential') || (lead.tags || []).includes('HT')));
+}
 // The taggable statuses shown on every lead picker. Driven by the admin-editable
 // config.statusTags (so "+ Add tag" in Customize actually adds a usable tag),
 // with HT always available. Falls back to the built-in STATUSES.
@@ -6166,8 +6172,12 @@ function RepDashboard({
   const activeLeads = myLeads.filter(l => !hasTabStatusTag(l));
   const campColorMap = {};
   (config.campaigns || []).forEach(c => campColorMap[c.id] = c.color);
-  const total = myLeads.length;
-  const active = activeLeads.length;
+  // The rep's lead count = only Potential + HT (their workable pipeline). Pending
+  // Qualification / Contacted / For Recycle are assigned to them but NOT counted
+  // here — they have their own tabs. (totalAssigned kept for reference/tooltips.)
+  const totalAssigned = myLeads.length;
+  const total = myLeads.filter(isWorkable).length;
+  const active = total;
   const potentialLeads = myLeads.filter(l => l.tags.includes('Potential')); // campaign-ready set
   const potential = potentialLeads.length;
   // Only FRESH Potential leads (not yet on Close) get pushed — Imported ones are
@@ -6231,7 +6241,7 @@ function RepDashboard({
     className: "rep-view-title"
   }, rep, "'s Dashboard"), /*#__PURE__*/React.createElement("div", {
     className: "rep-view-sub"
-  }, getProfile(rep).title ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("b", null, getProfile(rep).title), " · ") : null, total, " lead", total !== 1 ? 's' : '', " · ", active, " active", isLeadgen || handedOffCount > 0 ? ` · ${handedOffCount} qualified & handed off` : '')), /*#__PURE__*/React.createElement("div", {
+  }, getProfile(rep).title ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("b", null, getProfile(rep).title), " · ") : null, total, " lead", total !== 1 ? 's' : '', contacted ? ` · ${contacted} contacted` : '', isLeadgen || handedOffCount > 0 ? ` · ${handedOffCount} qualified & handed off` : '')), /*#__PURE__*/React.createElement("div", {
     style: {
       marginLeft: 'auto',
       display: 'flex',
@@ -6343,7 +6353,8 @@ function RepDashboard({
     style: {
       flex: 1,
       minWidth: 138
-    }
+    },
+    title: `${rep}'s workable leads = Potential + High Ticket. (${totalAssigned} total assigned incl. pending/contacted.)`
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-label"
   }, "Total"), /*#__PURE__*/React.createElement("div", {
@@ -6495,7 +6506,7 @@ function RepSelectScreen({
   }, /*#__PURE__*/React.createElement("h2", null, "Select Your Profile"), /*#__PURE__*/React.createElement("p", null, "Choose your name to log in and manage your assigned leads")), /*#__PURE__*/React.createElement("div", {
     className: "rep-grid"
   }, (config.salesReps || []).map(r => {
-    const active = leads.filter(l => l.assignedTo === r && !isContacted(l)).length;
+    const active = leads.filter(l => l.assignedTo === r && isWorkable(l)).length;
     const total = leads.filter(l => l.assignedTo === r).length;
     const isOnline = activeRep === r;
     const color = (config.repColors || {})[r] || '#6366F1';
@@ -14515,7 +14526,7 @@ function App() {
     className: "sidebar-section-label"
   }, "Sales Reps"), (config.salesReps || []).map(r => {
     // Active (non-contacted) leads — the rep's remaining work queue.
-    const cnt = vLeads.filter(l => l.assignedTo === r && !isContacted(l)).length;
+    const cnt = vLeads.filter(l => l.assignedTo === r && isWorkable(l)).length;
     return /*#__PURE__*/React.createElement("div", {
       key: r,
       title: r,
