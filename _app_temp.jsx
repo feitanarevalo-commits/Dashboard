@@ -2390,8 +2390,9 @@ function loadArchivedKeysFromSupabase(){
   return all().catch(()=>null);
 }
 function upsertLeadsToSupabase(arr){
-  if(!SB||!arr||!arr.length) return;
-  try{ SB.from('leads').upsert(arr.map(leadToRow),{onConflict:'id'}).then(({error})=>{ if(error) console.warn('[leads] upsert failed',error.message); }); }catch(e){}
+  if(!SB||!arr||!arr.length) return Promise.resolve({ok:true});
+  try{ return SB.from('leads').upsert(arr.map(leadToRow),{onConflict:'id'}).then(({error})=>{ if(error) console.warn('[leads] upsert failed',error.message); return {ok:!error,error}; }); }
+  catch(e){ return Promise.resolve({ok:false,error:e}); }
 }
 function deleteLeadFromSupabase(id){
   if(!SB||id==null) return;
@@ -5980,8 +5981,15 @@ function App() {
     const h=setTimeout(()=>{
       const prev=leadsSyncRef.current, snap={}, changed=[];
       leads.forEach(l=>{ const k=String(l.id), j=JSON.stringify(l); snap[k]=j; if(prev[k]!==j) changed.push(l); });
-      if(changed.length) upsertLeadsToSupabase(changed);
-      leadsSyncRef.current=snap;
+      if(changed.length){
+        // Mark leads as synced ONLY AFTER the write CONFIRMS. Until then they stay
+        // "dirty", so the 15s refresh poll can't read stale rows mid-write and
+        // revert a just-made edit — that was the "lead lingers in its old tab then
+        // disappears" bug. On failure we leave the snapshot old so it retries.
+        upsertLeadsToSupabase(changed).then(res=>{ if(!res || res.ok) leadsSyncRef.current=snap; });
+      } else {
+        leadsSyncRef.current=snap;
+      }
     }, 1000);
     return ()=>clearTimeout(h);
   },[leads,leadsReady]);
