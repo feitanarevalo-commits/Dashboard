@@ -6298,7 +6298,7 @@ function RepDashboard({
         setMenuOpen(false);
       },
       onMouseEnter: e => {
-        if (!disabled) e.currentTarget.style.background = '#f4f4f6';
+        if (!disabled) e.currentTarget.style.background = '#2a2a34';
       },
       onMouseLeave: e => {
         e.currentTarget.style.background = 'transparent';
@@ -6315,7 +6315,7 @@ function RepDashboard({
         border: 'none',
         fontSize: 13,
         fontFamily: 'inherit',
-        color: disabled ? '#c4c4cc' : o.danger ? '#dc2626' : '#18181b',
+        color: disabled ? '#6b6b76' : o.danger ? '#f87171' : '#f4f4f5',
         cursor: disabled ? 'not-allowed' : 'pointer'
       }
     }, /*#__PURE__*/React.createElement("span", {
@@ -6582,10 +6582,10 @@ function RepDashboard({
       position: 'absolute',
       top: 'calc(100% + 8px)',
       right: 0,
-      background: '#fff',
-      border: '1px solid #e4e4e7',
+      background: '#1b1b23',
+      border: '1px solid #2f2f3a',
       borderRadius: 12,
-      boxShadow: '0 16px 40px -12px rgba(0,0,0,.35)',
+      boxShadow: '0 16px 40px -12px rgba(0,0,0,.5)',
       padding: 6,
       minWidth: 214,
       zIndex: 60,
@@ -6598,7 +6598,7 @@ function RepDashboard({
   }), feats.exportCSV && menuRow('⬇', 'Export CSV', () => exportCSV(myLeads, `${rep}_leads.csv`)), feats.exportPDF && menuRow('🖨', 'Export PDF', () => exportPDF(rep)), /*#__PURE__*/React.createElement("div", {
     style: {
       height: 1,
-      background: '#ececef',
+      background: '#2f2f3a',
       margin: '5px 4px'
     }
   }), menuRow('←', 'Back to Home', onBack)))), /*#__PURE__*/React.createElement("div", {

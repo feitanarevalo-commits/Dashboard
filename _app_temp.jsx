@@ -2831,9 +2831,9 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
     return (
       <button key={label} disabled={disabled}
         onClick={()=>{ if(disabled) return; if(onClick) onClick(); setMenuOpen(false); }}
-        onMouseEnter={e=>{ if(!disabled) e.currentTarget.style.background='#f4f4f6'; }}
+        onMouseEnter={e=>{ if(!disabled) e.currentTarget.style.background='#2a2a34'; }}
         onMouseLeave={e=>{ e.currentTarget.style.background='transparent'; }}
-        style={{display:'flex',alignItems:'center',gap:10,width:'100%',textAlign:'left',padding:'9px 11px',borderRadius:8,background:'transparent',border:'none',fontSize:13,fontFamily:'inherit',color:disabled?'#c4c4cc':(o.danger?'#dc2626':'#18181b'),cursor:disabled?'not-allowed':'pointer'}}>
+        style={{display:'flex',alignItems:'center',gap:10,width:'100%',textAlign:'left',padding:'9px 11px',borderRadius:8,background:'transparent',border:'none',fontSize:13,fontFamily:'inherit',color:disabled?'#6b6b76':(o.danger?'#f87171':'#f4f4f5'),cursor:disabled?'not-allowed':'pointer'}}>
         <span style={{width:16,textAlign:'center',flexShrink:0}}>{icon}</span>{label}
       </button>
     );
@@ -2899,11 +2899,11 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
               Actions <span style={{fontSize:11,color:'#71717a'}}>▾</span>
             </button>
             {menuOpen && (
-              <div style={{position:'absolute',top:'calc(100% + 8px)',right:0,background:'#fff',border:'1px solid #e4e4e7',borderRadius:12,boxShadow:'0 16px 40px -12px rgba(0,0,0,.35)',padding:6,minWidth:214,zIndex:60,display:'flex',flexDirection:'column',gap:1}}>
+              <div style={{position:'absolute',top:'calc(100% + 8px)',right:0,background:'#1b1b23',border:'1px solid #2f2f3a',borderRadius:12,boxShadow:'0 16px 40px -12px rgba(0,0,0,.5)',padding:6,minWidth:214,zIndex:60,display:'flex',flexDirection:'column',gap:1}}>
                 {!isLeadgen && menuRow('⬆',`Send ${fresh} to Close.io`,()=>importToClose(rep,freshPotential),{disabled:!fresh})}
                 {feats.exportCSV && menuRow('⬇','Export CSV',()=>exportCSV(myLeads,`${rep}_leads.csv`))}
                 {feats.exportPDF && menuRow('🖨','Export PDF',()=>exportPDF(rep))}
-                <div style={{height:1,background:'#ececef',margin:'5px 4px'}}></div>
+                <div style={{height:1,background:'#2f2f3a',margin:'5px 4px'}}></div>
                 {menuRow('←','Back to Home',onBack)}
               </div>
             )}
