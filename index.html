@@ -6486,17 +6486,25 @@ function RepDashboard({
     style: {
       background: 'transparent',
       border: 'none',
-      color: '#d4d4d8',
+      color: '#f4f4f5',
       fontSize: 13,
       fontFamily: 'inherit',
       cursor: 'pointer',
       outline: 'none'
     }
   }, /*#__PURE__*/React.createElement("option", {
-    value: ""
+    value: "",
+    style: {
+      background: '#1b1b23',
+      color: '#f4f4f5'
+    }
   }, "SmartReach: all campaigns"), (config.campaigns || []).map(c => /*#__PURE__*/React.createElement("option", {
     key: c.id,
-    value: c.id
+    value: c.id,
+    style: {
+      background: '#1b1b23',
+      color: '#f4f4f5'
+    }
   }, "SmartReach: ", c.label, " only")))), /*#__PURE__*/React.createElement("button", {
     onClick: () => exportSmartReachCSV(smartReachLeads, srFilename),
     disabled: !srCount,

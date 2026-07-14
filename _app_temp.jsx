@@ -2876,9 +2876,9 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
                 <span style={{width:7,height:7,borderRadius:'50%',background:'#818cf8',flexShrink:0}}></span>
                 <select value={srCsvCampaign} onChange={e=>setSrCsvCampaign(e.target.value)}
                   title="Choose which campaign to export to SmartReach (blank = all Potential/HT leads with an email)"
-                  style={{background:'transparent',border:'none',color:'#d4d4d8',fontSize:13,fontFamily:'inherit',cursor:'pointer',outline:'none'}}>
-                  <option value="">SmartReach: all campaigns</option>
-                  {(config.campaigns||[]).map(c=><option key={c.id} value={c.id}>SmartReach: {c.label} only</option>)}
+                  style={{background:'transparent',border:'none',color:'#f4f4f5',fontSize:13,fontFamily:'inherit',cursor:'pointer',outline:'none'}}>
+                  <option value="" style={{background:'#1b1b23',color:'#f4f4f5'}}>SmartReach: all campaigns</option>
+                  {(config.campaigns||[]).map(c=><option key={c.id} value={c.id} style={{background:'#1b1b23',color:'#f4f4f5'}}>SmartReach: {c.label} only</option>)}
                 </select>
               </div>
               <button onClick={()=>exportSmartReachCSV(smartReachLeads,srFilename)} disabled={!srCount}
