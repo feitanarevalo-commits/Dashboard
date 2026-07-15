@@ -990,6 +990,11 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, colFilter, setC
     if(col==='origin'){
       return ['Fresh','Imported'];
     }
+    // Emailable vs not — "No email" is the one people actually want, to find the
+    // rows that can't be sent to SmartReach/Close yet.
+    if(col==='emails'){
+      return ['Has email','No email'];
+    }
     return [];
   }
 
@@ -1306,6 +1311,10 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
     if(colFilter.origin){
       if(leadOrigin(l)!==colFilter.origin) return false;
     }
+    if(colFilter.emails){
+      const n=(l.emails||[]).filter(Boolean).length;
+      if(colFilter.emails==='No email' ? n>0 : n===0) return false;
+    }
     return true;
   }).sort((a,b)=>{
     if(!sortCol) return 0;
@@ -1320,6 +1329,13 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
     }
     if(sortCol==='assignedTo') return dir*(a.assignedTo||'').localeCompare(b.assignedTo||'');
     if(sortCol==='dateAssigned') return dir*(a.dateAssigned||'').localeCompare(b.dateAssigned||'');
+    // Group the blanks together first, then sort by address — so "no email" is one
+    // contiguous block you can act on, not scattered through the page.
+    if(sortCol==='emails'){
+      const ea=((a.emails||[]).filter(Boolean)[0]||''), eb=((b.emails||[]).filter(Boolean)[0]||'');
+      if(!ea!==!eb) return dir*((ea?1:0)-(eb?1:0));
+      return dir*ea.localeCompare(eb);
+    }
     return 0;
   });
 
@@ -1524,7 +1540,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                 {cols.platform && <ColHeader col="platform" label="Platform" {...colHeaderProps}/>}
                 {cols.niche && <ColHeader col="niche" label="Niche" {...colHeaderProps}/>}
                 {cols.followers && <ColHeader col="followers" label="Followers" {...colHeaderProps}/>}
-                {cols.emails && <th>Email</th>}
+                {cols.emails && <ColHeader col="emails" label="Email" {...colHeaderProps}/>}
                 {cols.tags && <ColHeader col="tags" label="Tags" {...colHeaderProps}/>}
                 {showOrigin && <ColHeader col="origin" label="Origin" {...colHeaderProps}/>}
                 {showCampaign && cols.campaign && <ColHeader col="campaign" label="Campaign" {...colHeaderProps}/>}
