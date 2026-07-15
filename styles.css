@@ -289,6 +289,13 @@ html[data-dark] .note-dot { box-shadow:0 0 0 2px var(--card-bg, #1a1b23); }
 .dup-flag-cross { background:#FEE2E2; color:#B42318; }
 html[data-dark] .dup-flag { background:rgba(245,158,11,.18); color:#FCD34D; }
 html[data-dark] .dup-flag-cross { background:rgba(239,68,68,.18); color:#FCA5A5; }
+/* A teammate contacted this same channel and it isn't due for recycling yet —
+   emailing it now would double-touch the creator. Sits next to .dup-flag. */
+.recent-contact-flag { display:inline-block; margin-left:6px; font-size:9.5px; font-weight:700;
+  line-height:1; padding:2px 5px; border-radius:5px; vertical-align:middle;
+  letter-spacing:.02em; white-space:nowrap; cursor:help;
+  background:#EEF2FF; color:#3730A3; }
+html[data-dark] .recent-contact-flag { background:rgba(99,102,241,.18); color:#A5B4FC; }
 .thumb { width: 38px; height: 38px; border-radius: 50%; background: linear-gradient(135deg,var(--accent),var(--purple)); color: white; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; cursor: pointer; border: 2px solid var(--border); flex-shrink: 0; text-decoration: none; }
 .platform-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; color: var(--text-dim); background: var(--bg); padding: 3px 9px; border-radius: 8px; border: 1px solid var(--border); }
 .followers-val { font-weight: 600; color: var(--text); }

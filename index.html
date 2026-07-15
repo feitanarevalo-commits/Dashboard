@@ -355,6 +355,37 @@ function recycleThresholdDays(lead) {
   if (c.includes('VIRALS') || c.includes('VVV')) return 30;
   return 30;
 }
+// ─── RECENTLY-CONTACTED GUARD ────────────────────────────
+// Another copy of this same channel — under ANY teammate — was contacted and is
+// still inside its recycle window. Contacting it again now double-touches the
+// creator, so the row is flagged and imports warn up-front. Returns
+// {rep, days, left} or null. Reuses the same timezone-safe calendar-day maths as
+// the recycle countdown, so "10 days ago" means the same thing everywhere.
+// `recs` comes from the dup index: [{id, rep, contacted, lastContact, threshold}]
+function contactWarnFor(lead, recs) {
+  if (!lead || !recs || !recs.length) return null;
+  let best = null;
+  recs.forEach(r => {
+    if (String(r.id) === String(lead.id) || !r.contacted || !r.lastContact) return;
+    const d = toLocalDay(r.lastContact);
+    if (!d) return;
+    if (!best || d > best.date) best = {
+      date: d,
+      rep: r.rep || '',
+      threshold: r.threshold || 30
+    };
+  });
+  if (!best) return null;
+  const days = dayDiff(best.date, new Date());
+  if (days == null) return null;
+  const left = best.threshold - days;
+  if (left <= 0) return null; // already due for recycling — re-working it is fine
+  return {
+    rep: best.rep,
+    days,
+    left
+  };
+}
 // Parse "1.5M" / "23K" / "12000" → a number for range filtering.
 function parseFollowers(v) {
   if (v == null) return 0;
@@ -2001,6 +2032,109 @@ function NoteModal({
 }
 
 // ─── LEADS TABLE ──────────────────────────────────────────
+// ─── IMPORT GUARD ────────────────────────────────────────
+// After a sheet import, some rows may be channels a teammate contacted recently
+// that aren't due for recycling. One summary — not N confirm dialogs — so it
+// stays readable on a 200-row import. Nothing is dropped unless asked.
+function ImportWarnModal({
+  items,
+  onKeepTag,
+  onRemove,
+  onKeepAll,
+  onClose
+}) {
+  const byRep = {};
+  items.forEach(i => {
+    const r = i.rep || 'Unassigned';
+    byRep[r] = (byRep[r] || 0) + 1;
+  });
+  const breakdown = Object.keys(byRep).sort((a, b) => byRep[b] - byRep[a]).map(r => `${r} ${byRep[r]}`).join(' · ');
+  const show = items.slice(0, 8);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-overlay",
+    onClick: e => e.target === e.currentTarget && onClose()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal",
+    style: {
+      width: 640,
+      maxWidth: '94vw'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-header"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", null, "⚠ ", items.length, " imported lead", items.length !== 1 ? 's were' : ' was', " recently contacted"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: 'var(--text-dim)',
+      fontSize: 13,
+      marginTop: 3
+    }
+  }, "Still inside the recycle window — emailing them now would double-touch the creator.", breakdown ? ` (${breakdown})` : '')), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: onClose,
+    style: {
+      fontSize: 16,
+      padding: '4px 8px'
+    }
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxHeight: '44vh',
+      overflowY: 'auto',
+      border: '1px solid var(--border)',
+      borderRadius: 10
+    }
+  }, show.map((i, n) => /*#__PURE__*/React.createElement("div", {
+    key: n,
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '10px 14px',
+      borderBottom: n < show.length - 1 ? '1px solid var(--border-light)' : 'none',
+      fontSize: 13
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 600,
+      flex: 1,
+      minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
+    }
+  }, i.channelName), i.rep && /*#__PURE__*/React.createElement("span", {
+    className: "tag tag-contacted",
+    style: {
+      fontSize: 10.5
+    }
+  }, i.rep), /*#__PURE__*/React.createElement("span", {
+    className: "recent-contact-flag",
+    style: {
+      marginLeft: 0
+    }
+  }, "⏳ ", i.days, "d ago · recycle in ", i.left, "d"))), items.length > show.length && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '9px 14px',
+      fontSize: 12.5,
+      color: 'var(--text-dim)'
+    }
+  }, "…and ", items.length - show.length, " more")), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-danger btn-sm",
+    onClick: onRemove,
+    title: "Delete these rows from the import — the rest still import normally"
+  }, "🗑 Remove them from this import"), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer-right"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: onKeepAll,
+    title: "Import them as-is, no tag"
+  }, "Keep all"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: onKeepTag,
+    title: "Import them but tag them Recently Contacted so nobody emails them by accident"
+  }, "Keep & tag “Recently Contacted”")))));
+}
+
 // ─── LEAD HISTORY PANEL ──────────────────────────────────
 // The lead's own record: who scraped it and who qualified it (with exact date +
 // 12-hour time) up top, then everything else that happened, oldest → newest.
@@ -2802,6 +2936,16 @@ function LeadsTable({
       className: `dup-flag${crossRep ? ' dup-flag-cross' : ''}`,
       title: `Same channel also worked by: ${label}`
     }, "⚠ dup");
+  })(), (() => {
+    // A teammate contacted this same channel and it's still
+    // inside its recycle window — emailing it now double-touches
+    // the creator. Live-computed, so it's right on every tab.
+    const w = contactWarnFor(lead, dupIndex[leadKey(lead)]);
+    if (!w) return null;
+    return /*#__PURE__*/React.createElement("span", {
+      className: "recent-contact-flag",
+      title: `${w.rep || 'A teammate'} contacted this channel ${w.days} day${w.days !== 1 ? 's' : ''} ago — not due for recycling for another ${w.left} day${w.left !== 1 ? 's' : ''}. Contacting it now would double-touch the creator.`
+    }, "⏳ contacted ", w.days, "d ago", w.rep ? ` · ${w.rep}` : '', " · recycle in ", w.left, "d");
   })()), isInClose(lead) && /*#__PURE__*/React.createElement("div", {
     className: "in-close-badge",
     title: "This channel already exists in your Close CRM"
@@ -12815,6 +12959,7 @@ function App() {
   // revert then written back), because the lead is already marked "synced" by the
   // time the stale response lands.
   const writeStampRef = useRef({});
+  const [importWarn, setImportWarn] = useState(null); // rows an import flagged as recently contacted
   // Lightweight set of ARCHIVED channel keys (leadKey strings only — not the
   // full objects, so it stays cheap at scale). Lets the scraper + imports still
   // skip channels that were archived, so archived leads don't silently resurface
@@ -13590,6 +13735,43 @@ function App() {
     checkAndTagFromClose([lead], 'manually-added');
     return true;
   }
+  // ── Import guard actions ──
+  // Tag the flagged rows so nobody emails them by accident. They still import —
+  // nothing is silently dropped.
+  function importWarnKeepTag() {
+    const ids = new Set((importWarn || []).map(w => String(w.id)));
+    const me = currentUser && currentUser.name || '';
+    setLeads(ls => ls.map(l => {
+      if (!ids.has(String(l.id))) return l;
+      if ((l.tags || []).includes('Recently Contacted')) return l;
+      const tags = [...(l.tags || []), 'Recently Contacted'];
+      return {
+        ...l,
+        tags,
+        history: pushHist(l, [histEvent(me, 'tag', {
+          from: (l.tags || []).join(', '),
+          to: 'Recently Contacted',
+          via: 'import guard'
+        })])
+      };
+    }));
+    logH('⏳', `Import guard: tagged ${ids.size} recently-contacted lead(s)`);
+    addToast(`⏳ ${ids.size} lead(s) tagged "Recently Contacted"`, 'info');
+    setImportWarn(null);
+  }
+  function importWarnRemove() {
+    const ids = (importWarn || []).map(w => w.id);
+    const set = new Set(ids.map(String));
+    const removed = leads.filter(l => set.has(String(l.id)));
+    setLeads(ls => ls.filter(l => !set.has(String(l.id))));
+    deleteLeadsFromSupabase(ids);
+    logH('🗑', `Import guard: removed ${ids.length} recently-contacted lead(s) from the import`, {
+      type: 'undelete',
+      leads: removed
+    });
+    addToast(`🗑 ${ids.length} recently-contacted lead(s) removed from the import`, 'info');
+    setImportWarn(null);
+  }
   function clearAllLeads() {
     const n = leads.length;
     const snapshot = [...leads];
@@ -13767,6 +13949,36 @@ function App() {
     });
     const skipped = newLeads.length - fresh.length - skippedArch;
     setLeads(existing => [...existing, ...fresh]);
+    // Guard: which of these did a teammate contact recently, still inside the
+    // recycle window? Computed against the leads that existed BEFORE this import,
+    // so the fresh rows can't match themselves. Runs after the rows land, so it
+    // can never block or lose an import.
+    (function () {
+      const warn = [];
+      fresh.forEach(l => {
+        const key = leadKey(l);
+        if (!key) return;
+        const recs = leads.filter(x => leadKey(x) === key).map(x => ({
+          id: x.id,
+          rep: x.assignedTo || '',
+          contacted: isContacted(x) || (x.tags || []).includes('For Recycle'),
+          lastContact: x.lastContactDate || '',
+          threshold: recycleThresholdDays(x)
+        }));
+        const w = contactWarnFor(l, recs);
+        if (w) warn.push({
+          id: l.id,
+          channelName: l.channelName,
+          rep: w.rep,
+          days: w.days,
+          left: w.left
+        });
+      });
+      if (warn.length) {
+        setImportWarn(warn);
+        logH('⏳', `Import guard: ${warn.length} imported lead(s) were recently contacted and aren't due for recycling`);
+      }
+    })();
     logH('📊', `Google Sheets import: ${fresh.length} lead(s) added${skipped > 0 ? ` · ${skipped} same-rep duplicate(s) skipped` : ''}${skippedArch > 0 ? ` · ${skippedArch} in archive skipped` : ''}`);
     if (skippedArch > 0) addToast(`🗄 ${skippedArch} imported channel(s) are in your Archive — skipped`, 'info');
     autoFileAgencies(newLeads); // any rows with an "agency" column drop into that Agency folder
@@ -14531,11 +14743,15 @@ function App() {
   // pool tab, can show an inline "also worked elsewhere" flag. Built from the same
   // global set as dupGroups, so detection is identical everywhere.
   const dupIndex = {};
+  // lastContact + threshold ride along so a row can also warn that a teammate
+  // contacted this same channel recently and it isn't due for recycling yet.
   dupGroups.forEach(g => {
     dupIndex[g.key] = g.leads.map(l => ({
       id: l.id,
       rep: l.assignedTo || '',
-      contacted: isContacted(l) || (l.tags || []).includes('For Recycle')
+      contacted: isContacted(l) || (l.tags || []).includes('For Recycle'),
+      lastContact: l.lastContactDate || '',
+      threshold: recycleThresholdDays(l)
     }));
   });
   const recentCutoff = new Date();
@@ -15380,6 +15596,15 @@ function App() {
     onClose: () => setSearchLead(null),
     onSave: saveL,
     onDelete: delL
+  }), importWarn && importWarn.length > 0 && /*#__PURE__*/React.createElement(ImportWarnModal, {
+    items: importWarn,
+    onKeepTag: importWarnKeepTag,
+    onRemove: importWarnRemove,
+    onKeepAll: () => {
+      addToast(`${importWarn.length} recently-contacted lead(s) kept as-is`, 'info');
+      setImportWarn(null);
+    },
+    onClose: () => setImportWarn(null)
   })));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(ErrorBoundary, {
