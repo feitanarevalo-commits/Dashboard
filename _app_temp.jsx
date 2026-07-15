@@ -127,6 +127,11 @@ function humanScraper(lead){
 // exactly when. Lives on the lead itself (data.history in Supabase) so it
 // travels with the record. Nothing here is ever edited or reordered.
 const HISTORY_CAP=40;
+// Ceiling on a stored undo payload. Single edits are ~1 KB; a bulk assign of 200
+// is still small because undoSnap only keeps the fields undo needs. What this
+// really guards is undelete/unarchive, which carry WHOLE leads — "Clear ALL
+// leads" would otherwise write megabytes into one activity_log row.
+const PAYLOAD_CAP_BYTES=64*1024;
 // "Jul 9, 2026 · 2:34 PM" — 12-hour, local time.
 function fmtHistTime(ts){
   if(!ts) return '';
@@ -4617,16 +4622,17 @@ function HistoryView({history,addToast,feats,onRestore}) {
           <div className="history-text">{e.text}{e.actor?<span style={{color:'var(--text-dim)',fontWeight:600}}> · {e.actor}</span>:''}</div>
           <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,flexShrink:0}}>
             <div className="history-time">{e.time}</div>
-            {e.restorable && e.restore && (()=>{
+            {e.restorable && (()=>{
               // Label + tooltip per undo type, so the button says what it will
-              // actually do rather than a generic "Restore".
-              const t=e.restore.type;
-              const n=(e.restore.before||e.restore.leads||e.restore.ids||[]).length;
+              // actually do rather than a generic "Restore". The type comes from a
+              // light column, so the list never has to download undo payloads —
+              // those are fetched only when the button is actually clicked.
+              const t=e.restoreType||(e.restore&&e.restore.type);
               const meta={
-                revert:  {label:'↩ Undo', tip:`Put ${n} lead(s) back to how they were before this change. Any lead someone has edited since is skipped, not overwritten.`},
-                unimport:{label:'↩ Undo import', tip:`Remove the ${n} lead(s) this import added.`},
-                undelete:{label:'↩ Restore', tip:`Re-add the ${n} deleted lead(s).`},
-                unarchive:{label:'↩ Unarchive', tip:`Return the ${n} archived lead(s) to the active dashboard.`},
+                revert:  {label:'↩ Undo', tip:'Put the lead(s) back to how they were before this change. Any lead someone has edited since is skipped, not overwritten.'},
+                unimport:{label:'↩ Undo import', tip:'Remove the lead(s) this import added.'},
+                undelete:{label:'↩ Restore', tip:'Re-add the deleted lead(s).'},
+                unarchive:{label:'↩ Unarchive', tip:'Return the archived lead(s) to the active dashboard.'},
               }[t]||{label:'↩ Undo', tip:'Undo this action'};
               return <button className="btn btn-ghost btn-xs" title={meta.tip}
                 onClick={()=>onRestore&&onRestore(e)}>{meta.label}</button>;
@@ -5850,7 +5856,16 @@ function App() {
     // Capture the row id back onto the entry: without it, undoing an in-session
     // entry couldn't clear the stored payload, and the spent entry would offer
     // Undo again after a reload. Fire-and-forget so it never blocks the UI.
-    try{ if(SB) SB.from('activity_log').insert({actor,icon,text,payload:restore||null}).select('id').then(res=>{
+    //
+    // CAP: an undelete/unarchive payload carries WHOLE leads, so "Clear ALL
+    // leads" would try to store megabytes in one row (and every History load
+    // would drag it down). Past the cap we keep the payload in memory only —
+    // undo still works in this session, it just doesn't survive a reload — and
+    // we say so rather than pretending the entry is undoable forever.
+    let stored=restore||null, tooBig=false;
+    try{ if(stored && JSON.stringify(stored).length>PAYLOAD_CAP_BYTES){ stored=null; tooBig=true; } }catch(e){ stored=null; }
+    const dbText=text+(tooBig?' · (undo available this session only — too large to store)':'');
+    try{ if(SB) SB.from('activity_log').insert({actor,icon,text:dbText,payload:stored}).select('id').then(res=>{
       const dbId=res&&res.data&&res.data[0]&&res.data[0].id;
       if(dbId) setHistory(h=>h.map(x=>x.id===localId?{...x,dbId}:x));
     },()=>{}); }catch(e){}
@@ -5872,7 +5887,22 @@ function App() {
       if(SB && entry.dbId) SB.from('activity_log').update({payload:null,text:(entry.text||'')+suffix}).eq('id',entry.dbId).then(()=>{},()=>{});
     }catch(e){}
   }
+  // Entries loaded from the shared log carry only a has_payload flag, so pull the
+  // actual undo data on demand, then run the real undo.
   function restoreHistory(entry){
+    if(!entry) return;
+    if(!entry.restore && entry.dbId && SB){
+      SB.from('activity_log').select('payload').eq('id',entry.dbId).limit(1)
+        .then(({data})=>{
+          const p=data&&data[0]&&data[0].payload;
+          if(!p){ addToast('This action can no longer be undone','info'); setHistory(h=>h.map(x=>x.id===entry.id?{...x,restorable:false}:x)); return; }
+          doRestore({...entry, restore:p});
+        }, ()=>addToast('Couldn’t load the undo data','error'));
+      return;
+    }
+    doRestore(entry);
+  }
+  function doRestore(entry){
     if(!entry||!entry.restore) return;
     const t=entry.restore.type;
 
@@ -6511,10 +6541,12 @@ function App() {
     loadArchivedKeysFromSupabase().then(keys=>{ if(Array.isArray(keys)) archivedKeysRef.current=new Set(keys); });
     // Load the shared, persisted activity history (team-wide) so the History tab
     // shows real activity instead of an empty in-memory list.
-    // Pull the payload too, so undo survives a reload and works across the team
-    // (it used to be session-only, which quietly made every reloaded entry dead).
-    try{ if(SB) SB.from('activity_log').select('id,created_at,actor,icon,text,payload').order('created_at',{ascending:false}).limit(200)
-      .then(({data})=>{ if(Array.isArray(data)&&data.length) setHistory(data.map(r=>({id:'db_'+r.id, icon:r.icon||'•', text:r.text||'', actor:r.actor||'', time:new Date(r.created_at).toLocaleString('en-CA',{hour12:false}).replace(',',''), restorable:!!r.payload, restore:r.payload||null, dbId:r.id}))); }, ()=>{}); }catch(e){}
+    // Undo now survives a reload (the payload used to be session-only, which
+    // quietly made every reloaded entry dead). We deliberately DON'T pull the
+    // payloads here — only the has_payload flag — so 200 rows of undo data don't
+    // ride along on every page load. The payload is fetched when Undo is clicked.
+    try{ if(SB) SB.from('activity_log').select('id,created_at,actor,icon,text,has_payload,payload_type').order('created_at',{ascending:false}).limit(200)
+      .then(({data})=>{ if(Array.isArray(data)&&data.length) setHistory(data.map(r=>({id:'db_'+r.id, icon:r.icon||'•', text:r.text||'', actor:r.actor||'', time:new Date(r.created_at).toLocaleString('en-CA',{hour12:false}).replace(',',''), restorable:!!r.has_payload, restoreType:r.payload_type||null, restore:null, dbId:r.id}))); }, ()=>{}); }catch(e){}
   },[]);
 
   // Persist lead changes to Supabase (debounced, upsert-only — deletes go through
