@@ -106,6 +106,21 @@ function leadOrigin(lead){
 }
 // Convenience: a Fresh lead is one not yet on Close.
 function isFresh(lead){ return leadOrigin(lead)==='Fresh'; }
+// "Scraped By" is a PEOPLE record — which teammate (rep or lead-gen) sourced the
+// lead, so credit survives reassignment (e.g. JC scrapes → assigned to Mikka →
+// still reads JC). The Make automation isn't a person, so pool leads have no
+// human scraper and show "—" instead. The raw scrapedBy value is kept on the
+// lead either way; this only controls what the column reports.
+const AUTOMATION_SCRAPERS=['make scraper','make','make.com','automation','bot','scraper bot'];
+function isAutomationScraper(lead){
+  const s=String((lead&&lead.scrapedBy)||'').trim().toLowerCase();
+  return !!s && AUTOMATION_SCRAPERS.includes(s);
+}
+function humanScraper(lead){
+  const s=String((lead&&lead.scrapedBy)||'').trim();
+  if(!s || isAutomationScraper(lead)) return '';
+  return s;
+}
 function isRecycled(lead){
   return (lead.tags||[]).includes('For Recycle') || lead.recycled === true;
 }
@@ -333,7 +348,7 @@ function exportCSV(leads, filename='leads.csv') {
     l.followers, parseFollowers(l.followers)||'',
     (l.emails||[]).join('; '), (l.emails||[]).length,
     (l.tags||[]).join('; '), leadOrigin(l), isRecycled(l)?'Yes':'No',
-    (l.campaigns||[]).join(', '), l.scrapedBy||'', l.assignedTo||'',
+    (l.campaigns||[]).join(', '), humanScraper(l), l.assignedTo||'',
     fmtAddedAt(l), l.dateAssigned||'', l.lastContactDate||'', daysSince(l.dateAssigned),
     (l.channels||[]).length
   ]))].join('\n');
@@ -882,10 +897,11 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, colFilter, setC
     if(col==='origin'){
       return ['Fresh','Imported'];
     }
-    // Who originally sourced the lead (a rep, a lead-gen, or the Make automation).
+    // Which teammate originally sourced the lead. Automation-sourced pool leads
+    // have no human scraper, so they fall under "Unknown" rather than listing the bot.
     if(col==='scrapedBy'){
       const all=new Set();
-      leads.forEach(l=>{ if(l.scrapedBy) all.add(l.scrapedBy); });
+      leads.forEach(l=>{ const s=humanScraper(l); if(s) all.add(s); });
       return [...all,'Unknown'];
     }
     return [];
@@ -1064,8 +1080,9 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
       if(leadOrigin(l)!==colFilter.origin) return false;
     }
     if(colFilter.scrapedBy){
-      if(colFilter.scrapedBy==='Unknown'){ if(l.scrapedBy) return false; }
-      else if(l.scrapedBy!==colFilter.scrapedBy) return false;
+      const s=humanScraper(l);
+      if(colFilter.scrapedBy==='Unknown'){ if(s) return false; }
+      else if(s!==colFilter.scrapedBy) return false;
     }
     return true;
   }).sort((a,b)=>{
@@ -1080,7 +1097,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
       return dir*(fa-fb);
     }
     if(sortCol==='assignedTo') return dir*(a.assignedTo||'').localeCompare(b.assignedTo||'');
-    if(sortCol==='scrapedBy') return dir*(a.scrapedBy||'').localeCompare(b.scrapedBy||'');
+    if(sortCol==='scrapedBy') return dir*humanScraper(a).localeCompare(humanScraper(b));
     if(sortCol==='dateAssigned') return dir*(a.dateAssigned||'').localeCompare(b.dateAssigned||'');
     return 0;
   });
@@ -1373,11 +1390,11 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                         onChange={campaigns=>patchLead(lead.id,{campaigns})}/>
                     </td>
                   )}
-                  {/* Who ORIGINALLY sourced this lead. Never changes on reassignment,
-                      so it stays the permanent record of who scraped it. */}
-                  <td style={{whiteSpace:'nowrap'}} title={lead.scrapedBy?`Originally scraped by ${lead.scrapedBy}`:'No scrape record for this lead (added before scraper attribution, or bulk-imported)'}>
-                    {lead.scrapedBy
-                      ? <span style={{fontSize:11.5,fontWeight:600,color:'var(--text-dim)'}}>{lead.scrapedBy}</span>
+                  {/* Which TEAMMATE originally sourced this lead. Never changes on
+                      reassignment, so it stays the permanent record of who scraped it. */}
+                  <td style={{whiteSpace:'nowrap'}} title={humanScraper(lead)?`Originally scraped by ${humanScraper(lead)}`:(isAutomationScraper(lead)?'From the automated pool scraper — no teammate scraped this one':'No scrape record for this lead')}>
+                    {humanScraper(lead)
+                      ? <span style={{fontSize:11.5,fontWeight:600,color:'var(--text-dim)'}}>{humanScraper(lead)}</span>
                       : <span style={{color:'var(--text-light)',fontSize:11}}>—</span>}
                   </td>
                   {showAssigned && cols.assignedTo && (
@@ -3104,14 +3121,14 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
   const rows=contacted.filter(l=>{
     if(colFilter.campaign){ if(colFilter.campaign==='None'){ if((l.campaigns||[]).length>0) return false; } else if(!(l.campaigns||[]).includes(colFilter.campaign)) return false; }
     if(colFilter.assignedTo){ if(colFilter.assignedTo==='Unassigned'){ if(l.assignedTo) return false; } else if(l.assignedTo!==colFilter.assignedTo) return false; }
-    if(colFilter.scrapedBy){ if(colFilter.scrapedBy==='Unknown'){ if(l.scrapedBy) return false; } else if(l.scrapedBy!==colFilter.scrapedBy) return false; }
+    if(colFilter.scrapedBy){ const s=humanScraper(l); if(colFilter.scrapedBy==='Unknown'){ if(s) return false; } else if(s!==colFilter.scrapedBy) return false; }
     return true;
   }).sort((a,b)=>{
     if(!sortCol) return 0;
     const dir=sortDir==='asc'?1:-1;
     if(sortCol==='channelName') return dir*String(a.channelName||'').localeCompare(String(b.channelName||''));
     if(sortCol==='assignedTo') return dir*String(a.assignedTo||'').localeCompare(String(b.assignedTo||''));
-    if(sortCol==='scrapedBy') return dir*String(a.scrapedBy||'').localeCompare(String(b.scrapedBy||''));
+    if(sortCol==='scrapedBy') return dir*humanScraper(a).localeCompare(humanScraper(b));
     if(sortCol==='campaign') return dir*(a.campaigns||[]).join(',').localeCompare((b.campaigns||[]).join(','));
     if(sortCol==='followers'){ const fa=parseInt(String(a.followers).replace(/[^0-9]/g,''))||0, fb=parseInt(String(b.followers).replace(/[^0-9]/g,''))||0; return dir*(fa-fb); }
     if(sortCol==='lastContact'){ const da=effectiveContact(a),db=effectiveContact(b); return dir*((da?da.date.getTime():0)-(db?db.date.getTime():0)); }
@@ -3160,9 +3177,9 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
                   ? <a href={`mailto:${email}`} style={{fontSize:11.5,color:'var(--accent)',textDecoration:'none',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'block'}} title={email}>{email}</a>
                   : <span style={{color:'var(--text-light)',fontSize:11}}>—</span>}</td>
                 <td>{l.campaigns.length?l.campaigns.map(c=><span key={c} style={{color:campColorMap[c]||'var(--accent)',fontWeight:700,fontSize:12,marginRight:8}}>{c}</span>):<span style={{color:'var(--text-dim)'}}>—</span>}</td>
-                <td style={{whiteSpace:'nowrap'}} title={l.scrapedBy?`Originally scraped by ${l.scrapedBy}`:'No scrape record for this lead'}>
-                  {l.scrapedBy
-                    ? <span style={{fontSize:11.5,fontWeight:600,color:'var(--text-dim)'}}>{l.scrapedBy}</span>
+                <td style={{whiteSpace:'nowrap'}} title={humanScraper(l)?`Originally scraped by ${humanScraper(l)}`:(isAutomationScraper(l)?'From the automated pool scraper — no teammate scraped this one':'No scrape record for this lead')}>
+                  {humanScraper(l)
+                    ? <span style={{fontSize:11.5,fontWeight:600,color:'var(--text-dim)'}}>{humanScraper(l)}</span>
                     : <span style={{color:'var(--text-light)',fontSize:11}}>—</span>}
                 </td>
                 <td>{l.assignedTo||<span style={{color:'var(--text-dim)'}}>—</span>}</td>
