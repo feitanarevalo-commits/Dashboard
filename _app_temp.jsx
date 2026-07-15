@@ -2822,6 +2822,11 @@ function normalizeReply(x,i){
 function fmtReplyWhen(w){ if(!w) return ''; const d=new Date(w); return isNaN(d.getTime())?'':d.toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
 function repliesSeenSet(name){ try{ return new Set(JSON.parse(localStorage.getItem('repliesSeen_'+name)||'[]')); }catch(e){ return new Set(); } }
 function markRepliesSeen(name,ids){ try{ const s=repliesSeenSet(name); ids.forEach(id=>s.add(id)); localStorage.setItem('repliesSeen_'+name,JSON.stringify([...s])); }catch(e){} }
+// Same seen-tracking for duplicate conflicts, so "Chase is also working X" only
+// pings once. The id encodes the channel AND who holds it, so a NEW rep picking
+// it up is a new alert rather than a silent no-op.
+function dupSeenSet(name){ try{ return new Set(JSON.parse(localStorage.getItem('dupSeen_'+name)||'[]')); }catch(e){ return new Set(); } }
+function markDupSeen(name,ids){ try{ const s=dupSeenSet(name); ids.forEach(id=>s.add(id)); localStorage.setItem('dupSeen_'+name,JSON.stringify([...s])); }catch(e){} }
 
 function RepAvatar({rep,config,size=36,online=false,bgOverride=null}) {
   const color=(config.repColors||{})[rep]||'#6366F1';
@@ -6608,10 +6613,38 @@ function App() {
   // contacted this same channel recently and it isn't due for recycling yet.
   dupGroups.forEach(g=>{ dupIndex[g.key]=g.leads.map(l=>({id:l.id, rep:l.assignedTo||'', contacted:isContacted(l)||(l.tags||[]).includes('For Recycle'), lastContact:l.lastContactDate||'', threshold:recycleThresholdDays(l)})); });
 
+  // Cross-rep lead conflicts worth actively telling someone about: the same
+  // channel held by 2+ DIFFERENT teammates. A rep only hears about channels they
+  // hold ("Chase is also working X"); admins see every conflict. Same-rep copies
+  // are excluded — that's just a tidy-up, not a conflict.
+  const dupAlerts=(function(){
+    if(!currentUser) return [];
+    const out=[];
+    dupGroups.forEach(g=>{
+      const reps=[...new Set(g.leads.map(l=>l.assignedTo).filter(Boolean))];
+      if(reps.length<2) return;
+      if(!isAdmin && !reps.includes(currentUser.name)) return;
+      const others=reps.filter(r=>r!==currentUser.name);
+      if(!isAdmin && !others.length) return;
+      const own=g.leads.find(l=>l.assignedTo===currentUser.name);
+      out.push({
+        id:'dup_'+g.key+'_'+reps.slice().sort().join('_'),
+        channel:((own||g.leads[0])||{}).channelName||'(unnamed)',
+        who:isAdmin?reps:others,
+      });
+    });
+    return out;
+  })();
+
   const recentCutoff=new Date();recentCutoff.setDate(recentCutoff.getDate()-7);
-  // A lead is "Pending Qualification" if it carries that status tag OR it's the
-  // original workflow case (assigned to a rep but not yet sorted into a campaign).
-  const isPendingLead = l => (l.tags||[]).includes('Pending Qualification') || (l.assignedTo && (l.campaigns||[]).length===0);
+  // A lead is "Pending Qualification" if it carries that status tag, OR it's the
+  // original workflow case: assigned to a rep but not triaged AT ALL — no status
+  // and no campaign. A lead the rep has already tagged (Potential / HT /
+  // Contacted / For Recycle) is triaged by definition, so a missing campaign must
+  // not drag it back into Pending — that made a just-tagged lead look like the
+  // tag never stuck, and showed Contacted leads in two tabs at once.
+  const isPendingLead = l => (l.tags||[]).includes('Pending Qualification') ||
+    (l.assignedTo && (l.campaigns||[]).length===0 && !hasStatusTag(l));
   // Non-admins only see their OWN leads on scoped tabs (e.g. Pending); admins see all.
   const canSeeLead = l => isAdmin || (currentUser && l.assignedTo===currentUser.name);
   const counts={
@@ -6747,26 +6780,43 @@ function App() {
             const allMode = isAdmin && bellScope==='all';
             const myReplies = allMode ? replies : replies.filter(r=>(r.rep||'')===currentUser.name);
             const seen = repliesSeenSet(currentUser.name);
-            const unread = myReplies.filter(r=>!seen.has(r.id)).length;
+            const dseen = dupSeenSet(currentUser.name);
+            const unread = myReplies.filter(r=>!seen.has(r.id)).length
+                         + dupAlerts.filter(a=>!dseen.has(a.id)).length;
             return (
               <div className="bell-wrap">
-                <button className="btn btn-outline btn-sm bell-btn" title="Replies & interest"
-                  onClick={()=>{ if(!showBell) markRepliesSeen(currentUser.name, myReplies.map(r=>r.id)); setShowBell(s=>!s); }}>
+                <button className="btn btn-outline btn-sm bell-btn" title="Replies, interest & lead conflicts"
+                  onClick={()=>{ if(!showBell){ markRepliesSeen(currentUser.name, myReplies.map(r=>r.id)); markDupSeen(currentUser.name, dupAlerts.map(a=>a.id)); } setShowBell(s=>!s); }}>
                   🔔{unread>0 && <span className="bell-badge">{unread>9?'9+':unread}</span>}
                 </button>
                 {showBell && <>
                   <div className="bell-backdrop" onClick={()=>setShowBell(false)}/>
                   <div className="bell-dropdown">
                     <div className="bell-head">
-                      <span>🔔 Replies &amp; Interest · {allMode?'all reps':currentUser.name}</span>
+                      <span>🔔 Replies &amp; Alerts · {allMode?'all reps':currentUser.name}</span>
                       <div style={{display:'flex',gap:6,alignItems:'center'}}>
                         {isAdmin && <button className="btn btn-ghost btn-xs" onClick={()=>setBellScope(s=>s==='all'?'mine':'all')} title="Switch between your messages and everyone's">{allMode?'👤 Mine':'👥 All reps'}</button>}
                         <button className="btn btn-ghost btn-xs" onClick={()=>loadReplies()} disabled={repliesLoading}>{repliesLoading?'…':'⟳ Check'}</button>
                       </div>
                     </div>
                     <div className="bell-list">
-                      {myReplies.length===0
-                        ? <div className="bell-empty"><div style={{fontSize:24,marginBottom:6}}>🔔</div>No replies yet.<div className="bell-empty-sub">You'll be notified here when a prospect replies or shows interest in your campaigns — across SmartReach &amp; Close.</div></div>
+                      {/* Lead conflicts first — someone else working your channel is
+                          time-sensitive in a way an old reply isn't. */}
+                      {dupAlerts.slice(0,20).map(a=>(
+                        <div key={a.id} className={`bell-item${dseen.has(a.id)?'':' unread'}`}>
+                          <div className="bell-item-top">
+                            <span className="rs-chip" style={{background:'#FEE2E2',color:'#B42318'}}>⚠ Duplicate</span>
+                            <span className="bell-src">lead conflict</span>
+                          </div>
+                          <div className="bell-name">
+                            <b>{a.who.join(', ')}</b> {a.who.length>1?'are':'is'} also working <b>{a.channel}</b>
+                          </div>
+                          <div className="bell-snip">Same channel in {a.who.length+(isAdmin?0:1)} reps’ lists — agree who keeps it before either of you emails the creator.</div>
+                          <span className="bell-open" style={{cursor:'pointer'}} onClick={()=>{ setShowBell(false); setTab('duplicates'); }}>Open Duplicates ↗</span>
+                        </div>
+                      ))}
+                      {myReplies.length===0 && dupAlerts.length===0
+                        ? <div className="bell-empty"><div style={{fontSize:24,marginBottom:6}}>🔔</div>Nothing new.<div className="bell-empty-sub">You'll be notified here when a prospect replies or shows interest — and when another rep starts working a channel you already have.</div></div>
                         : myReplies.slice(0,40).map(r=>(
                           <div key={r.id} className={`bell-item${seen.has(r.id)?'':' unread'}`}>
                             <div className="bell-item-top">
