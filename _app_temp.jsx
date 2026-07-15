@@ -121,6 +121,77 @@ function humanScraper(lead){
   if(!s || isAutomationScraper(lead)) return '';
   return s;
 }
+
+// ─── PER-LEAD HISTORY ────────────────────────────────────
+// An append-only record of everything that happened to a lead: who did it and
+// exactly when. Lives on the lead itself (data.history in Supabase) so it
+// travels with the record. Nothing here is ever edited or reordered.
+const HISTORY_CAP=40;
+// "Jul 9, 2026 · 2:34 PM" — 12-hour, local time.
+function fmtHistTime(ts){
+  if(!ts) return '';
+  const d=new Date(ts); if(isNaN(d)) return '';
+  const date=d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const time=d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
+  return `${date} · ${time}`;
+}
+function histEvent(actor,type,extra){ return {ts:new Date().toISOString(), actor:actor||'', type, ...(extra||{})}; }
+// Append events, trimming to the cap. The accountability record (scraped /
+// qualified) is NEVER trimmed — only context events age out.
+function pushHist(lead, evs){
+  const add=(Array.isArray(evs)?evs:[evs]).filter(Boolean);
+  if(!add.length) return (lead&&lead.history)||[];
+  const h=[...((lead&&lead.history)||[]), ...add];
+  if(h.length<=HISTORY_CAP) return h;
+  const isKey=e=>e.type==='scraped'||e.type==='qualified';
+  const keys=h.filter(isKey);
+  const rest=h.filter(e=>!isKey(e));
+  const keep=rest.slice(Math.max(0, rest.length-Math.max(0,HISTORY_CAP-keys.length)));
+  return [...keys,...keep].sort((a,b)=>String(a.ts||'').localeCompare(String(b.ts||'')));
+}
+// Derive events by diffing a lead before/after an edit. Only meaningful field
+// changes are logged, so background writes (Close id backfill, urlBroken flags)
+// don't spam the timeline.
+function diffHistory(old, upd, actor){
+  if(!old||!upd) return [];
+  const evs=[];
+  const oldTags=old.tags||[], newTags=upd.tags||[];
+  const gained=newTags.filter(t=>!oldTags.includes(t));
+  const lost=oldTags.filter(t=>!newTags.includes(t));
+  gained.forEach(t=>{
+    if(t==='Potential') evs.push({type:'qualified', from:lost.join(', '), to:'Potential'});
+    else evs.push({type:'tag', from:lost.join(', '), to:t});
+  });
+  if(!gained.length && lost.length) evs.push({type:'tag', from:lost.join(', '), to:''});
+  if((old.assignedTo||'')!==(upd.assignedTo||'')) evs.push({type:'assigned', from:old.assignedTo||'', to:upd.assignedTo||''});
+  const oc=(old.campaigns||[]).join(', '), nc=(upd.campaigns||[]).join(', ');
+  if(oc!==nc) evs.push({type:'campaign', from:oc, to:nc});
+  if((old.lastContactDate||'')!==(upd.lastContactDate||'')) evs.push({type:'contact', from:old.lastContactDate||'', to:upd.lastContactDate||'', manual:!!upd.contactDateManual});
+  if((old.note||'')!==(upd.note||'')) evs.push({type:'note', to:(upd.note?'added':'cleared')});
+  // closeLeadId is deliberately NOT diffed: the Contacted tab resolves it in the
+  // background, which would log an automated backfill as if a rep did it. The
+  // real "sent to Close" action logs its own event.
+  const ts=new Date().toISOString();
+  return evs.map(e=>({ts, actor:actor||'', ...e}));
+}
+// One-line human sentence for an event.
+function histSentence(e){
+  const who=e.actor||'Someone';
+  switch(e.type){
+    case 'scraped':   return `${who} scraped this lead`;
+    case 'qualified': return `${who} tagged it Potential`;
+    case 'assigned':  return e.to ? `${e.from?`Reassigned to ${e.to}`:`Assigned to ${e.to}`}` : `Unassigned from ${e.from}`;
+    case 'tag':       return e.to ? `${who} tagged it ${e.to}` : `${who} cleared the status`;
+    case 'campaign':  return e.to ? `${who} set campaign to ${e.to}` : `${who} cleared the campaign`;
+    case 'close':     return `${who} sent it to Close.io`;
+    case 'contact':   return e.manual ? `${who} corrected the last-contacted date` : `${who} logged a contact`;
+    case 'recycle':   return `${who} recycled it — clock reset`;
+    case 'archive':   return e.to==='restored' ? `${who} restored it from the archive` : `${who} archived it`;
+    case 'import':    return `${who} imported it`;
+    default:          return `${who} updated the lead`;
+  }
+}
+const HIST_ICON={scraped:'◎',qualified:'🏷',assigned:'→',tag:'🏷',campaign:'◆',close:'☁',contact:'✉',recycle:'↻',archive:'🗄',import:'⬆'};
 function isRecycled(lead){
   return (lead.tags||[]).includes('For Recycle') || lead.recycled === true;
 }
@@ -1022,6 +1093,92 @@ function NoteModal({lead,onClose,onSave}){
 }
 
 // ─── LEADS TABLE ──────────────────────────────────────────
+// ─── LEAD HISTORY PANEL ──────────────────────────────────
+// The lead's own record: who scraped it and who qualified it (with exact date +
+// 12-hour time) up top, then everything else that happened, oldest → newest.
+function LeadHistoryModal({lead,onClose}){
+  const hist=(lead.history||[]);
+  const firstOf=t=>hist.find(e=>e.type===t);
+  const scraped=firstOf('scraped'), qualified=firstOf('qualified');
+  function Fact({icon,label,ev,fallbackWho}){
+    const who=(ev&&ev.actor)||fallbackWho||'';
+    return (
+      <div style={{background:'var(--card)',padding:'14px 16px'}}>
+        <div style={{fontSize:10,fontWeight:800,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text-dim)',marginBottom:6}}>{icon} {label}</div>
+        <div style={{fontSize:17,fontWeight:700,letterSpacing:'-.01em',color:who?'var(--text)':'var(--text-light)'}}>{who||'No record'}</div>
+        <div style={{fontSize:12.5,color:'var(--text-dim)',marginTop:3}}>
+          {ev&&ev.ts ? fmtHistTime(ev.ts)
+            : ev&&ev.legacy ? <span style={{color:'var(--warn)'}}>on record before history tracking · date unknown</span>
+            : <span style={{color:'var(--text-light)'}}>—</span>}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{width:620,maxWidth:'94vw'}}>
+        <div className="modal-header">
+          <div>
+            <h2>🕘 Lead History</h2>
+            <p style={{color:'var(--text-dim)',fontSize:13,marginTop:3}}>{lead.channelName}</p>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
+        </div>
+
+        {/* the two facts that matter, up front */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:1,background:'var(--border)',border:'1px solid var(--border)',borderRadius:12,overflow:'hidden',marginBottom:16}}>
+          <Fact icon="◎" label="Scraped by" ev={scraped} fallbackWho={humanScraper(lead)}/>
+          <Fact icon="🏷" label="Qualified (Potential) by" ev={qualified} fallbackWho=""/>
+        </div>
+
+        {hist.length===0 ? (
+          <div style={{textAlign:'center',padding:'28px 12px',color:'var(--text-dim)',fontSize:13}}>
+            <div style={{fontSize:24,marginBottom:6}}>🕘</div>
+            Nothing recorded yet.
+            <div style={{fontSize:11.5,color:'var(--text-light)',marginTop:4}}>History starts from the next action on this lead.</div>
+          </div>
+        ) : (
+          <div style={{maxHeight:'46vh',overflowY:'auto',paddingRight:4}}>
+            {hist.map((e,i)=>{
+              const key=e.type==='scraped'||e.type==='qualified';
+              return (
+                <div key={i} style={{display:'grid',gridTemplateColumns:'26px 1fr',gap:12,position:'relative',padding:'11px 0'}}>
+                  {i<hist.length-1 && <span style={{position:'absolute',left:12.5,top:34,bottom:-11,width:1,background:'var(--border)'}}/>}
+                  <div style={{width:26,height:26,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,flexShrink:0,
+                    background:key?'var(--accent)':'var(--bg)',border:`1px solid ${key?'var(--accent)':'var(--border)'}`,color:key?'#fff':'var(--text-dim)'}}>
+                    {HIST_ICON[e.type]||'•'}
+                  </div>
+                  <div>
+                    <div style={{fontSize:13.5,color:key?'var(--text)':'var(--text-dim)'}}>
+                      {histSentence(e)}
+                      {key && <span style={{marginLeft:7,fontSize:9.5,fontWeight:800,letterSpacing:'.05em',textTransform:'uppercase',color:'var(--accent)',background:'var(--accent-light)',padding:'2px 6px',borderRadius:4}}>Key</span>}
+                    </div>
+                    <div style={{fontSize:11.5,color:'var(--text-light)',marginTop:2,fontVariantNumeric:'tabular-nums'}}>
+                      {e.ts ? fmtHistTime(e.ts) : <span style={{color:'var(--warn)'}}>date unknown · recorded before history tracking</span>}
+                      {e.via?` · ${e.via}`:''}
+                    </div>
+                    {(e.from||e.to) && e.type!=='scraped' && (
+                      <div style={{marginTop:5,fontSize:11.5,color:'var(--text-dim)',display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                        <span style={{padding:'1.5px 7px',borderRadius:5,fontWeight:700,fontSize:10.5,border:'1px solid var(--border)'}}>{e.from||'—'}</span>
+                        <span>→</span>
+                        <span style={{padding:'1.5px 7px',borderRadius:5,fontWeight:700,fontSize:10.5,border:'1px solid var(--border)'}}>{e.to||'—'}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="modal-footer">
+          <span style={{fontSize:11,color:'var(--text-light)'}}>Append-only · {hist.length} event{hist.length!==1?'s':''} recorded</span>
+          <div className="modal-footer-right"><button className="btn btn-ghost" onClick={onClose}>Close</button></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,hideRepFilter=false,onClaim=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
   const [sel,setSel] = useState([]);
   const dupIndex = React.useContext(DupContext) || {};
@@ -1039,6 +1196,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
   const [bulkCamps,setBulkCamps] = useState([]);
   const [editLead,setEditLead] = useState(null);
   const [noteLead,setNoteLead] = useState(null);
+  const [histLead,setHistLead] = useState(null);
   const [ctxMenu,setCtxMenu] = useState(null);
   const [page,setPage] = useState(1);
   const [colFilter,setColFilter] = useState({});
@@ -1411,6 +1569,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                     <div style={{display:'flex',gap:5}}>
                       <button className="btn-icon" onClick={()=>onRowOpen?onRowOpen(lead):setEditLead(lead)} title={onRowOpen?'View profile':'Edit lead'}>{onRowOpen?'👁':'✏'}</button>
                       {onEdit && <button className="btn-icon note-ind-btn" onClick={()=>setNoteLead(lead)} style={lead.note?{color:'var(--accent)',borderColor:'var(--accent-light)',background:'var(--accent-light)'}:{}} title={lead.note?('Note: '+String(lead.note).slice(0,100)+(String(lead.note).length>100?'…':'')):'Add a note'}>📝{lead.note && <span className="note-dot"/>}</button>}
+                      <button className="btn-icon" onClick={()=>setHistLead(lead)} title={humanScraper(lead)?`History — scraped by ${humanScraper(lead)}`:'History — who scraped & qualified this lead'}>🕘</button>
                       {onDelete && <button className="btn-icon" style={{color:'var(--danger)',borderColor:'rgba(222,53,11,.25)'}} onClick={()=>{if(window.confirm(`Delete "${lead.channelName}"?`))onDelete(lead.id);}} title="Delete lead">🗑</button>}
                     </div>
                   </td>
@@ -1436,6 +1595,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
       )}
       {editLead&&<LeadModal lead={editLead} config={config} onClose={()=>setEditLead(null)} onSave={l=>{if(onEdit)onEdit(l);setEditLead(null);}} onDelete={id=>{if(onDelete)onDelete(id);setEditLead(null);}}/>}
       {noteLead&&<NoteModal lead={noteLead} onClose={()=>setNoteLead(null)} onSave={l=>{if(onEdit)onEdit(l);setNoteLead(null);}}/>}
+      {histLead&&<LeadHistoryModal lead={leads.find(l=>l.id===histLead.id)||histLead} onClose={()=>setHistLead(null)}/>}
       {ctxMenu&&<ContextMenu x={ctxMenu.x} y={ctxMenu.y} lead={ctxMenu.lead} sel={sel} allLeads={leads} config={config} campColorMap={campColorMap} onEdit={l=>{if(onEdit)onEdit(l);}} onDelete={id=>{if(onDelete)onDelete(id);setCtxMenu(null);}} onOpenEdit={l=>setEditLead(l)} onClose={()=>setCtxMenu(null)}/>}
     </div>
   );
@@ -2737,6 +2897,7 @@ function AddLeadModal({rep,config,onAdd,onClose}) {
         tags:[], campaigns:[], assignedTo:rep, dateAssigned:new Date().toISOString().split('T')[0],
         lastContactDate:null, channels:[n], addedAt:new Date().toISOString(), source:'manual',
         scrapedBy: rep || null,   // manually added under this rep — they sourced it
+        history: [histEvent(rep,'scraped',{via:'added manually'})],
       });
       // Keep the form open if the add was blocked or the rep cancelled a warning.
       if(res!==false) onClose();
@@ -3116,6 +3277,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
   const [sortDir,setSortDir]=useState('asc');
   const [colFilter,setColFilter]=useState({});
   const [openFilterCol,setOpenFilterCol]=useState(null);
+  const [histLead,setHistLead]=useState(null);
   function handleSort(col,dir){ setSortCol(col); setSortDir(dir||'asc'); }
   const colHeaderProps={sortCol,sortDir,onSort:handleSort,leads:contacted,colFilter,setColFilter,openFilterCol,setOpenFilterCol};
   const rows=contacted.filter(l=>{
@@ -3194,6 +3356,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
                         ? <span style={{fontSize:10.5,color:'var(--text-light)'}} title="Looking this lead up in Close…">checking Close…</span>
                         : <span style={{fontSize:10.5,color:'var(--text-light)'}} title="Not found in Close">not in Close</span>}
                     <button className="btn btn-ghost btn-xs" title="Log a contact today — resets the recycle clock" onClick={()=>logContact(l)}>✓ Log contact</button>
+                    <button className="btn-icon" onClick={()=>setHistLead(l)} title={humanScraper(l)?`History — scraped by ${humanScraper(l)}`:'History — who scraped & qualified this lead'}>🕘</button>
                   </div>
                 </td>
               </tr>
@@ -3201,6 +3364,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
           })}
         </tbody>
       </table>
+      {histLead&&<LeadHistoryModal lead={leads.find(l=>l.id===histLead.id)||histLead} onClose={()=>setHistLead(null)}/>}
     </div>
   );
 }
@@ -5560,6 +5724,9 @@ function App() {
       updated.lastContactDate=ymdLocal(new Date());
       addToast(`"${upd.channelName}" re-qualified as Potential — recycle clock reset`,'success');
     }
+    // Record what actually changed on the lead's own timeline (who + exactly when).
+    const evs=diffHistory(old, updated, (currentUser&&currentUser.name)||'');
+    if(evs.length) updated.history=pushHist(updated, evs);
     setLeads(ls=>ls.map(l=>l.id===updated.id?updated:l));
     logH('✏️',`Lead "${updated.channelName}" updated`);
   }
@@ -5622,7 +5789,20 @@ function App() {
   // Covers pool claims and bulk reassignment. Same rule as saveL: the first
   // teammate a lead lands with becomes its permanent scraper; an existing human
   // scraper is never overwritten, so only "Assigned To" changes after that.
-  function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:ymdLocal(new Date()),scrapedBy:humanScraper(l)||rep||l.scrapedBy||null}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
+  function bulkAssign(ids,rep){
+    const me=(currentUser&&currentUser.name)||'';
+    setLeads(ls=>ls.map(l=>{
+      if(!ids.includes(l.id)) return l;
+      const firstScrape=!humanScraper(l) && !!rep;
+      const evs=[];
+      if(firstScrape) evs.push(histEvent(rep,'scraped',{via:'pool claim'}));
+      if((l.assignedTo||'')!==(rep||'')) evs.push(histEvent(me,'assigned',{from:l.assignedTo||'',to:rep||'',via:'bulk'}));
+      const next={...l,assignedTo:rep,dateAssigned:ymdLocal(new Date()),scrapedBy:humanScraper(l)||rep||l.scrapedBy||null};
+      next.history=pushHist(l,evs);
+      return next;
+    }));
+    addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);
+  }
   // Distribute lead-gen JC's QUALIFIED (Potential-tagged) leads to the sales team.
   // RULE: high-ticket Potentials all go to Rein; every other Potential is split
   // EVENLY across Mikka, Chase and Pen — with fresh and imported balanced
@@ -5647,7 +5827,9 @@ function App() {
     // Credit JC (the lead-gen who sourced/qualified it) via qualifiedBy — this
     // survives the reassignment so his lead-gen KPI stays accurate even though the
     // lead now belongs to a sales rep. Assignment date resets to the handoff day.
-    setLeads(ls=>ls.map(l=> map[l.id] ? {...l,assignedTo:map[l.id],dateAssigned:today,qualifiedBy:l.qualifiedBy||l.assignedTo,handedOffAt:today} : l));
+    const me=(currentUser&&currentUser.name)||'';
+    setLeads(ls=>ls.map(l=> map[l.id] ? {...l,assignedTo:map[l.id],dateAssigned:today,qualifiedBy:l.qualifiedBy||l.assignedTo,handedOffAt:today,
+      history:pushHist(l,[histEvent(me,'assigned',{from:l.assignedTo||'',to:map[l.id],via:'auto-assign'})])} : l));
     addToast(`Distributed JC's Potential leads → Rein ${tally.Rein} (high-ticket) · Mikka ${tally.Mikka} · Chase ${tally.Chase} · Pen ${tally.Pen}`,'success');
     logH('⚡',`Auto-assigned ${targets.length} JC Potential leads — high-ticket→Rein, rest→Mikka/Chase/Pen`);
   }
@@ -5747,6 +5929,7 @@ function App() {
             emails: (lead.emails&&lead.emails.length)?lead.emails:target.emails,
             tags: [...(target.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'),'Contacted'],
             lastContactDate: today,
+            history: pushHist(target,[histEvent((currentUser&&currentUser.name)||'','recycle',{from:(target.tags||[]).join(', '),to:'Contacted'})]),
           };
           const dropIds=new Set(mine.filter(l=>l.id!==target.id).map(l=>l.id));
           setLeads(ls=>ls.map(l=>l.id===target.id?merged:l).filter(l=>!dropIds.has(l.id)));
@@ -5831,7 +6014,9 @@ function App() {
       seen.add(k);
       // Keep any scraper the sheet already declares; otherwise credit whoever ran
       // the import, so every lead carries a source record instead of a blank.
-      fresh.push({...l,source:'import',scrapedBy:l.scrapedBy||importerName||null});
+      const who=l.scrapedBy||importerName||'';
+      fresh.push({...l,source:'import',scrapedBy:who||null,
+        history:pushHist(l,[histEvent(who,'scraped',{via:'sheet import'})])});
     });
     const skipped=newLeads.length-fresh.length-skippedArch;
     setLeads(existing=>[...existing,...fresh]);
@@ -5891,7 +6076,9 @@ function App() {
       const arch=archivedKeysRef.current;
       const fresh=[];
       const importerName=(currentUser&&currentUser.name)||'';
-      arr.forEach(l=>{ const bare=leadKey(l); if(bare&&arch.has(bare)) return; const k=bare+'|'+(l.assignedTo||''); if(bare&&seen.has(k)) return; seen.add(k); fresh.push({...l,source:'import',scrapedBy:l.scrapedBy||importerName||null}); });
+      arr.forEach(l=>{ const bare=leadKey(l); if(bare&&arch.has(bare)) return; const k=bare+'|'+(l.assignedTo||''); if(bare&&seen.has(k)) return; seen.add(k);
+        const who=l.scrapedBy||importerName||'';
+        fresh.push({...l,source:'import',scrapedBy:who||null,history:pushHist(l,[histEvent(who,'scraped',{via:'agency import'})])}); });
       return [...existing,...fresh];
     });
     const keys=[...new Set(arr.map(leadKey).filter(Boolean))];
@@ -5915,7 +6102,9 @@ function App() {
       if(k && arch.has(k)){ skippedArch++; return; }  // deliberately archived — don't resurface
       if(k && seen.has(k)){ skipped++; return; }   // already in your leads
       if(k) seen.add(k);
-      fresh.push({...l, scrapedBy: l.scrapedBy||myName});   // stamp who scraped it
+      // Stamp who scraped it + open its timeline with that fact.
+      const who=l.scrapedBy||myName;
+      fresh.push({...l, scrapedBy: who, history: pushHist(l,[histEvent(who,'scraped',{via:'scraper'})])});
     });
     if(fresh.length) setLeads(existing=>{
       // Re-dedupe vs the LATEST existing (live-sync could have changed it).
@@ -5957,6 +6146,7 @@ function App() {
       assignedTo: x.assignedTo || getCf('rep') || meta.rep || null, dateAssigned: x.dateAssigned || getCf('assigned') || meta.assigned || null,
       lastContactDate: x.lastContactDate || null, contactDateManual: x.contactDateManual || false,
       scrapedBy: x.scrapedBy || null,   // permanent record of who originally sourced it — must survive normalization
+      history: Array.isArray(x.history) ? x.history : [],   // append-only per-lead timeline — must survive normalization too
       qualifiedBy: x.qualifiedBy || null, handedOffAt: x.handedOffAt || null, inClose: x.inClose || false, urlBroken: x.urlBroken || false, channels: Array.isArray(x.channels)?x.channels:[],
       links: Array.isArray(x.links)?x.links:[],
       addedAt: x.addedAt || null,
@@ -6202,7 +6392,11 @@ function App() {
         const failed=results.filter(r=>r && r.ok===false).length;
         // Mark Imported + store each lead's Close id (matched by order) so a
         // re-push updates in place rather than creating a duplicate.
-        setLeads(ls=>ls.map(l=>{ const idx=orderedIds.indexOf(l.id); if(idx<0) return l; const r=results[idx]; return {...l, importedToClose:true, closeLeadId:(r&&r.id)||l.closeLeadId||null}; }));
+        const me=(currentUser&&currentUser.name)||'';
+        setLeads(ls=>ls.map(l=>{ const idx=orderedIds.indexOf(l.id); if(idx<0) return l; const r=results[idx];
+          if(r && r.ok===false) return l;   // failed pushes don't get a timeline entry
+          return {...l, importedToClose:true, closeLeadId:(r&&r.id)||l.closeLeadId||null,
+            history:pushHist(l,[histEvent(me,'close',{to:'sent'})])}; }));
         addToast(failed?`Sent ${repLeads.length-failed}/${repLeads.length} to Close.io (${failed} failed) for ${rep}`:`✓ ${repLeads.length} lead(s) sent to Close.io for ${rep}`, failed?'info':'success');
         logH('⬆',`Close.io import: ${repLeads.length-failed} lead(s) for ${rep}`);
       })

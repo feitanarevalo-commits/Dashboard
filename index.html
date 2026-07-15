@@ -200,6 +200,148 @@ function humanScraper(lead) {
   if (!s || isAutomationScraper(lead)) return '';
   return s;
 }
+
+// ─── PER-LEAD HISTORY ────────────────────────────────────
+// An append-only record of everything that happened to a lead: who did it and
+// exactly when. Lives on the lead itself (data.history in Supabase) so it
+// travels with the record. Nothing here is ever edited or reordered.
+const HISTORY_CAP = 40;
+// "Jul 9, 2026 · 2:34 PM" — 12-hour, local time.
+function fmtHistTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d)) return '';
+  const date = d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+  const time = d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+  return `${date} · ${time}`;
+}
+function histEvent(actor, type, extra) {
+  return {
+    ts: new Date().toISOString(),
+    actor: actor || '',
+    type,
+    ...(extra || {})
+  };
+}
+// Append events, trimming to the cap. The accountability record (scraped /
+// qualified) is NEVER trimmed — only context events age out.
+function pushHist(lead, evs) {
+  const add = (Array.isArray(evs) ? evs : [evs]).filter(Boolean);
+  if (!add.length) return lead && lead.history || [];
+  const h = [...(lead && lead.history || []), ...add];
+  if (h.length <= HISTORY_CAP) return h;
+  const isKey = e => e.type === 'scraped' || e.type === 'qualified';
+  const keys = h.filter(isKey);
+  const rest = h.filter(e => !isKey(e));
+  const keep = rest.slice(Math.max(0, rest.length - Math.max(0, HISTORY_CAP - keys.length)));
+  return [...keys, ...keep].sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
+}
+// Derive events by diffing a lead before/after an edit. Only meaningful field
+// changes are logged, so background writes (Close id backfill, urlBroken flags)
+// don't spam the timeline.
+function diffHistory(old, upd, actor) {
+  if (!old || !upd) return [];
+  const evs = [];
+  const oldTags = old.tags || [],
+    newTags = upd.tags || [];
+  const gained = newTags.filter(t => !oldTags.includes(t));
+  const lost = oldTags.filter(t => !newTags.includes(t));
+  gained.forEach(t => {
+    if (t === 'Potential') evs.push({
+      type: 'qualified',
+      from: lost.join(', '),
+      to: 'Potential'
+    });else evs.push({
+      type: 'tag',
+      from: lost.join(', '),
+      to: t
+    });
+  });
+  if (!gained.length && lost.length) evs.push({
+    type: 'tag',
+    from: lost.join(', '),
+    to: ''
+  });
+  if ((old.assignedTo || '') !== (upd.assignedTo || '')) evs.push({
+    type: 'assigned',
+    from: old.assignedTo || '',
+    to: upd.assignedTo || ''
+  });
+  const oc = (old.campaigns || []).join(', '),
+    nc = (upd.campaigns || []).join(', ');
+  if (oc !== nc) evs.push({
+    type: 'campaign',
+    from: oc,
+    to: nc
+  });
+  if ((old.lastContactDate || '') !== (upd.lastContactDate || '')) evs.push({
+    type: 'contact',
+    from: old.lastContactDate || '',
+    to: upd.lastContactDate || '',
+    manual: !!upd.contactDateManual
+  });
+  if ((old.note || '') !== (upd.note || '')) evs.push({
+    type: 'note',
+    to: upd.note ? 'added' : 'cleared'
+  });
+  // closeLeadId is deliberately NOT diffed: the Contacted tab resolves it in the
+  // background, which would log an automated backfill as if a rep did it. The
+  // real "sent to Close" action logs its own event.
+  const ts = new Date().toISOString();
+  return evs.map(e => ({
+    ts,
+    actor: actor || '',
+    ...e
+  }));
+}
+// One-line human sentence for an event.
+function histSentence(e) {
+  const who = e.actor || 'Someone';
+  switch (e.type) {
+    case 'scraped':
+      return `${who} scraped this lead`;
+    case 'qualified':
+      return `${who} tagged it Potential`;
+    case 'assigned':
+      return e.to ? `${e.from ? `Reassigned to ${e.to}` : `Assigned to ${e.to}`}` : `Unassigned from ${e.from}`;
+    case 'tag':
+      return e.to ? `${who} tagged it ${e.to}` : `${who} cleared the status`;
+    case 'campaign':
+      return e.to ? `${who} set campaign to ${e.to}` : `${who} cleared the campaign`;
+    case 'close':
+      return `${who} sent it to Close.io`;
+    case 'contact':
+      return e.manual ? `${who} corrected the last-contacted date` : `${who} logged a contact`;
+    case 'recycle':
+      return `${who} recycled it — clock reset`;
+    case 'archive':
+      return e.to === 'restored' ? `${who} restored it from the archive` : `${who} archived it`;
+    case 'import':
+      return `${who} imported it`;
+    default:
+      return `${who} updated the lead`;
+  }
+}
+const HIST_ICON = {
+  scraped: '◎',
+  qualified: '🏷',
+  assigned: '→',
+  tag: '🏷',
+  campaign: '◆',
+  close: '☁',
+  contact: '✉',
+  recycle: '↻',
+  archive: '🗄',
+  import: '⬆'
+};
 function isRecycled(lead) {
   return (lead.tags || []).includes('For Recycle') || lead.recycled === true;
 }
@@ -1869,6 +2011,233 @@ function NoteModal({
 }
 
 // ─── LEADS TABLE ──────────────────────────────────────────
+// ─── LEAD HISTORY PANEL ──────────────────────────────────
+// The lead's own record: who scraped it and who qualified it (with exact date +
+// 12-hour time) up top, then everything else that happened, oldest → newest.
+function LeadHistoryModal({
+  lead,
+  onClose
+}) {
+  const hist = lead.history || [];
+  const firstOf = t => hist.find(e => e.type === t);
+  const scraped = firstOf('scraped'),
+    qualified = firstOf('qualified');
+  function Fact({
+    icon,
+    label,
+    ev,
+    fallbackWho
+  }) {
+    const who = ev && ev.actor || fallbackWho || '';
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: 'var(--card)',
+        padding: '14px 16px'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        fontWeight: 800,
+        letterSpacing: '.07em',
+        textTransform: 'uppercase',
+        color: 'var(--text-dim)',
+        marginBottom: 6
+      }
+    }, icon, " ", label), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 17,
+        fontWeight: 700,
+        letterSpacing: '-.01em',
+        color: who ? 'var(--text)' : 'var(--text-light)'
+      }
+    }, who || 'No record'), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12.5,
+        color: 'var(--text-dim)',
+        marginTop: 3
+      }
+    }, ev && ev.ts ? fmtHistTime(ev.ts) : ev && ev.legacy ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--warn)'
+      }
+    }, "on record before history tracking · date unknown") : /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--text-light)'
+      }
+    }, "—")));
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-overlay",
+    onClick: e => e.target === e.currentTarget && onClose()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal",
+    style: {
+      width: 620,
+      maxWidth: '94vw'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-header"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", null, "🕘 Lead History"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: 'var(--text-dim)',
+      fontSize: 13,
+      marginTop: 3
+    }
+  }, lead.channelName)), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: onClose,
+    style: {
+      fontSize: 16,
+      padding: '4px 8px'
+    }
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 1,
+      background: 'var(--border)',
+      border: '1px solid var(--border)',
+      borderRadius: 12,
+      overflow: 'hidden',
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement(Fact, {
+    icon: "◎",
+    label: "Scraped by",
+    ev: scraped,
+    fallbackWho: humanScraper(lead)
+  }), /*#__PURE__*/React.createElement(Fact, {
+    icon: "🏷",
+    label: "Qualified (Potential) by",
+    ev: qualified,
+    fallbackWho: ""
+  })), hist.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center',
+      padding: '28px 12px',
+      color: 'var(--text-dim)',
+      fontSize: 13
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 24,
+      marginBottom: 6
+    }
+  }, "🕘"), "Nothing recorded yet.", /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: 'var(--text-light)',
+      marginTop: 4
+    }
+  }, "History starts from the next action on this lead.")) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxHeight: '46vh',
+      overflowY: 'auto',
+      paddingRight: 4
+    }
+  }, hist.map((e, i) => {
+    const key = e.type === 'scraped' || e.type === 'qualified';
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        display: 'grid',
+        gridTemplateColumns: '26px 1fr',
+        gap: 12,
+        position: 'relative',
+        padding: '11px 0'
+      }
+    }, i < hist.length - 1 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        position: 'absolute',
+        left: 12.5,
+        top: 34,
+        bottom: -11,
+        width: 1,
+        background: 'var(--border)'
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 26,
+        height: 26,
+        borderRadius: '50%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 11,
+        flexShrink: 0,
+        background: key ? 'var(--accent)' : 'var(--bg)',
+        border: `1px solid ${key ? 'var(--accent)' : 'var(--border)'}`,
+        color: key ? '#fff' : 'var(--text-dim)'
+      }
+    }, HIST_ICON[e.type] || '•'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13.5,
+        color: key ? 'var(--text)' : 'var(--text-dim)'
+      }
+    }, histSentence(e), key && /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: 7,
+        fontSize: 9.5,
+        fontWeight: 800,
+        letterSpacing: '.05em',
+        textTransform: 'uppercase',
+        color: 'var(--accent)',
+        background: 'var(--accent-light)',
+        padding: '2px 6px',
+        borderRadius: 4
+      }
+    }, "Key")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11.5,
+        color: 'var(--text-light)',
+        marginTop: 2,
+        fontVariantNumeric: 'tabular-nums'
+      }
+    }, e.ts ? fmtHistTime(e.ts) : /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--warn)'
+      }
+    }, "date unknown · recorded before history tracking"), e.via ? ` · ${e.via}` : ''), (e.from || e.to) && e.type !== 'scraped' && /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 5,
+        fontSize: 11.5,
+        color: 'var(--text-dim)',
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center',
+        flexWrap: 'wrap'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        padding: '1.5px 7px',
+        borderRadius: 5,
+        fontWeight: 700,
+        fontSize: 10.5,
+        border: '1px solid var(--border)'
+      }
+    }, e.from || '—'), /*#__PURE__*/React.createElement("span", null, "→"), /*#__PURE__*/React.createElement("span", {
+      style: {
+        padding: '1.5px 7px',
+        borderRadius: 5,
+        fontWeight: 700,
+        fontSize: 10.5,
+        border: '1px solid var(--border)'
+      }
+    }, e.to || '—'))));
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-light)'
+    }
+  }, "Append-only · ", hist.length, " event", hist.length !== 1 ? 's' : '', " recorded"), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer-right"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: onClose
+  }, "Close")))));
+}
 function LeadsTable({
   leads,
   onEdit,
@@ -1914,6 +2283,7 @@ function LeadsTable({
   const [bulkCamps, setBulkCamps] = useState([]);
   const [editLead, setEditLead] = useState(null);
   const [noteLead, setNoteLead] = useState(null);
+  const [histLead, setHistLead] = useState(null);
   const [ctxMenu, setCtxMenu] = useState(null);
   const [page, setPage] = useState(1);
   const [colFilter, setColFilter] = useState({});
@@ -2587,7 +2957,11 @@ function LeadsTable({
     title: lead.note ? 'Note: ' + String(lead.note).slice(0, 100) + (String(lead.note).length > 100 ? '…' : '') : 'Add a note'
   }, "📝", lead.note && /*#__PURE__*/React.createElement("span", {
     className: "note-dot"
-  })), onDelete && /*#__PURE__*/React.createElement("button", {
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "btn-icon",
+    onClick: () => setHistLead(lead),
+    title: humanScraper(lead) ? `History — scraped by ${humanScraper(lead)}` : 'History — who scraped & qualified this lead'
+  }, "🕘"), onDelete && /*#__PURE__*/React.createElement("button", {
     className: "btn-icon",
     style: {
       color: 'var(--danger)',
@@ -2656,6 +3030,9 @@ function LeadsTable({
       if (onEdit) onEdit(l);
       setNoteLead(null);
     }
+  }), histLead && /*#__PURE__*/React.createElement(LeadHistoryModal, {
+    lead: leads.find(l => l.id === histLead.id) || histLead,
+    onClose: () => setHistLead(null)
   }), ctxMenu && /*#__PURE__*/React.createElement(ContextMenu, {
     x: ctxMenu.x,
     y: ctxMenu.y,
@@ -6083,7 +6460,11 @@ function AddLeadModal({
         channels: [n],
         addedAt: new Date().toISOString(),
         source: 'manual',
-        scrapedBy: rep || null // manually added under this rep — they sourced it
+        scrapedBy: rep || null,
+        // manually added under this rep — they sourced it
+        history: [histEvent(rep, 'scraped', {
+          via: 'added manually'
+        })]
       });
       // Keep the form open if the add was blocked or the rep cancelled a warning.
       if (res !== false) onClose();
@@ -7082,6 +7463,7 @@ function ContactedView({
   const [sortDir, setSortDir] = useState('asc');
   const [colFilter, setColFilter] = useState({});
   const [openFilterCol, setOpenFilterCol] = useState(null);
+  const [histLead, setHistLead] = useState(null);
   function handleSort(col, dir) {
     setSortCol(col);
     setSortDir(dir || 'asc');
@@ -7377,8 +7759,15 @@ function ContactedView({
       className: "btn btn-ghost btn-xs",
       title: "Log a contact today — resets the recycle clock",
       onClick: () => logContact(l)
-    }, "✓ Log contact"))));
-  }))));
+    }, "✓ Log contact"), /*#__PURE__*/React.createElement("button", {
+      className: "btn-icon",
+      onClick: () => setHistLead(l),
+      title: humanScraper(l) ? `History — scraped by ${humanScraper(l)}` : 'History — who scraped & qualified this lead'
+    }, "🕘"))));
+  }))), histLead && /*#__PURE__*/React.createElement(LeadHistoryModal, {
+    lead: leads.find(l => l.id === histLead.id) || histLead,
+    onClose: () => setHistLead(null)
+  }));
 }
 
 // ─── GOOGLE SHEETS: fetch a worksheet BY TAB NAME ─────────
@@ -12854,6 +13243,9 @@ function App() {
       updated.lastContactDate = ymdLocal(new Date());
       addToast(`"${upd.channelName}" re-qualified as Potential — recycle clock reset`, 'success');
     }
+    // Record what actually changed on the lead's own timeline (who + exactly when).
+    const evs = diffHistory(old, updated, currentUser && currentUser.name || '');
+    if (evs.length) updated.history = pushHist(updated, evs);
     setLeads(ls => ls.map(l => l.id === updated.id ? updated : l));
     logH('✏️', `Lead "${updated.channelName}" updated`);
   }
@@ -12980,12 +13372,28 @@ function App() {
   // teammate a lead lands with becomes its permanent scraper; an existing human
   // scraper is never overwritten, so only "Assigned To" changes after that.
   function bulkAssign(ids, rep) {
-    setLeads(ls => ls.map(l => ids.includes(l.id) ? {
-      ...l,
-      assignedTo: rep,
-      dateAssigned: ymdLocal(new Date()),
-      scrapedBy: humanScraper(l) || rep || l.scrapedBy || null
-    } : l));
+    const me = currentUser && currentUser.name || '';
+    setLeads(ls => ls.map(l => {
+      if (!ids.includes(l.id)) return l;
+      const firstScrape = !humanScraper(l) && !!rep;
+      const evs = [];
+      if (firstScrape) evs.push(histEvent(rep, 'scraped', {
+        via: 'pool claim'
+      }));
+      if ((l.assignedTo || '') !== (rep || '')) evs.push(histEvent(me, 'assigned', {
+        from: l.assignedTo || '',
+        to: rep || '',
+        via: 'bulk'
+      }));
+      const next = {
+        ...l,
+        assignedTo: rep,
+        dateAssigned: ymdLocal(new Date()),
+        scrapedBy: humanScraper(l) || rep || l.scrapedBy || null
+      };
+      next.history = pushHist(l, evs);
+      return next;
+    }));
     addToast(`${ids.length} leads assigned to ${rep}`, 'success');
     logH('✅', `Bulk: ${ids.length} leads → ${rep}`);
   }
@@ -13037,12 +13445,18 @@ function App() {
     // Credit JC (the lead-gen who sourced/qualified it) via qualifiedBy — this
     // survives the reassignment so his lead-gen KPI stays accurate even though the
     // lead now belongs to a sales rep. Assignment date resets to the handoff day.
+    const me = currentUser && currentUser.name || '';
     setLeads(ls => ls.map(l => map[l.id] ? {
       ...l,
       assignedTo: map[l.id],
       dateAssigned: today,
       qualifiedBy: l.qualifiedBy || l.assignedTo,
-      handedOffAt: today
+      handedOffAt: today,
+      history: pushHist(l, [histEvent(me, 'assigned', {
+        from: l.assignedTo || '',
+        to: map[l.id],
+        via: 'auto-assign'
+      })])
     } : l));
     addToast(`Distributed JC's Potential leads → Rein ${tally.Rein} (high-ticket) · Mikka ${tally.Mikka} · Chase ${tally.Chase} · Pen ${tally.Pen}`, 'success');
     logH('⚡', `Auto-assigned ${targets.length} JC Potential leads — high-ticket→Rein, rest→Mikka/Chase/Pen`);
@@ -13204,7 +13618,11 @@ function App() {
             followers: (lead.followers || '').trim() || target.followers,
             emails: lead.emails && lead.emails.length ? lead.emails : target.emails,
             tags: [...(target.tags || []).filter(t => t !== 'For Recycle' && t !== 'Contacted'), 'Contacted'],
-            lastContactDate: today
+            lastContactDate: today,
+            history: pushHist(target, [histEvent(currentUser && currentUser.name || '', 'recycle', {
+              from: (target.tags || []).join(', '),
+              to: 'Contacted'
+            })])
           };
           const dropIds = new Set(mine.filter(l => l.id !== target.id).map(l => l.id));
           setLeads(ls => ls.map(l => l.id === target.id ? merged : l).filter(l => !dropIds.has(l.id)));
@@ -13387,10 +13805,14 @@ function App() {
       seen.add(k);
       // Keep any scraper the sheet already declares; otherwise credit whoever ran
       // the import, so every lead carries a source record instead of a blank.
+      const who = l.scrapedBy || importerName || '';
       fresh.push({
         ...l,
         source: 'import',
-        scrapedBy: l.scrapedBy || importerName || null
+        scrapedBy: who || null,
+        history: pushHist(l, [histEvent(who, 'scraped', {
+          via: 'sheet import'
+        })])
       });
     });
     const skipped = newLeads.length - fresh.length - skippedArch;
@@ -13476,10 +13898,14 @@ function App() {
         const k = bare + '|' + (l.assignedTo || '');
         if (bare && seen.has(k)) return;
         seen.add(k);
+        const who = l.scrapedBy || importerName || '';
         fresh.push({
           ...l,
           source: 'import',
-          scrapedBy: l.scrapedBy || importerName || null
+          scrapedBy: who || null,
+          history: pushHist(l, [histEvent(who, 'scraped', {
+            via: 'agency import'
+          })])
         });
       });
       return [...existing, ...fresh];
@@ -13515,10 +13941,15 @@ function App() {
         return;
       } // already in your leads
       if (k) seen.add(k);
+      // Stamp who scraped it + open its timeline with that fact.
+      const who = l.scrapedBy || myName;
       fresh.push({
         ...l,
-        scrapedBy: l.scrapedBy || myName
-      }); // stamp who scraped it
+        scrapedBy: who,
+        history: pushHist(l, [histEvent(who, 'scraped', {
+          via: 'scraper'
+        })])
+      });
     });
     if (fresh.length) setLeads(existing => {
       // Re-dedupe vs the LATEST existing (live-sync could have changed it).
@@ -13581,6 +14012,8 @@ function App() {
       contactDateManual: x.contactDateManual || false,
       scrapedBy: x.scrapedBy || null,
       // permanent record of who originally sourced it — must survive normalization
+      history: Array.isArray(x.history) ? x.history : [],
+      // append-only per-lead timeline — must survive normalization too
       qualifiedBy: x.qualifiedBy || null,
       handedOffAt: x.handedOffAt || null,
       inClose: x.inClose || false,
@@ -13992,14 +14425,19 @@ function App() {
       const failed = results.filter(r => r && r.ok === false).length;
       // Mark Imported + store each lead's Close id (matched by order) so a
       // re-push updates in place rather than creating a duplicate.
+      const me = currentUser && currentUser.name || '';
       setLeads(ls => ls.map(l => {
         const idx = orderedIds.indexOf(l.id);
         if (idx < 0) return l;
         const r = results[idx];
+        if (r && r.ok === false) return l; // failed pushes don't get a timeline entry
         return {
           ...l,
           importedToClose: true,
-          closeLeadId: r && r.id || l.closeLeadId || null
+          closeLeadId: r && r.id || l.closeLeadId || null,
+          history: pushHist(l, [histEvent(me, 'close', {
+            to: 'sent'
+          })])
         };
       }));
       addToast(failed ? `Sent ${repLeads.length - failed}/${repLeads.length} to Close.io (${failed} failed) for ${rep}` : `✓ ${repLeads.length} lead(s) sent to Close.io for ${rep}`, failed ? 'info' : 'success');
