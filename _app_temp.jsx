@@ -4601,7 +4601,20 @@ function HistoryView({history,addToast,feats,onRestore}) {
           <div className="history-text">{e.text}{e.actor?<span style={{color:'var(--text-dim)',fontWeight:600}}> · {e.actor}</span>:''}</div>
           <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,flexShrink:0}}>
             <div className="history-time">{e.time}</div>
-            {e.restorable && e.restore && <button className="btn btn-ghost btn-xs" title={`Re-add the deleted lead(s)`} onClick={()=>onRestore&&onRestore(e)}>↩ Restore</button>}
+            {e.restorable && e.restore && (()=>{
+              // Label + tooltip per undo type, so the button says what it will
+              // actually do rather than a generic "Restore".
+              const t=e.restore.type;
+              const n=(e.restore.before||e.restore.leads||e.restore.ids||[]).length;
+              const meta={
+                revert:  {label:'↩ Undo', tip:`Put ${n} lead(s) back to how they were before this change. Any lead someone has edited since is skipped, not overwritten.`},
+                unimport:{label:'↩ Undo import', tip:`Remove the ${n} lead(s) this import added.`},
+                undelete:{label:'↩ Restore', tip:`Re-add the ${n} deleted lead(s).`},
+                unarchive:{label:'↩ Unarchive', tip:`Return the ${n} archived lead(s) to the active dashboard.`},
+              }[t]||{label:'↩ Undo', tip:'Undo this action'};
+              return <button className="btn btn-ghost btn-xs" title={meta.tip}
+                onClick={()=>onRestore&&onRestore(e)}>{meta.label}</button>;
+            })()}
           </div>
         </div>
       ))}
@@ -5799,7 +5812,10 @@ function App() {
     const evs=diffHistory(old, updated, (currentUser&&currentUser.name)||'');
     if(evs.length) updated.history=pushHist(updated, evs);
     setLeads(ls=>ls.map(l=>l.id===updated.id?updated:l));
-    logH('✏️',`Lead "${updated.channelName}" updated`);
+    // Only offer undo when something undo-able actually changed — otherwise the
+    // History tab fills with dead "Undo" buttons on no-op background writes.
+    const undo = (old && evs.length) ? {type:'revert', before:[undoSnap(old)], after:[undoSnap(updated)]} : null;
+    logH('✏️',`Lead "${updated.channelName}" updated${evs.length?' — '+evs.map(histSentence).join('; '):''}`,undo);
   }
   // A lead "belongs" to a rep if they scraped it or it's assigned to them.
   function ownsLead(l){ return !!l && (l.assignedTo===currentUser.name || l.scrapedBy===currentUser.name); }
@@ -5811,17 +5827,96 @@ function App() {
   }
   function logH(icon,text,restore){
     const actor=(currentUser&&currentUser.name)||'';
-    setHistory(h=>[{id:Date.now()+'_'+Math.floor(Math.random()*1e6),icon,text,actor,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:!!restore,restore:restore||null},...h]);
-    // Persist to the shared activity log (team-wide, survives reloads; restore
-    // payloads stay session-only). Fire-and-forget so it never blocks the UI.
-    try{ if(SB) SB.from('activity_log').insert({actor,icon,text}).then(()=>{},()=>{}); }catch(e){}
+    const localId=Date.now()+'_'+Math.floor(Math.random()*1e6);
+    setHistory(h=>[{id:localId,icon,text,actor,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:!!restore,restore:restore||null},...h]);
+    // Persist to the shared activity log, INCLUDING the undo payload — so undo
+    // survives a reload and works for teammates, not just this browser session.
+    // Capture the row id back onto the entry: without it, undoing an in-session
+    // entry couldn't clear the stored payload, and the spent entry would offer
+    // Undo again after a reload. Fire-and-forget so it never blocks the UI.
+    try{ if(SB) SB.from('activity_log').insert({actor,icon,text,payload:restore||null}).select('id').then(res=>{
+      const dbId=res&&res.data&&res.data[0]&&res.data[0].id;
+      if(dbId) setHistory(h=>h.map(x=>x.id===localId?{...x,dbId}:x));
+    },()=>{}); }catch(e){}
+  }
+  // Snapshot only the fields undo needs — not whole leads — so the log stays small.
+  function undoSnap(l){
+    return {id:l.id, channelName:l.channelName, tags:[...(l.tags||[])], campaigns:[...(l.campaigns||[])],
+      assignedTo:l.assignedTo||null, dateAssigned:l.dateAssigned||null,
+      lastContactDate:l.lastContactDate||null, contactDateManual:!!l.contactDateManual, note:l.note||''};
   }
   // Undo a delete recorded in history: re-add the removed lead(s) to the pool and
   // re-persist them to Supabase (dedup by id). Only "undelete" entries carry a
   // restore payload, so only those show a Restore button.
+  // Mark an entry as used, in memory AND in the shared log, so it can't be undone
+  // twice and teammates see it's spent.
+  function markUndone(entry,suffix){
+    setHistory(h=>h.map(x=>x.id===entry.id?{...x,restorable:false,restore:null,text:x.text+suffix}:x));
+    try{
+      if(SB && entry.dbId) SB.from('activity_log').update({payload:null,text:(entry.text||'')+suffix}).eq('id',entry.dbId).then(()=>{},()=>{});
+    }catch(e){}
+  }
   function restoreHistory(entry){
     if(!entry||!entry.restore) return;
     const t=entry.restore.type;
+
+    // ── Undo a lead CHANGE (tags / campaign / assignment / dates / note) ──
+    // Only reverts leads that STILL match what this action set. If someone has
+    // touched a lead since, undoing would silently wipe their newer work, so
+    // those are skipped and reported rather than clobbered.
+    if(t==='revert'){
+      const before=(entry.restore.before||[]).filter(Boolean);
+      const after={}; (entry.restore.after||[]).forEach(a=>{ if(a&&a.id!=null) after[String(a.id)]=a; });
+      if(!before.length){ addToast('Nothing to undo','info'); return; }
+      const cmp=o=>JSON.stringify({tags:[...(o.tags||[])].sort(),campaigns:[...(o.campaigns||[])].sort(),
+        assignedTo:o.assignedTo||null,lastContactDate:o.lastContactDate||null,note:o.note||''});
+      const byId={}; leads.forEach(l=>byId[String(l.id)]=l);
+      const ok=[], changedSince=[], gone=[];
+      before.forEach(b=>{
+        const cur=byId[String(b.id)];
+        if(!cur){ gone.push(b); return; }
+        const exp=after[String(b.id)];
+        if(exp && cmp(cur)!==cmp(exp)){ changedSince.push(cur); return; }   // someone edited it after this action
+        ok.push(b);
+      });
+      if(!ok.length){
+        addToast(changedSince.length
+          ? `Can't undo — ${changedSince.length} lead(s) changed since this action`
+          : `Can't undo — the lead(s) no longer exist`,'error');
+        return;
+      }
+      const me=(currentUser&&currentUser.name)||'';
+      const okById={}; ok.forEach(b=>okById[String(b.id)]=b);
+      setLeads(ls=>ls.map(l=>{
+        const b=okById[String(l.id)]; if(!b) return l;
+        const next={...l, tags:[...(b.tags||[])], campaigns:[...(b.campaigns||[])],
+          assignedTo:b.assignedTo||null, dateAssigned:b.dateAssigned||null,
+          lastContactDate:b.lastContactDate||null, contactDateManual:!!b.contactDateManual, note:b.note||''};
+        next.history=pushHist(l,[histEvent(me,'tag',{from:(l.tags||[]).join(', '),to:(b.tags||[]).join(', '),via:'undo'})]);
+        return next;
+      }));
+      const skipped=changedSince.length+gone.length;
+      markUndone(entry,` · ↩ undone${skipped?` (${skipped} skipped)`:''}`);
+      logH('↩',`Undo: "${entry.text}" — ${ok.length} lead(s) reverted${skipped?` · ${skipped} skipped (changed since)`:''}`);
+      addToast(`↩ Undid ${ok.length} lead change(s)${skipped?` · ${skipped} skipped — changed since`:''}`, skipped?'info':'success');
+      return;
+    }
+
+    // ── Undo an IMPORT / scrape: remove the rows it added ──
+    if(t==='unimport'){
+      const ids=(entry.restore.ids||[]).map(String);
+      const set=new Set(ids);
+      const present=leads.filter(l=>set.has(String(l.id)));
+      if(!present.length){ addToast('Those leads are already gone','info'); markUndone(entry,' · ↩ already gone'); return; }
+      setLeads(ls=>ls.filter(l=>!set.has(String(l.id))));
+      deleteLeadsFromSupabase(present.map(l=>l.id));
+      markUndone(entry,' · ↩ undone');
+      logH('↩',`Undo: removed ${present.length} imported lead(s)`,{type:'undelete',leads:present});
+      addToast(`↩ Removed ${present.length} imported lead(s)`,'info');
+      return;
+    }
+
+    // ── Undelete / unarchive (original behaviour) ──
     if(t!=='undelete'&&t!=='unarchive') return;
     const toRestore=(entry.restore.leads||[]).filter(Boolean);
     if(!toRestore.length){ addToast('Nothing to restore','info'); return; }
@@ -5829,7 +5924,7 @@ function App() {
     // Undelete re-inserts rows; unarchive just flips the flag back to active.
     if(t==='unarchive'){ unarchiveLeadsInSupabase(toRestore.map(l=>l.id)); }
     else { try{ upsertLeadsToSupabase(toRestore); }catch(e){} }
-    setHistory(h=>h.map(x=>x.id===entry.id?{...x,restorable:false,text:x.text+(t==='unarchive'?' · ↩ unarchived':' · ↩ restored')}:x));
+    markUndone(entry,(t==='unarchive'?' · ↩ unarchived':' · ↩ restored'));
     addToast(`✓ Restored ${toRestore.length} lead(s)`,'success');
   }
   // Archiving: soft-remove selected leads from the active dashboard (recoverable
@@ -5862,6 +5957,9 @@ function App() {
   // scraper is never overwritten, so only "Assigned To" changes after that.
   function bulkAssign(ids,rep){
     const me=(currentUser&&currentUser.name)||'';
+    const idSet=new Set(ids.map(String));
+    const before=leads.filter(l=>idSet.has(String(l.id))).map(undoSnap);
+    const after=before.map(b=>({...b, assignedTo:rep||null, dateAssigned:ymdLocal(new Date())}));
     setLeads(ls=>ls.map(l=>{
       if(!ids.includes(l.id)) return l;
       const firstScrape=!humanScraper(l) && !!rep;
@@ -5872,7 +5970,8 @@ function App() {
       next.history=pushHist(l,evs);
       return next;
     }));
-    addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);
+    addToast(`${ids.length} leads assigned to ${rep}`,'success');
+    logH('✅',`Bulk: ${ids.length} leads → ${rep}`, before.length?{type:'revert',before,after}:null);
   }
   // Distribute lead-gen JC's QUALIFIED (Potential-tagged) leads to the sales team.
   // RULE: high-ticket Potentials all go to Rein; every other Potential is split
@@ -5899,10 +5998,12 @@ function App() {
     // survives the reassignment so his lead-gen KPI stays accurate even though the
     // lead now belongs to a sales rep. Assignment date resets to the handoff day.
     const me=(currentUser&&currentUser.name)||'';
+    const before=targets.map(undoSnap);
+    const after=targets.map(l=>({...undoSnap(l), assignedTo:map[l.id], dateAssigned:today}));
     setLeads(ls=>ls.map(l=> map[l.id] ? {...l,assignedTo:map[l.id],dateAssigned:today,qualifiedBy:l.qualifiedBy||l.assignedTo,handedOffAt:today,
       history:pushHist(l,[histEvent(me,'assigned',{from:l.assignedTo||'',to:map[l.id],via:'auto-assign'})])} : l));
     addToast(`Distributed JC's Potential leads → Rein ${tally.Rein} (high-ticket) · Mikka ${tally.Mikka} · Chase ${tally.Chase} · Pen ${tally.Pen}`,'success');
-    logH('⚡',`Auto-assigned ${targets.length} JC Potential leads — high-ticket→Rein, rest→Mikka/Chase/Pen`);
+    logH('⚡',`Auto-assigned ${targets.length} JC Potential leads — high-ticket→Rein, rest→Mikka/Chase/Pen`,{type:'revert',before,after});
   }
   function bulkDelete(ids){
     if(!ids||!ids.length) return;
@@ -6136,7 +6237,8 @@ function App() {
         logH('⏳',`Import guard: ${warn.length} imported lead(s) were recently contacted and aren't due for recycling`);
       }
     })();
-    logH('📊',`Google Sheets import: ${fresh.length} lead(s) added${skipped>0?` · ${skipped} same-rep duplicate(s) skipped`:''}${skippedArch>0?` · ${skippedArch} in archive skipped`:''}`);
+    logH('📊',`Google Sheets import: ${fresh.length} lead(s) added${skipped>0?` · ${skipped} same-rep duplicate(s) skipped`:''}${skippedArch>0?` · ${skippedArch} in archive skipped`:''}`,
+      fresh.length?{type:'unimport', ids:fresh.map(l=>l.id)}:null);
     if(skippedArch>0) addToast(`🗄 ${skippedArch} imported channel(s) are in your Archive — skipped`,'info');
     autoFileAgencies(newLeads);   // any rows with an "agency" column drop into that Agency folder
     setTab('lead-mgmt');
@@ -6393,8 +6495,10 @@ function App() {
     loadArchivedKeysFromSupabase().then(keys=>{ if(Array.isArray(keys)) archivedKeysRef.current=new Set(keys); });
     // Load the shared, persisted activity history (team-wide) so the History tab
     // shows real activity instead of an empty in-memory list.
-    try{ if(SB) SB.from('activity_log').select('id,created_at,actor,icon,text').order('created_at',{ascending:false}).limit(200)
-      .then(({data})=>{ if(Array.isArray(data)&&data.length) setHistory(data.map(r=>({id:'db_'+r.id, icon:r.icon||'•', text:r.text||'', actor:r.actor||'', time:new Date(r.created_at).toLocaleString('en-CA',{hour12:false}).replace(',',''), restorable:false}))); }, ()=>{}); }catch(e){}
+    // Pull the payload too, so undo survives a reload and works across the team
+    // (it used to be session-only, which quietly made every reloaded entry dead).
+    try{ if(SB) SB.from('activity_log').select('id,created_at,actor,icon,text,payload').order('created_at',{ascending:false}).limit(200)
+      .then(({data})=>{ if(Array.isArray(data)&&data.length) setHistory(data.map(r=>({id:'db_'+r.id, icon:r.icon||'•', text:r.text||'', actor:r.actor||'', time:new Date(r.created_at).toLocaleString('en-CA',{hour12:false}).replace(',',''), restorable:!!r.payload, restore:r.payload||null, dbId:r.id}))); }, ()=>{}); }catch(e){}
   },[]);
 
   // Persist lead changes to Supabase (debounced, upsert-only — deletes go through
