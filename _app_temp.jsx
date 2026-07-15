@@ -896,6 +896,12 @@ function ContextMenu({x,y,lead,sel,allLeads,config,campColorMap,onEdit,onDelete,
   );
 }
 
+// Human names for the column filters, used by the active-filter chips. Without
+// these a rep could have three filters on (one of them scrolled off-screen on a
+// wide table), see an empty table, and have no way to tell which one did it.
+const FILTER_LABELS={tags:'Status', assignedTo:'Assigned to', campaign:'Campaign',
+  platform:'Platform', origin:'Origin', emails:'Email'};
+
 // ─── INLINE PICKER ───────────────────────────────────────
 function InlinePicker({type,selected,options,campColorMap,onChange,single=false}) {
   const [open,setOpen]=useState(false);
@@ -952,7 +958,11 @@ function InlinePicker({type,selected,options,campColorMap,onChange,single=false}
 }
 
 // ─── COL HEADER (with filter dropdown) ───────────────────
-function ColHeader({col, label, sortCol, sortDir, onSort, leads, colFilter, setColFilter, openFilterCol, setOpenFilterCol}) {
+function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, colFilter, setColFilter, openFilterCol, setOpenFilterCol}) {
+  // Build options from the rows that survive the OTHER filters, so a dropdown
+  // never offers a value that returns nothing. Falls back to the full list for
+  // tables that don't pass leadsForCol (e.g. the Contacted tab).
+  const optionLeads = (typeof leadsForCol==='function' ? leadsForCol(col) : leads) || [];
   const ref = useRef(null);
   const isOpen = openFilterCol === col;
   const hasFilter = colFilter[col] != null;
@@ -970,35 +980,44 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, colFilter, setC
 
   // Build filter options for this column
   function getOptions(){
+    // All options come from optionLeads (rows passing the OTHER filters), and
+    // catch-all options only appear if they'd actually match something — so no
+    // choice in this menu can lead to an empty table.
     if(col==='tags'){
       const all=new Set();
-      leads.forEach(l=>(l.tags||[]).forEach(t=>all.add(t)));
-      const opts=[...all];
-      opts.push('Unassigned');
+      optionLeads.forEach(l=>(l.tags||[]).forEach(t=>all.add(t)));
+      const opts=[...all].sort();
+      if(optionLeads.some(l=>(l.tags||[]).length===0)) opts.push('Unassigned');
       return opts;
     }
     if(col==='assignedTo'){
       const all=new Set();
-      leads.forEach(l=>{ if(l.assignedTo) all.add(l.assignedTo); });
-      return [...all,'Unassigned'];
+      optionLeads.forEach(l=>{ if(l.assignedTo) all.add(l.assignedTo); });
+      const opts=[...all].sort();
+      if(optionLeads.some(l=>!l.assignedTo)) opts.push('Unassigned');
+      return opts;
     }
     if(col==='campaign'){
       const all=new Set();
-      leads.forEach(l=>(l.campaigns||[]).forEach(c=>all.add(c)));
-      return [...all,'None'];
+      optionLeads.forEach(l=>(l.campaigns||[]).forEach(c=>all.add(c)));
+      const opts=[...all].sort();
+      if(optionLeads.some(l=>(l.campaigns||[]).length===0)) opts.push('None');
+      return opts;
     }
     if(col==='platform'){
       const all=new Set();
-      leads.forEach(l=>{ if(l.platform) all.add(l.platform); });
-      return [...all];
+      optionLeads.forEach(l=>{ if(l.platform) all.add(l.platform); });
+      return [...all].sort();
     }
     if(col==='origin'){
-      return ['Fresh','Imported'];
+      return ['Fresh','Imported'].filter(o=>optionLeads.some(l=>leadOrigin(l)===o));
     }
     // Emailable vs not — "No email" is the one people actually want, to find the
     // rows that can't be sent to SmartReach/Close yet.
     if(col==='emails'){
-      return ['Has email','No email'];
+      const has=optionLeads.some(l=>(l.emails||[]).filter(Boolean).length>0);
+      const none=optionLeads.some(l=>(l.emails||[]).filter(Boolean).length===0);
+      return [has&&'Has email', none&&'No email'].filter(Boolean);
     }
     return [];
   }
@@ -1259,8 +1278,11 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
   // scrape keyword), the box is controlled by the parent; otherwise local.
   const search = onSearchChange!=null ? (searchValue||'') : searchState;
   const setSearch = onSearchChange!=null ? onSearchChange : setSearchState;
-  const [filterStatus,setFilterStatus] = useState('');
-  const [filterRep,setFilterRep] = useState('');
+  // NOTE: the toolbar's Status/Rep selects deliberately have no state of their
+  // own — they read and write colFilter, the same store the column dropdowns use.
+  // They used to be separate, which meant "Status: Potential" in the toolbar and
+  // "Tags: Contacted" on the column were ANDed into an impossible request, and
+  // the table just went empty with nothing explaining why.
   const [sortCol,setSortCol] = useState('');
   const [sortDir,setSortDir] = useState('asc');
   const [bulkRep,setBulkRep] = useState('');
@@ -1285,7 +1307,12 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
   }
 
   // Apply column filters on top of search/status/rep filters
-  const filtered = leads.filter(l=>{
+  // ONE filter predicate, used by the table AND by the header dropdowns, so the
+  // options a header offers can never disagree with what the table shows.
+  // `skipCol` ignores one column's own filter — that's how a dropdown lists the
+  // values still reachable given the OTHER active filters, instead of offering
+  // dead ends that silently return zero rows.
+  function passesFilters(l, cf, skipCol){
     const s=(searchFilters?search:'').toLowerCase();
     // Coerce before matching. A lead written straight to Supabase (the Make
     // ingest bypasses normalizeLead) can be missing channelName/niche/platform,
@@ -1295,36 +1322,34 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
       const hay=[l.channelName,l.niche,l.platform].map(v=>String(v==null?'':v).toLowerCase());
       if(!hay.some(h=>h.includes(s))) return false;
     }
-    if(filterStatus && !(l.tags||[]).includes(filterStatus)) return false;
-    if(filterRep && l.assignedTo!==filterRep) return false;
-    // Column filters
-    if(colFilter.tags){
-      if(colFilter.tags==='Unassigned'){if((l.tags||[]).length>0) return false;}
-      else{if(!(l.tags||[]).includes(colFilter.tags)) return false;}
+    if(skipCol!=='tags' && cf.tags){
+      if(cf.tags==='Unassigned'){ if((l.tags||[]).length>0) return false; }
+      else if(!(l.tags||[]).includes(cf.tags)) return false;
     }
-    if(colFilter.assignedTo){
-      if(colFilter.assignedTo==='Unassigned'){if(l.assignedTo) return false;}
-      else{if(l.assignedTo!==colFilter.assignedTo) return false;}
+    if(skipCol!=='assignedTo' && cf.assignedTo){
+      if(cf.assignedTo==='Unassigned'){ if(l.assignedTo) return false; }
+      else if(l.assignedTo!==cf.assignedTo) return false;
     }
-    if(colFilter.campaign){
-      if(colFilter.campaign==='None'){if((l.campaigns||[]).length>0) return false;}
-      else{if(!(l.campaigns||[]).includes(colFilter.campaign)) return false;}
+    if(skipCol!=='campaign' && cf.campaign){
+      if(cf.campaign==='None'){ if((l.campaigns||[]).length>0) return false; }
+      else if(!(l.campaigns||[]).includes(cf.campaign)) return false;
     }
-    if(colFilter.platform){
-      if(l.platform!==colFilter.platform) return false;
-    }
-    if(colFilter.origin){
-      if(leadOrigin(l)!==colFilter.origin) return false;
-    }
-    if(colFilter.emails){
+    if(skipCol!=='platform' && cf.platform){ if(l.platform!==cf.platform) return false; }
+    if(skipCol!=='origin' && cf.origin){ if(leadOrigin(l)!==cf.origin) return false; }
+    if(skipCol!=='emails' && cf.emails){
       const n=(l.emails||[]).filter(Boolean).length;
-      if(colFilter.emails==='No email' ? n>0 : n===0) return false;
+      if(cf.emails==='No email' ? n>0 : n===0) return false;
     }
     return true;
-  }).sort((a,b)=>{
+  }
+  // Rows still reachable if you ignore ONE column's filter — feeds that column's
+  // dropdown so it only offers values that actually return something.
+  const leadsForCol = col => leads.filter(l=>passesFilters(l, colFilter, col));
+
+  const filtered = leads.filter(l=>passesFilters(l, colFilter)).sort((a,b)=>{
     if(!sortCol) return 0;
     const dir=sortDir==='asc'?1:-1;
-    if(sortCol==='channelName') return dir*a.channelName.localeCompare(b.channelName);
+    if(sortCol==='channelName') return dir*String(a.channelName||'').localeCompare(String(b.channelName||''));
     if(sortCol==='platform') return dir*(a.platform||'').localeCompare(b.platform||'');
     if(sortCol==='niche') return dir*(a.niche||'').localeCompare(b.niche||'');
     if(sortCol==='followers'){
@@ -1344,7 +1369,14 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
     return 0;
   });
 
-  useEffect(()=>setPage(1),[search,filterStatus,filterRep,sortCol,sortDir,colFilter,leads.length]);
+  // Set or clear one filter. Shared by the toolbar selects and the column
+  // dropdowns so there's exactly one source of truth.
+  function setColFilterValue(col,val){
+    setColFilter(f=>{ const n={...f}; if(val) n[col]=val; else delete n[col]; return n; });
+  }
+  function clearAllFilters(){ setColFilter({}); setSearch(''); }
+  const activeFilters=Object.keys(colFilter).filter(k=>colFilter[k]);
+  useEffect(()=>setPage(1),[search,sortCol,sortDir,colFilter,leads.length]);
   const totalPages=Math.max(1,Math.ceil(filtered.length/PAGE_SIZE));
   const paginated=filtered.slice((page-1)*PAGE_SIZE,page*PAGE_SIZE);
 
@@ -1419,7 +1451,9 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
   function patchLead(id,patch){const l=leads.find(x=>x.id===id);if(l)onEdit({...l,...patch});}
   function handleCtx(e,lead){e.preventDefault();setCtxMenu({x:e.clientX,y:e.clientY,lead});}
 
-  const colHeaderProps = {sortCol,sortDir,onSort:handleSort,leads,colFilter,setColFilter,openFilterCol,setOpenFilterCol};
+  // leadsForCol (not the raw list) so each dropdown offers only values that still
+  // return rows given the other active filters.
+  const colHeaderProps = {sortCol,sortDir,onSort:handleSort,leads,leadsForCol,colFilter,setColFilter,openFilterCol,setOpenFilterCol};
 
   return (
     <div className={embedded?'lt-embedded':''} style={embedded?{display:'flex',flexDirection:'column'}:{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
@@ -1430,12 +1464,12 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
           <input placeholder={searchPlaceholder} value={search} onChange={e=>setSearch(e.target.value)}/>
         </div>
         {toolbarAfterSearch}
-        <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
+        <select value={colFilter.tags||''} onChange={e=>setColFilterValue('tags',e.target.value)}>
           <option value="">All Status</option>
           {statusOptions(config).map(s=><option key={s} value={s}>{s==='HT'?'HT (High Ticket)':s}</option>)}
         </select>
         {showAssigned && !hideRepFilter && (
-          <select value={filterRep} onChange={e=>setFilterRep(e.target.value)}>
+          <select value={colFilter.assignedTo||''} onChange={e=>setColFilterValue('assignedTo',e.target.value)}>
             <option value="">All Reps</option>
             {allReps.map(r=><option key={r}>{r}</option>)}
           </select>
@@ -1446,6 +1480,22 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
           {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={()=>exportPDF()}>🖨 PDF</button>}
         </div>}
       </div>
+
+      {/* What's actually filtering the table, in one place. A column's ● dot can
+          scroll off-screen on a wide table, so filters were effectively invisible
+          — you'd get an empty table and no idea which one caused it. */}
+      {activeFilters.length>0 && (
+        <div className="filter-chips no-print">
+          <span className="fc-label">Filtered by</span>
+          {activeFilters.map(k=>(
+            <button key={k} className="fc-chip" title={`Remove the ${FILTER_LABELS[k]||k} filter`}
+              onClick={()=>setColFilterValue(k,'')}>
+              {FILTER_LABELS[k]||k}: <b>{String(colFilter[k])}</b><span className="fc-x">✕</span>
+            </button>
+          ))}
+          <button className="fc-clear" onClick={clearAllFilters} title="Remove every filter and clear the search box">Clear all</button>
+        </div>
+      )}
 
       {sel.length>0&&(
         <div className="bulk-panel no-print">
@@ -1533,7 +1583,12 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
 
       <div className="table-container" onMouseDown={containerMouseDown}>
         {filtered.length===0
-          ? <div className="empty"><div className="empty-icon">📭</div><h3>No leads found</h3><p>Try adjusting your filters</p></div>
+          ? <div className="empty"><div className="empty-icon">📭</div><h3>No leads found</h3>
+              <p>{activeFilters.length
+                ? `No lead matches all ${activeFilters.length} filter${activeFilters.length!==1?'s':''} at once: ${activeFilters.map(k=>`${FILTER_LABELS[k]||k} = ${colFilter[k]}`).join(' + ')}${search?` (plus the search "${search}")`:''}.`
+                : (search?`Nothing matches the search "${search}".`:'Try adjusting your filters')}</p>
+              {(activeFilters.length>0||search) && <button className="btn btn-outline btn-sm" style={{marginTop:10}} onClick={clearAllFilters}>Clear all filters</button>}
+            </div>
           : (
           <table>
             <thead>

@@ -289,6 +289,22 @@ html[data-dark] .note-dot { box-shadow:0 0 0 2px var(--card-bg, #1a1b23); }
 .dup-flag-cross { background:#FEE2E2; color:#B42318; }
 html[data-dark] .dup-flag { background:rgba(245,158,11,.18); color:#FCD34D; }
 html[data-dark] .dup-flag-cross { background:rgba(239,68,68,.18); color:#FCA5A5; }
+/* Active column filters, shown as removable chips under the toolbar. */
+.filter-chips { display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+  padding:8px 24px; background:var(--bg); border-bottom:1px solid var(--border); flex-shrink:0; }
+.filter-chips .fc-label { font-size:10.5px; font-weight:800; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--text-dim); }
+.filter-chips .fc-chip { display:inline-flex; align-items:center; gap:6px; cursor:pointer;
+  font-family:inherit; font-size:11.5px; color:var(--accent); background:var(--accent-light);
+  border:1px solid transparent; border-radius:999px; padding:3px 9px; white-space:nowrap; }
+.filter-chips .fc-chip:hover { border-color:var(--accent); }
+.filter-chips .fc-chip b { font-weight:700; }
+.filter-chips .fc-x { font-size:9px; opacity:.65; }
+.filter-chips .fc-chip:hover .fc-x { opacity:1; }
+.filter-chips .fc-clear { cursor:pointer; font-family:inherit; font-size:11.5px; font-weight:600;
+  color:var(--text-dim); background:transparent; border:none; text-decoration:underline; padding:3px 4px; }
+.filter-chips .fc-clear:hover { color:var(--danger); }
+
 /* A teammate contacted this same channel and it isn't due for recycling yet —
    emailing it now would double-touch the creator. Sits next to .dup-flag. */
 .recent-contact-flag { display:inline-block; margin-left:6px; font-size:9.5px; font-weight:700;
