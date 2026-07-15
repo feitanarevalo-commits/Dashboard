@@ -5521,6 +5521,13 @@ function App() {
   const [leadsReady,setLeadsReady]=useState(false);   // Supabase leads loaded
   const supabaseHadLeadsRef=useRef(false);
   const leadsSyncRef=useRef({});                       // {id: JSON} last synced
+  // {id: ms} when each lead was last changed locally. The 15s poll compares this
+  // against the moment its OWN fetch started: if a lead was edited while that
+  // fetch was in flight, the response is stale for that lead and must not win.
+  // Without this, tagging Pending→Potential could be silently reverted (and the
+  // revert then written back), because the lead is already marked "synced" by the
+  // time the stale response lands.
+  const writeStampRef=useRef({});
   // Lightweight set of ARCHIVED channel keys (leadKey strings only — not the
   // full objects, so it stays cheap at scale). Lets the scraper + imports still
   // skip channels that were archived, so archived leads don't silently resurface
@@ -6266,6 +6273,9 @@ function App() {
     const h=setTimeout(()=>{
       const prev=leadsSyncRef.current, snap={}, changed=[];
       leads.forEach(l=>{ const k=String(l.id), j=JSON.stringify(l); snap[k]=j; if(prev[k]!==j) changed.push(l); });
+      // Stamp every locally-changed lead BEFORE the write goes out, so any poll
+      // whose fetch is already in flight knows its answer is stale for this lead.
+      const now=Date.now(); changed.forEach(l=>{ writeStampRef.current[String(l.id)]=now; });
       if(changed.length){
         // Mark leads as synced ONLY AFTER the write CONFIRMS. Until then they stay
         // "dirty", so the 15s refresh poll can't read stale rows mid-write and
@@ -6290,6 +6300,9 @@ function App() {
       // Every ~60s refresh the archived-keys set too, so an archive done by
       // another admin propagates (keeps re-scrapes of it skipped everywhere).
       if((tick++ %4)===0){ loadArchivedKeysFromSupabase().then(keys=>{ if(!stop && Array.isArray(keys)) archivedKeysRef.current=new Set(keys); }); }
+      // When THIS fetch began. Anything the DB tells us reflects the world at
+      // roughly this instant, so a lead edited after it is newer than the answer.
+      const fetchStartedAt=Date.now();
       loadLeadsFromSupabase().then(remote=>{
         if(stop || !Array.isArray(remote)) return;
         const remoteById={}; remote.forEach(l=>remoteById[String(l.id)]=l);
@@ -6300,8 +6313,12 @@ function App() {
           local.forEach(l=>{
             const id=String(l.id), r=remoteById[id];
             const dirty=JSON.stringify(l)!==synced[id];         // local edit not yet pushed
-            if(r===undefined){ if(!(id in synced)||dirty) out.push(l); /* else: deleted by another rep */ }
-            else out.push(dirty?l:r);                            // keep my edit, else take shared
+            // Edited while this fetch was in flight → the response predates the
+            // edit and cannot be trusted for this lead, even though it's already
+            // been marked synced. This is what was reverting Pending→Potential.
+            const staleForThisLead=(writeStampRef.current[id]||0)>=fetchStartedAt;
+            if(r===undefined){ if(!(id in synced)||dirty||staleForThisLead) out.push(l); /* else: deleted by another rep */ }
+            else out.push((dirty||staleForThisLead)?l:r);        // keep my edit, else take shared
           });
           remote.forEach(l=>{ if(!localIds.has(String(l.id))) out.push(l); });   // new from other reps
           if(out.length===local.length){
