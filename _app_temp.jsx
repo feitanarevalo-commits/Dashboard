@@ -1208,8 +1208,15 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
   // Apply column filters on top of search/status/rep filters
   const filtered = leads.filter(l=>{
     const s=(searchFilters?search:'').toLowerCase();
-    if(s && !l.channelName.toLowerCase().includes(s) && !l.niche.toLowerCase().includes(s) && !l.platform.toLowerCase().includes(s)) return false;
-    if(filterStatus && !l.tags.includes(filterStatus)) return false;
+    // Coerce before matching. A lead written straight to Supabase (the Make
+    // ingest bypasses normalizeLead) can be missing channelName/niche/platform,
+    // and a bare .toLowerCase() on it threw here — taking the whole app down on
+    // the first keystroke in search. One bad row must never break the table.
+    if(s){
+      const hay=[l.channelName,l.niche,l.platform].map(v=>String(v==null?'':v).toLowerCase());
+      if(!hay.some(h=>h.includes(s))) return false;
+    }
+    if(filterStatus && !(l.tags||[]).includes(filterStatus)) return false;
     if(filterRep && l.assignedTo!==filterRep) return false;
     // Column filters
     if(colFilter.tags){
@@ -1769,7 +1776,7 @@ function CloseSearchView({config}) {
               const open=openId===l.id;
               const conv=convos[l.id];
               return (<React.Fragment key={l.id}>
-              <tr style={open?{background:'var(--accent-light)'}:undefined}>
+              <tr style={open?{background:'var(--accent-light)'}:{}}>
                 <td style={td}>{l.channelName||l.name}{l.url?<a href={l.url} target="_blank" rel="noreferrer" title={l.url} style={{marginLeft:6,fontSize:11,textDecoration:'none'}}>↗</a>:null}</td>
                 <td style={td}>{l.followers||'—'}</td><td style={td}>{l.niche||'—'}</td>
                 <td style={td}>{l.status?<span style={{padding:'2px 8px',borderRadius:999,fontSize:11,fontWeight:600,whiteSpace:'nowrap',background:neg?'#FFEBE6':'var(--accent-light)',color:neg?'#DE350B':'var(--accent)'}}>{neg?'⚠ ':''}{l.status}</span>:'—'}</td>
@@ -2329,7 +2336,7 @@ function HomeView({leads,config,currentUser}) {
                 const s=r.campaignStats[c.id]||{total:0,potential:0,contacted:0,ht:0};
                 const color=campColorMap[c.id]||'var(--accent)';
                 return (
-                  <tr key={r.rep+'|'+c.id} style={ci===campDefs.length-1?{borderBottom:'1px solid var(--border)'}:undefined}>
+                  <tr key={r.rep+'|'+c.id} style={ci===campDefs.length-1?{borderBottom:'1px solid var(--border)'}:{}}>
                     {ci===0 && <td style={{fontWeight:600}} rowSpan={campDefs.length}>{r.rep}</td>}
                     <td style={{whiteSpace:'nowrap'}}><span style={{color,fontWeight:700}}>●</span> {c.label}</td>
                     <td>{s.total}</td>
