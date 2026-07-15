@@ -968,13 +968,6 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, colFilter, setC
     if(col==='origin'){
       return ['Fresh','Imported'];
     }
-    // Which teammate originally sourced the lead. Automation-sourced pool leads
-    // have no human scraper, so they fall under "Unknown" rather than listing the bot.
-    if(col==='scrapedBy'){
-      const all=new Set();
-      leads.forEach(l=>{ const s=humanScraper(l); if(s) all.add(s); });
-      return [...all,'Unknown'];
-    }
     return [];
   }
 
@@ -1237,11 +1230,6 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
     if(colFilter.origin){
       if(leadOrigin(l)!==colFilter.origin) return false;
     }
-    if(colFilter.scrapedBy){
-      const s=humanScraper(l);
-      if(colFilter.scrapedBy==='Unknown'){ if(s) return false; }
-      else if(s!==colFilter.scrapedBy) return false;
-    }
     return true;
   }).sort((a,b)=>{
     if(!sortCol) return 0;
@@ -1255,7 +1243,6 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
       return dir*(fa-fb);
     }
     if(sortCol==='assignedTo') return dir*(a.assignedTo||'').localeCompare(b.assignedTo||'');
-    if(sortCol==='scrapedBy') return dir*humanScraper(a).localeCompare(humanScraper(b));
     if(sortCol==='dateAssigned') return dir*(a.dateAssigned||'').localeCompare(b.dateAssigned||'');
     return 0;
   });
@@ -1465,7 +1452,6 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                 {cols.tags && <ColHeader col="tags" label="Tags" {...colHeaderProps}/>}
                 {showOrigin && <ColHeader col="origin" label="Origin" {...colHeaderProps}/>}
                 {showCampaign && cols.campaign && <ColHeader col="campaign" label="Campaign" {...colHeaderProps}/>}
-                <ColHeader col="scrapedBy" label="Scraped By" {...colHeaderProps}/>
                 {showAssigned && cols.assignedTo && <ColHeader col="assignedTo" label="Assigned To" {...colHeaderProps}/>}
                 {showAssigned && cols.dateAssigned && <ColHeader col="dateAssigned" label="Date Assigned" {...colHeaderProps}/>}
                 <th style={{width:80}} className="no-print">Actions</th>
@@ -1548,13 +1534,6 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                         onChange={campaigns=>patchLead(lead.id,{campaigns})}/>
                     </td>
                   )}
-                  {/* Which TEAMMATE originally sourced this lead. Never changes on
-                      reassignment, so it stays the permanent record of who scraped it. */}
-                  <td style={{whiteSpace:'nowrap'}} title={humanScraper(lead)?`Originally scraped by ${humanScraper(lead)}`:(isAutomationScraper(lead)?'From the automated pool scraper — no teammate scraped this one':'No scrape record for this lead')}>
-                    {humanScraper(lead)
-                      ? <span style={{fontSize:11.5,fontWeight:600,color:'var(--text-dim)'}}>{humanScraper(lead)}</span>
-                      : <span style={{color:'var(--text-light)',fontSize:11}}>—</span>}
-                  </td>
                   {showAssigned && cols.assignedTo && (
                     <td>
                       {lead.assignedTo
@@ -3283,14 +3262,12 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
   const rows=contacted.filter(l=>{
     if(colFilter.campaign){ if(colFilter.campaign==='None'){ if((l.campaigns||[]).length>0) return false; } else if(!(l.campaigns||[]).includes(colFilter.campaign)) return false; }
     if(colFilter.assignedTo){ if(colFilter.assignedTo==='Unassigned'){ if(l.assignedTo) return false; } else if(l.assignedTo!==colFilter.assignedTo) return false; }
-    if(colFilter.scrapedBy){ const s=humanScraper(l); if(colFilter.scrapedBy==='Unknown'){ if(s) return false; } else if(s!==colFilter.scrapedBy) return false; }
     return true;
   }).sort((a,b)=>{
     if(!sortCol) return 0;
     const dir=sortDir==='asc'?1:-1;
     if(sortCol==='channelName') return dir*String(a.channelName||'').localeCompare(String(b.channelName||''));
     if(sortCol==='assignedTo') return dir*String(a.assignedTo||'').localeCompare(String(b.assignedTo||''));
-    if(sortCol==='scrapedBy') return dir*humanScraper(a).localeCompare(humanScraper(b));
     if(sortCol==='campaign') return dir*(a.campaigns||[]).join(',').localeCompare((b.campaigns||[]).join(','));
     if(sortCol==='followers'){ const fa=parseInt(String(a.followers).replace(/[^0-9]/g,''))||0, fb=parseInt(String(b.followers).replace(/[^0-9]/g,''))||0; return dir*(fa-fb); }
     if(sortCol==='lastContact'){ const da=effectiveContact(a),db=effectiveContact(b); return dir*((da?da.date.getTime():0)-(db?db.date.getTime():0)); }
@@ -3312,7 +3289,6 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
           <ColHeader col="followers" label="Followers" {...colHeaderProps}/>
           <th>Email</th>
           <ColHeader col="campaign" label="Campaign" {...colHeaderProps}/>
-          <ColHeader col="scrapedBy" label="Scraped By" {...colHeaderProps}/>
           <ColHeader col="assignedTo" label="Assigned To" {...colHeaderProps}/>
           <ColHeader col="lastContact" label="Last Contacted" {...colHeaderProps}/>
           <ColHeader col="daysSince" label="Days Since Contact" {...colHeaderProps}/>
@@ -3320,7 +3296,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
           <th>Actions</th>
         </tr></thead>
         <tbody>
-          {rows.length===0&&<tr><td colSpan={10} style={{textAlign:'center',padding:32,color:'var(--text-dim)'}}>{contacted.length===0?'No contacted leads yet':'No contacted leads match the filters'}</td></tr>}
+          {rows.length===0&&<tr><td colSpan={9} style={{textAlign:'center',padding:32,color:'var(--text-dim)'}}>{contacted.length===0?'No contacted leads yet':'No contacted leads match the filters'}</td></tr>}
           {rows.map(l=>{
             const r=recycleInfo(l);
             const e=effectiveContact(l);
@@ -3339,11 +3315,6 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
                   ? <a href={`mailto:${email}`} style={{fontSize:11.5,color:'var(--accent)',textDecoration:'none',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'block'}} title={email}>{email}</a>
                   : <span style={{color:'var(--text-light)',fontSize:11}}>—</span>}</td>
                 <td>{l.campaigns.length?l.campaigns.map(c=><span key={c} style={{color:campColorMap[c]||'var(--accent)',fontWeight:700,fontSize:12,marginRight:8}}>{c}</span>):<span style={{color:'var(--text-dim)'}}>—</span>}</td>
-                <td style={{whiteSpace:'nowrap'}} title={humanScraper(l)?`Originally scraped by ${humanScraper(l)}`:(isAutomationScraper(l)?'From the automated pool scraper — no teammate scraped this one':'No scrape record for this lead')}>
-                  {humanScraper(l)
-                    ? <span style={{fontSize:11.5,fontWeight:600,color:'var(--text-dim)'}}>{humanScraper(l)}</span>
-                    : <span style={{color:'var(--text-light)',fontSize:11}}>—</span>}
-                </td>
                 <td>{l.assignedTo||<span style={{color:'var(--text-dim)'}}>—</span>}</td>
                 <td><EditableContactDate lead={l} effective={e} onCommit={v=>setContactDate(l,v)}/></td>
                 <td>{r?<span style={{fontWeight:600,color:r.diff>0?'var(--text-dim)':'var(--text)'}}>{r.diff} day{r.diff!==1?'s':''}</span>:<span style={{color:'var(--text-dim)'}}>—</span>}</td>

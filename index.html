@@ -1766,16 +1766,6 @@ function ColHeader({
     if (col === 'origin') {
       return ['Fresh', 'Imported'];
     }
-    // Which teammate originally sourced the lead. Automation-sourced pool leads
-    // have no human scraper, so they fall under "Unknown" rather than listing the bot.
-    if (col === 'scrapedBy') {
-      const all = new Set();
-      leads.forEach(l => {
-        const s = humanScraper(l);
-        if (s) all.add(s);
-      });
-      return [...all, 'Unknown'];
-    }
     return [];
   }
   const filterOpts = getOptions();
@@ -2331,12 +2321,6 @@ function LeadsTable({
     if (colFilter.origin) {
       if (leadOrigin(l) !== colFilter.origin) return false;
     }
-    if (colFilter.scrapedBy) {
-      const s = humanScraper(l);
-      if (colFilter.scrapedBy === 'Unknown') {
-        if (s) return false;
-      } else if (s !== colFilter.scrapedBy) return false;
-    }
     return true;
   }).sort((a, b) => {
     if (!sortCol) return 0;
@@ -2350,7 +2334,6 @@ function LeadsTable({
       return dir * (fa - fb);
     }
     if (sortCol === 'assignedTo') return dir * (a.assignedTo || '').localeCompare(b.assignedTo || '');
-    if (sortCol === 'scrapedBy') return dir * humanScraper(a).localeCompare(humanScraper(b));
     if (sortCol === 'dateAssigned') return dir * (a.dateAssigned || '').localeCompare(b.dateAssigned || '');
     return 0;
   });
@@ -2753,10 +2736,6 @@ function LeadsTable({
     col: "campaign",
     label: "Campaign",
     ...colHeaderProps
-  }), /*#__PURE__*/React.createElement(ColHeader, {
-    col: "scrapedBy",
-    label: "Scraped By",
-    ...colHeaderProps
   }), showAssigned && cols.assignedTo && /*#__PURE__*/React.createElement(ColHeader, {
     col: "assignedTo",
     label: "Assigned To",
@@ -2886,23 +2865,7 @@ function LeadsTable({
     onChange: campaigns => patchLead(lead.id, {
       campaigns
     })
-  })), /*#__PURE__*/React.createElement("td", {
-    style: {
-      whiteSpace: 'nowrap'
-    },
-    title: humanScraper(lead) ? `Originally scraped by ${humanScraper(lead)}` : isAutomationScraper(lead) ? 'From the automated pool scraper — no teammate scraped this one' : 'No scrape record for this lead'
-  }, humanScraper(lead) ? /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 11.5,
-      fontWeight: 600,
-      color: 'var(--text-dim)'
-    }
-  }, humanScraper(lead)) : /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: 'var(--text-light)',
-      fontSize: 11
-    }
-  }, "—")), showAssigned && cols.assignedTo && /*#__PURE__*/React.createElement("td", null, lead.assignedTo ? /*#__PURE__*/React.createElement("div", {
+  })), showAssigned && cols.assignedTo && /*#__PURE__*/React.createElement("td", null, lead.assignedTo ? /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       alignItems: 'center',
@@ -7489,19 +7452,12 @@ function ContactedView({
         if (l.assignedTo) return false;
       } else if (l.assignedTo !== colFilter.assignedTo) return false;
     }
-    if (colFilter.scrapedBy) {
-      const s = humanScraper(l);
-      if (colFilter.scrapedBy === 'Unknown') {
-        if (s) return false;
-      } else if (s !== colFilter.scrapedBy) return false;
-    }
     return true;
   }).sort((a, b) => {
     if (!sortCol) return 0;
     const dir = sortDir === 'asc' ? 1 : -1;
     if (sortCol === 'channelName') return dir * String(a.channelName || '').localeCompare(String(b.channelName || ''));
     if (sortCol === 'assignedTo') return dir * String(a.assignedTo || '').localeCompare(String(b.assignedTo || ''));
-    if (sortCol === 'scrapedBy') return dir * humanScraper(a).localeCompare(humanScraper(b));
     if (sortCol === 'campaign') return dir * (a.campaigns || []).join(',').localeCompare((b.campaigns || []).join(','));
     if (sortCol === 'followers') {
       const fa = parseInt(String(a.followers).replace(/[^0-9]/g, '')) || 0,
@@ -7598,10 +7554,6 @@ function ContactedView({
     label: "Campaign",
     ...colHeaderProps
   }), /*#__PURE__*/React.createElement(ColHeader, {
-    col: "scrapedBy",
-    label: "Scraped By",
-    ...colHeaderProps
-  }), /*#__PURE__*/React.createElement(ColHeader, {
     col: "assignedTo",
     label: "Assigned To",
     ...colHeaderProps
@@ -7618,7 +7570,7 @@ function ContactedView({
     label: "Recycle In",
     ...colHeaderProps
   }), /*#__PURE__*/React.createElement("th", null, "Actions"))), /*#__PURE__*/React.createElement("tbody", null, rows.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: 10,
+    colSpan: 9,
     style: {
       textAlign: 'center',
       padding: 32,
@@ -7687,22 +7639,6 @@ function ContactedView({
     }, c)) : /*#__PURE__*/React.createElement("span", {
       style: {
         color: 'var(--text-dim)'
-      }
-    }, "—")), /*#__PURE__*/React.createElement("td", {
-      style: {
-        whiteSpace: 'nowrap'
-      },
-      title: humanScraper(l) ? `Originally scraped by ${humanScraper(l)}` : isAutomationScraper(l) ? 'From the automated pool scraper — no teammate scraped this one' : 'No scrape record for this lead'
-    }, humanScraper(l) ? /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 11.5,
-        fontWeight: 600,
-        color: 'var(--text-dim)'
-      }
-    }, humanScraper(l)) : /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: 'var(--text-light)',
-        fontSize: 11
       }
     }, "—")), /*#__PURE__*/React.createElement("td", null, l.assignedTo || /*#__PURE__*/React.createElement("span", {
       style: {
