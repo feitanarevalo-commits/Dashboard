@@ -5544,6 +5544,11 @@ function App() {
     // Any lead with a rep must carry a dateAssigned, else it's invisible to the
     // date-based Home KPIs. Stamp today if a rep is set but the date is missing.
     if(updated.assignedTo && !updated.dateAssigned) updated.dateAssigned=ymdLocal(new Date());
+    // The FIRST teammate a lead lands with is its scraper — they claimed and
+    // qualified it into the pipeline (pool leads from the Make automation
+    // included). Only fills a missing human scraper, so it's never overwritten
+    // on reassignment: JC scrapes → handed to Mikka → still reads JC.
+    if(updated.assignedTo && !humanScraper(updated)) updated.scrapedBy=updated.assignedTo;
     if(old&&!old.tags.includes('Contacted')&&upd.tags.includes('Contacted')){
       updated.lastContactDate=ymdLocal(new Date());
       addToast(`"${upd.channelName}" marked Contacted — date recorded`,'success');
@@ -5614,7 +5619,10 @@ function App() {
     logH('♻',`Restored ${arr.length} lead(s) from Archive`);
     addToast(`♻ Restored ${arr.length} lead(s) from Archive`,'success');
   }
-  function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:new Date().toISOString().split('T')[0]}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
+  // Covers pool claims and bulk reassignment. Same rule as saveL: the first
+  // teammate a lead lands with becomes its permanent scraper; an existing human
+  // scraper is never overwritten, so only "Assigned To" changes after that.
+  function bulkAssign(ids,rep){setLeads(ls=>ls.map(l=>ids.includes(l.id)?{...l,assignedTo:rep,dateAssigned:ymdLocal(new Date()),scrapedBy:humanScraper(l)||rep||l.scrapedBy||null}:l));addToast(`${ids.length} leads assigned to ${rep}`,'success');logH('✅',`Bulk: ${ids.length} leads → ${rep}`);}
   // Distribute lead-gen JC's QUALIFIED (Potential-tagged) leads to the sales team.
   // RULE: high-ticket Potentials all go to Rein; every other Potential is split
   // EVENLY across Mikka, Chase and Pen — with fresh and imported balanced
