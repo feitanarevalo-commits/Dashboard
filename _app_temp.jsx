@@ -2856,13 +2856,15 @@ function saveRepApiKeysToSupabase(keys){
 function loadApiPool(){
   if(!SB) return Promise.resolve([]);
   return SB.from('youtube_api_keys')
-    .select('id,label,api_key,active,exhausted_until,last_status,last_used_at')
+    .select('id,label,api_key,active,sort_order,exhausted_until,last_status,last_used_at')
     .order('sort_order',{ascending:true}).order('id',{ascending:true})
     .then(({data,error})=> (error||!data)?[]:data).catch(()=>[]);
 }
-function addApiPoolKey(label,apiKey){
+function addApiPoolKey(label,apiKey,sortOrder){
   if(!SB) return Promise.resolve({ok:false});
-  return SB.from('youtube_api_keys').insert({label:String(label||'').trim(),api_key:String(apiKey||'').trim()})
+  const row={label:String(label||'').trim(),api_key:String(apiKey||'').trim()};
+  if(Number.isFinite(sortOrder)) row.sort_order=sortOrder;
+  return SB.from('youtube_api_keys').insert(row)
     .then(({error})=>({ok:!error,error})).catch(e=>({ok:false,error:e}));
 }
 function updateApiPoolKey(id,patch){
@@ -4756,7 +4758,13 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
     if(!k){ addToast('Paste a YouTube API key first','error'); return; }
     if(apiPool.some(p=>p.api_key===k)){ addToast('That key is already in the pool','info'); return; }
     setPoolBusy(true);
-    const res=await addApiPoolKey(poolDraft.label||('Key '+(apiPool.length+1)),k);
+    // Order a new key by the number in its label ("Profile 4" → 4); if the label
+    // has no number, append it after the current keys so it never jumps the queue.
+    const label=poolDraft.label||('Key '+(apiPool.length+1));
+    const numMatch=label.match(/\d+/);
+    const maxOrder=apiPool.reduce((m,p)=>Math.max(m,p.sort_order||0),0);
+    const sortOrder=numMatch?parseInt(numMatch[0],10):(maxOrder+1);
+    const res=await addApiPoolKey(label,k,sortOrder);
     setPoolBusy(false);
     if(res.ok){ setPoolDraft({label:'',api_key:''}); refreshPool(); addToast('API key added to the pool','success'); }
     else addToast('Could not add key'+(res.error&&res.error.message?': '+res.error.message:''),'error');

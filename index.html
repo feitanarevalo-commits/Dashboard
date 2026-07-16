@@ -6261,7 +6261,7 @@ function saveRepApiKeysToSupabase(keys) {
 // doesn't stop everyone. This replaces the old per-rep key buckets.
 function loadApiPool() {
   if (!SB) return Promise.resolve([]);
-  return SB.from('youtube_api_keys').select('id,label,api_key,active,exhausted_until,last_status,last_used_at').order('sort_order', {
+  return SB.from('youtube_api_keys').select('id,label,api_key,active,sort_order,exhausted_until,last_status,last_used_at').order('sort_order', {
     ascending: true
   }).order('id', {
     ascending: true
@@ -6270,14 +6270,16 @@ function loadApiPool() {
     error
   }) => error || !data ? [] : data).catch(() => []);
 }
-function addApiPoolKey(label, apiKey) {
+function addApiPoolKey(label, apiKey, sortOrder) {
   if (!SB) return Promise.resolve({
     ok: false
   });
-  return SB.from('youtube_api_keys').insert({
+  const row = {
     label: String(label || '').trim(),
     api_key: String(apiKey || '').trim()
-  }).then(({
+  };
+  if (Number.isFinite(sortOrder)) row.sort_order = sortOrder;
+  return SB.from('youtube_api_keys').insert(row).then(({
     error
   }) => ({
     ok: !error,
@@ -10635,7 +10637,13 @@ function SettingsDrawer({
       return;
     }
     setPoolBusy(true);
-    const res = await addApiPoolKey(poolDraft.label || 'Key ' + (apiPool.length + 1), k);
+    // Order a new key by the number in its label ("Profile 4" → 4); if the label
+    // has no number, append it after the current keys so it never jumps the queue.
+    const label = poolDraft.label || 'Key ' + (apiPool.length + 1);
+    const numMatch = label.match(/\d+/);
+    const maxOrder = apiPool.reduce((m, p) => Math.max(m, p.sort_order || 0), 0);
+    const sortOrder = numMatch ? parseInt(numMatch[0], 10) : maxOrder + 1;
+    const res = await addApiPoolKey(label, k, sortOrder);
     setPoolBusy(false);
     if (res.ok) {
       setPoolDraft({
