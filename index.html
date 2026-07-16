@@ -5929,9 +5929,12 @@ function loadLeadsFromSupabase() {
   // Paginate past PostgREST's ~1000-row cap so no leads are ever silently
   // dropped. (Interim: still loads all into memory; server-side paging via the
   // leads_page RPC is the scale path once the UI migrates to it.)
+  // Returns {items, versions}: the lead objects plus a {id: version} map used as
+  // the base for optimistic-concurrency writes (sync_leads rejects stale versions).
   async function all() {
     const PAGE = 1000,
-      out = [];
+      out = [],
+      versions = {};
     let from = 0;
     for (let i = 0; i < 1000; i++) {
       // hard safety cap = 1,000,000 rows
@@ -5940,7 +5943,7 @@ function loadLeadsFromSupabase() {
       const {
         data,
         error
-      } = await SB.from('leads').select('id,data').eq('archived', false).range(from, from + PAGE - 1);
+      } = await SB.from('leads').select('id,data,version').eq('archived', false).range(from, from + PAGE - 1);
       if (error || !data) {
         if (i === 0) {
           reportError('loadLeads', error || 'no data');
@@ -5948,11 +5951,19 @@ function loadLeadsFromSupabase() {
         }
         break;
       }
-      out.push(...data.map(r => r.data).filter(Boolean));
+      data.forEach(r => {
+        if (r.data) {
+          out.push(r.data);
+          versions[String(r.id)] = r.version;
+        }
+      });
       if (data.length < PAGE) break;
       from += PAGE;
     }
-    return out;
+    return {
+      items: out,
+      versions
+    };
   }
   return all().catch(e => {
     reportError('loadLeads', e);
@@ -6054,6 +6065,60 @@ function upsertLeadsToSupabase(arr) {
     return Promise.resolve({
       ok: false,
       error: e
+    });
+  }
+}
+// Optimistic-concurrency write: sends each changed lead WITH the version it was
+// based on. The sync_leads RPC writes it only if the DB still holds that version;
+// otherwise the lead is REJECTED and its current DB row is returned, so a stale
+// tab can't overwrite newer work (the Contacted→Potential clobber). Returns
+// {ok, accepted:[{id,version}], rejected:[{id,data,version}]}.
+function syncLeadsToSupabase(arr, versions) {
+  if (!SB || !arr || !arr.length) return Promise.resolve({
+    ok: true,
+    accepted: [],
+    rejected: []
+  });
+  const v = versions || {};
+  const rows = arr.map(l => {
+    const id = String(l.id);
+    const bv = v[id];
+    return {
+      id,
+      lead_key: leadKey(l),
+      assigned_to: l.assignedTo || null,
+      data: l,
+      base_version: bv == null ? null : String(bv)
+    };
+  });
+  try {
+    return SB.rpc('sync_leads', {
+      rows
+    }).then(({
+      data,
+      error
+    }) => {
+      if (error) {
+        console.warn('[leads] sync_leads failed', error.message);
+        return {
+          ok: false,
+          error,
+          accepted: [],
+          rejected: []
+        };
+      }
+      return {
+        ok: true,
+        accepted: data && data.accepted || [],
+        rejected: data && data.rejected || []
+      };
+    });
+  } catch (e) {
+    return Promise.resolve({
+      ok: false,
+      error: e,
+      accepted: [],
+      rejected: []
     });
   }
 }
@@ -13293,6 +13358,7 @@ function App() {
   const [leadsReady, setLeadsReady] = useState(false); // Supabase leads loaded
   const supabaseHadLeadsRef = useRef(false);
   const leadsSyncRef = useRef({}); // {id: JSON} last synced
+  const leadVersionsRef = useRef({}); // {id: DB version} — base for optimistic-concurrency writes
   // {id: ms} when each lead was last changed locally. The 15s poll compares this
   // against the moment its OWN fetch started: if a lead was edited while that
   // fetch was in flight, the response is stale for that lead and must not win.
@@ -14322,6 +14388,7 @@ function App() {
     const snapshot = [...leads];
     setLeads([]);
     leadsSyncRef.current = {};
+    leadVersionsRef.current = {};
     clearAllLeadsFromSupabase();
     logH('🗑', `Cleared ALL leads (${n})`, {
       type: 'undelete',
@@ -14929,12 +14996,14 @@ function App() {
 
   // Load shared LEADS from Supabase once on start (the team source of truth).
   useEffect(() => {
-    loadLeadsFromSupabase().then(loaded => {
+    loadLeadsFromSupabase().then(res => {
+      const loaded = res && res.items;
       if (loaded && loaded.length) {
         supabaseHadLeadsRef.current = true;
         const snap = {};
         loaded.forEach(l => snap[String(l.id)] = JSON.stringify(l));
         leadsSyncRef.current = snap;
+        leadVersionsRef.current = res && res.versions || {};
         setLeads(loaded);
       }
       setLeadsReady(true);
@@ -14995,10 +15064,31 @@ function App() {
       if (changed.length) {
         // Mark leads as synced ONLY AFTER the write CONFIRMS. Until then they stay
         // "dirty", so the 15s refresh poll can't read stale rows mid-write and
-        // revert a just-made edit — that was the "lead lingers in its old tab then
-        // disappears" bug. On failure we leave the snapshot old so it retries.
-        upsertLeadsToSupabase(changed).then(res => {
-          if (!res || res.ok) leadsSyncRef.current = snap;
+        // revert a just-made edit. On failure we leave the snapshot old so it retries.
+        syncLeadsToSupabase(changed, leadVersionsRef.current).then(res => {
+          if (!res || !res.ok) return; // network/RPC error → keep snapshot old, retry next tick
+          // Accepted writes: advance our known version so the next edit isn't rejected.
+          (res.accepted || []).forEach(a => {
+            leadVersionsRef.current[String(a.id)] = a.version;
+          });
+          // Rejected = someone else wrote a newer version. Adopt the DB's current row
+          // instead of clobbering it, refresh our version, and align the snapshot so
+          // we don't immediately re-push the stale change.
+          if (res.rejected && res.rejected.length) {
+            const byId = {};
+            res.rejected.forEach(r => {
+              const id = String(r.id);
+              byId[id] = r;
+              leadVersionsRef.current[id] = r.version;
+              if (r.data) snap[id] = JSON.stringify(r.data);
+            });
+            setLeads(cur => cur.map(l => {
+              const r = byId[String(l.id)];
+              return r && r.data ? r.data : l;
+            }));
+            addToast(`${res.rejected.length} lead(s) were updated by someone else — refreshed to the latest`, 'info');
+          }
+          leadsSyncRef.current = snap;
         });
       } else {
         leadsSyncRef.current = snap;
@@ -15026,7 +15116,9 @@ function App() {
       // When THIS fetch began. Anything the DB tells us reflects the world at
       // roughly this instant, so a lead edited after it is newer than the answer.
       const fetchStartedAt = Date.now();
-      loadLeadsFromSupabase().then(remote => {
+      loadLeadsFromSupabase().then(res => {
+        const remote = res && res.items;
+        const remoteVersions = res && res.versions || {};
         if (stop || !Array.isArray(remote)) return;
         const remoteById = {};
         remote.forEach(l => remoteById[String(l.id)] = l);
@@ -15044,10 +15136,18 @@ function App() {
             const staleForThisLead = (writeStampRef.current[id] || 0) >= fetchStartedAt;
             if (r === undefined) {
               if (!(id in synced) || dirty || staleForThisLead) out.push(l); /* else: deleted by another rep */
-            } else out.push(dirty || staleForThisLead ? l : r); // keep my edit, else take shared
+            } else {
+              const take = dirty || staleForThisLead ? l : r;
+              out.push(take);
+              if (take === r) leadVersionsRef.current[id] = remoteVersions[id];
+            } // adopted shared row → track its version
           });
           remote.forEach(l => {
-            if (!localIds.has(String(l.id))) out.push(l);
+            const id = String(l.id);
+            if (!localIds.has(id)) {
+              out.push(l);
+              leadVersionsRef.current[id] = remoteVersions[id];
+            }
           }); // new from other reps
           if (out.length === local.length) {
             const lm = {};
