@@ -39,7 +39,10 @@ function statusOptions(config){
 }
 // Status tags that have their OWN dedicated tab. A lead carrying one has "landed"
 // there and should leave the general Scraper / Lead Management lists.
-const STATUS_TAB_TAGS = ['Pending Qualification','Contacted','For Recycle'];
+const STATUS_TAB_TAGS = ['Pending Qualification','Contacted','For Recycle','Partner'];
+// Already a signed partner — the lead is won. It leaves the rep's queue and the
+// campaign tabs (it isn't workable pipeline any more) and lives in its own tab.
+function isPartnerLead(lead){ return (lead&&(lead.tags||[]).includes('Partner'))||false; }
 function hasTabStatusTag(lead){ return isContacted(lead) || STATUS_TAB_TAGS.some(t=>(lead.tags||[]).includes(t)); }
 // Any status tag — built-in OR admin-added (config.statusTags). Used to drop a
 // lead from the FRESH Scraper queue the moment it's triaged with any status.
@@ -591,6 +594,9 @@ function Toast({toasts}) {
 }
 
 // ─── TAG BADGE ────────────────────────────────────────────
+// NOTE: this shadows the `var TAG_COLORS` in config.js — the tag pills render
+// from THIS copy, so a colour added only to config.js silently falls back to the
+// grey "Duplicate" style. Keep the two in sync until they're merged.
 const TAG_COLORS={
   'Potential':{bg:'#E3FCF2',color:'#00875A'},
   'Not Qualified':{bg:'#FFEBE6',color:'#DE350B'},
@@ -599,6 +605,7 @@ const TAG_COLORS={
   'Existing Leads':{bg:'#EAE6FF',color:'#6554C0'},
   'Duplicate':{bg:'#F0F2F5',color:'#68737D'},
   'HT':{bg:'#FFF4E5',color:'#FF8B00'},
+  'Partner':{bg:'#E6F4EA',color:'#1E7B45'},
 };
 
 function TagBadge({tag}) {
@@ -6861,6 +6868,7 @@ function App() {
     recycle:vLeads.filter(l=>l.tags.includes('For Recycle')).length,
     recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff).length,
     duplicates:myDupGroups.length,
+    partner:vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l)).length,
   };
 
   // ── Lead Pools ── the Make scraper feeds these buckets 24/7 with unclaimed
@@ -6923,6 +6931,7 @@ function App() {
     {id:'pending',icon:'◔',label:'Pending Qualification',count:counts.pending,cls:'orange'},
     {id:'contacted',icon:'✉',label:'Contacted',count:counts.contacted,cls:'blue'},
     {id:'recycle',icon:'↻',label:'For Recycle',count:counts.recycle,cls:'orange'},
+    {id:'partner',icon:'🤝',label:'Already Partner',count:counts.partner,cls:'green'},
     {id:'duplicates',icon:'⧉',label:'Duplicates',count:counts.duplicates,cls:'red'},
   ];
 
@@ -6940,6 +6949,9 @@ function App() {
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap} addToast={addToast}/>;
     if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;
+    // Already Partner: the lead is won and out of the pipeline. Reps see their
+    // own, admins see everyone's — same scoping as Pending.
+    if(tab==='partner') return <LeadsTable leads={vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="already_partner" printTitle="Already Partner"/>;
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
     if(tab==='duplicates') return <DuplicatesView groups={myDupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
     if(tab==='archive') return isAdmin ? <ArchiveView loadArchived={loadArchivedFromSupabase} onRestore={restoreArchived} config={config} campColorMap={campColorMap} addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
@@ -6960,7 +6972,7 @@ function App() {
     return null;
   }
 
-  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',partner:'Already Partner',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // Gate the entire app behind login.
   const resetToken=(()=>{ try{ return new URLSearchParams(window.location.search).get('reset'); }catch(e){ return null; } })();

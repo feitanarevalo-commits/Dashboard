@@ -13,7 +13,7 @@ var PLATFORM_ICON = { YouTube: '▶', TikTok: '♫', Instagram: '◈' };
 // ── STATUS TAGS ────────────────────────────────────────────
 // These are the standard lead statuses shown in dropdowns.
 // Changing order here changes dropdown order throughout the app.
-var STATUSES = ['Potential', 'Contacted', 'For Recycle'];
+var STATUSES = ['Potential', 'Contacted', 'For Recycle', 'Partner'];
 var STATUS_CLS = {
   'Potential':      'tag-potential',
   'Not Qualified':  'tag-nq',
@@ -21,11 +21,14 @@ var STATUS_CLS = {
   'Existing Leads': 'tag-existing',
   'For Recycle':    'tag-recycle',
   'Duplicate':      'tag-duplicate',
+  'Partner':        'tag-partner',
 };
 
 // Tags that cause a lead to leave the Scraper queue.
 // Add a tag here to make it auto-route leads out of Scraper.
-var STATUS_TAGS = ['Potential', 'Contacted', 'For Recycle', 'HT'];
+// 'Partner' = already a signed partner: the lead is won, so it stops counting as
+// workable pipeline and lives in the Already Partner tab.
+var STATUS_TAGS = ['Potential', 'Contacted', 'For Recycle', 'HT', 'Partner'];
 
 // ── TAG COLOURS ────────────────────────────────────────────
 // Controls the colour of tag badges everywhere in the app.
@@ -37,6 +40,7 @@ var TAG_COLORS = {
   'Existing Leads': { bg: '#EAE6FF', color: '#6554C0' },
   'Duplicate':      { bg: '#F0F2F5', color: '#68737D' },
   'HT':             { bg: '#FFF4E5', color: '#FF8B00' },
+  'Partner':        { bg: '#E6F4EA', color: '#1E7B45' },
 };
 
 // ── APP DEFAULT SETTINGS ───────────────────────────────────
@@ -188,7 +192,7 @@ var DEFAULT_CONFIG = {
   ],
 
   // Tags shown in the Settings drawer "Status Tags" section
-  statusTags: ['Potential', 'Contacted', 'For Recycle'],
+  statusTags: ['Potential', 'Contacted', 'For Recycle', 'Partner'],
 };
 
 // ── SAMPLE / SEED DATA ─────────────────────────────────────

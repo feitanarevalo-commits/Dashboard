@@ -228,6 +228,9 @@ h1, h2, h3, h4, h5, h6, .display { font-family: 'Space Grotesk', 'Plus Jakarta S
 .tag-recycle { background: var(--warn-light); color: var(--warn); }
 .tag-duplicate { background: #F0F2F5; color: var(--text-dim); }
 .tag-ht { background: #FFF4E5; color: var(--warn); border: 1px solid rgba(255,139,0,.3); font-weight: 700; }
+/* Already a signed partner — won, out of the pipeline. */
+.tag-partner { background: #E6F4EA; color: #1E7B45; border: 1px solid rgba(30,123,69,.25); }
+html[data-dark] .tag-partner { background: rgba(30,123,69,.18); color: #6EE7A8; }
 .camp-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
 .camp-msn { background: #EBF2FF; color: var(--msn); }
 .camp-vvv { background: #EAE6FF; color: var(--vvv); }
