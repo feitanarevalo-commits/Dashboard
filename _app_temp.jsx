@@ -6749,7 +6749,8 @@ function App() {
   useEffect(()=>{
     if(!SB || !leadsReady) return;
     let stop=false, tick=0;
-    const iv=setInterval(()=>{
+    const pullAndMerge=()=>{
+      if(stop) return;
       // Every ~60s refresh the archived-keys set too, so an archive done by
       // another admin propagates (keeps re-scrapes of it skipped everywhere).
       if((tick++ %4)===0){ loadArchivedKeysFromSupabase().then(keys=>{ if(!stop && Array.isArray(keys)) archivedKeysRef.current=new Set(keys); }); }
@@ -6783,9 +6784,41 @@ function App() {
           return out;
         });
       }).catch(()=>{});
-    }, 15000);
-    return ()=>{ stop=true; clearInterval(iv); };
+    };
+    const iv=setInterval(pullAndMerge, 15000);
+    // Refresh-on-focus: a tab that was backgrounded (or the laptop asleep) holds
+    // stale leads; pull fresh the moment the rep returns so they edit from current
+    // data. With the version guard this just means fewer conflict-refreshes.
+    const onVisible=()=>{ if(document.visibilityState==='visible') pullAndMerge(); };
+    document.addEventListener('visibilitychange',onVisible);
+    window.addEventListener('focus',onVisible);
+    return ()=>{ stop=true; clearInterval(iv); document.removeEventListener('visibilitychange',onVisible); window.removeEventListener('focus',onVisible); };
   },[leadsReady]);
+
+  // New-build detection: if the deployed page changes (a new deploy), this tab is
+  // running old code — surface a Reload banner so nobody unknowingly stays on a
+  // stale build (pre-fix builds could still clobber). When a newer build is known
+  // and the tab is hidden with nothing unsaved, reload quietly so it's fresh on
+  // return. Uses the page's etag — no build step or extra file required.
+  const [updateAvailable,setUpdateAvailable]=useState(false);
+  const updateAvailableRef=useRef(false); updateAvailableRef.current=updateAvailable;
+  const leadsLiveRef=useRef(leads); leadsLiveRef.current=leads;
+  useEffect(()=>{
+    let stop=false, baseline=null;
+    const tag=()=>fetch(location.pathname+'?_v='+Date.now(),{method:'HEAD',cache:'no-store'})
+      .then(r=> r.headers.get('etag')||r.headers.get('last-modified')||r.headers.get('content-length')).catch(()=>null);
+    const check=()=>{ if(stop) return; tag().then(t=>{ if(stop||!t) return; if(baseline==null){ baseline=t; return; } if(t!==baseline) setUpdateAvailable(true); }); };
+    check();  // establishes the baseline
+    const iv=setInterval(check,180000);   // re-check every 3 min
+    const hasUnsaved=()=>{ const s=leadsSyncRef.current||{}; return (leadsLiveRef.current||[]).some(l=>JSON.stringify(l)!==(s[String(l.id)]||' ')); };
+    const onVis=()=>{
+      if(document.visibilityState==='visible'){ check(); }
+      else if(updateAvailableRef.current && !hasUnsaved()){ try{ location.reload(); }catch(e){} }  // reload quietly while away
+    };
+    document.addEventListener('visibilitychange',onVis);
+    window.addEventListener('focus',onVis);
+    return ()=>{ stop=true; clearInterval(iv); document.removeEventListener('visibilitychange',onVis); window.removeEventListener('focus',onVis); };
+  },[]);
 
   // Auto-load from Close after login ONLY if Supabase had no leads yet (first-time
   // setup); otherwise Supabase is the source and we don't overwrite it.
@@ -7084,14 +7117,24 @@ function App() {
 
   const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',partner:'Already Partner',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
+  // "New build available" banner — rendered on login AND inside the app, so even a
+  // logged-out stale tab is told to reload.
+  const updateBanner = updateAvailable ? (
+    <div style={{position:'fixed',top:0,left:0,right:0,zIndex:9999,background:'#4f46e5',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',gap:14,padding:'9px 16px',fontSize:13.5,fontWeight:600,boxShadow:'0 2px 12px rgba(0,0,0,.25)',fontFamily:'inherit'}}>
+      <span>🔄 A new version of the dashboard is available.</span>
+      <button onClick={()=>{ try{ location.reload(); }catch(e){} }} style={{background:'#fff',color:'#4f46e5',border:'none',borderRadius:8,padding:'6px 15px',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>Reload now</button>
+    </div>
+  ) : null;
+
   // Gate the entire app behind login.
   const resetToken=(()=>{ try{ return new URLSearchParams(window.location.search).get('reset'); }catch(e){ return null; } })();
   if(resetToken) return <ResetPasswordScreen token={resetToken} onDone={()=>{ try{ window.history.replaceState({},'',window.location.pathname); }catch(e){}; window.location.reload(); }}/>;
-  if(!currentUser) return <LoginScreen config={config} onLogin={login}/>;
+  if(!currentUser) return <>{updateBanner}<LoginScreen config={config} onLogin={login}/></>;
 
   return (
     <DupContext.Provider value={dupIndex}>
     <div id="root" style={{display:'flex',flexDirection:'column',height:'100vh'}}>
+      {updateBanner}
       {/* TOPBAR */}
       <div className="topbar">
         <div className="topbar-brand">
