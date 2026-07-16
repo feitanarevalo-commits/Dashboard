@@ -2848,6 +2848,34 @@ function saveRepApiKeysToSupabase(keys){
   return SB.from('rep_api_keys').upsert(rows,{onConflict:'rep_name'}).then(({error})=>({ok:!error,error}));
 }
 
+// ── Shared YouTube API key POOL (rotation) ────────────────────────────────
+// The whole team draws from these keys. The yt-scrape Edge Function tries them in
+// order and, when one hits YouTube's daily quota (403), marks it exhausted until
+// the next midnight Pacific and rotates to the next — so one rep maxing a key
+// doesn't stop everyone. This replaces the old per-rep key buckets.
+function loadApiPool(){
+  if(!SB) return Promise.resolve([]);
+  return SB.from('youtube_api_keys')
+    .select('id,label,api_key,active,exhausted_until,last_status,last_used_at')
+    .order('sort_order',{ascending:true}).order('id',{ascending:true})
+    .then(({data,error})=> (error||!data)?[]:data).catch(()=>[]);
+}
+function addApiPoolKey(label,apiKey){
+  if(!SB) return Promise.resolve({ok:false});
+  return SB.from('youtube_api_keys').insert({label:String(label||'').trim(),api_key:String(apiKey||'').trim()})
+    .then(({error})=>({ok:!error,error})).catch(e=>({ok:false,error:e}));
+}
+function updateApiPoolKey(id,patch){
+  if(!SB) return Promise.resolve({ok:false});
+  return SB.from('youtube_api_keys').update({...patch,updated_at:new Date().toISOString()}).eq('id',id)
+    .then(({error})=>({ok:!error,error})).catch(e=>({ok:false,error:e}));
+}
+function deleteApiPoolKey(id){
+  if(!SB) return Promise.resolve({ok:false});
+  return SB.from('youtube_api_keys').delete().eq('id',id)
+    .then(({error})=>({ok:!error,error})).catch(e=>({ok:false,error:e}));
+}
+
 // ── Per-rep CLOSE API keys (write-only; server-read only) ─────────────────
 // Close keys grant full CRM access, so the browser can WRITE them but never
 // read them back. The status view returns only whether each rep has one set;
@@ -4188,12 +4216,11 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
     const baseExtra = relevanceLanguage
       ? ('&relevanceLanguage='+relevanceLanguage + (regionCode?'&regionCode='+regionCode:''))
       : '';
-    // Use the rep's own YouTube API key so each rep has their own 10k/day quota.
-    // Lookup order: localStorage → config (admin-managed, synced from Supabase)
-    // → blank (Edge Function falls back to the shared key).
-    let apiKey='';
-    try{ apiKey=localStorage.getItem('ytKey_'+(currentUser&&currentUser.name||''))||''; }catch(e){}
-    if(!apiKey) apiKey=(config.repApiKeys||{})[currentUser&&currentUser.name]||'';
+    // Keys now come from the SHARED pool in Supabase (youtube_api_keys). The
+    // yt-scrape Edge Function loads the pool and rotates through the keys itself,
+    // marking any that hit quota as exhausted until the daily reset. We send a
+    // blank apiKey so every rep draws from that one rotating pool.
+    const apiKey='';
 
     const br=FOLLOWER_BRACKETS.find(b=>b.v===minF)||FOLLOWER_BRACKETS[0];
     const isAnyBracket = !br.v;
@@ -4309,9 +4336,9 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
       {loading?'⏳ Scraping…':'▶ Run Scraper'}
     </button>
   );
-  // YouTube API keys are managed centrally by the admin (Customize → Per-Rep
-  // YouTube API Keys, persisted to Supabase). Reps never see a key prompt — the
-  // key is loaded into config.repApiKeys on startup and used by scrape() silently.
+  // YouTube API keys live in a shared Supabase pool (Customize → Shared YouTube
+  // API Key Pool). Reps never see a key prompt — the yt-scrape Edge Function loads
+  // the pool and rotates through the keys itself when one hits its daily quota.
   const scraperFilters=(
     <>
       <select value={platform} onChange={e=>setPlatform(e.target.value)} title="Platform">
@@ -4717,6 +4744,26 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   const [closeKeyDrafts,setCloseKeyDrafts]=useState({});
   const [closeKeyStatus,setCloseKeyStatus]=useState({});
   useEffect(()=>{ loadRepCloseKeyStatusFromSupabase().then(setCloseKeyStatus); },[]);
+  // Shared YouTube API key pool — live rows from Supabase, managed immediately
+  // (not through the Save button, since exhaustion status is live data).
+  const [apiPool,setApiPool]=useState([]);
+  const [poolDraft,setPoolDraft]=useState({label:'',api_key:''});
+  const [poolBusy,setPoolBusy]=useState(false);
+  const refreshPool=()=>loadApiPool().then(setApiPool);
+  useEffect(()=>{ refreshPool(); },[]);
+  async function poolAdd(){
+    const k=(poolDraft.api_key||'').trim();
+    if(!k){ addToast('Paste a YouTube API key first','error'); return; }
+    if(apiPool.some(p=>p.api_key===k)){ addToast('That key is already in the pool','info'); return; }
+    setPoolBusy(true);
+    const res=await addApiPoolKey(poolDraft.label||('Key '+(apiPool.length+1)),k);
+    setPoolBusy(false);
+    if(res.ok){ setPoolDraft({label:'',api_key:''}); refreshPool(); addToast('API key added to the pool','success'); }
+    else addToast('Could not add key'+(res.error&&res.error.message?': '+res.error.message:''),'error');
+  }
+  async function poolRemove(id){ const r=await deleteApiPoolKey(id); if(r.ok){ refreshPool(); addToast('Key removed from pool','info'); } else addToast('Could not remove key','error'); }
+  async function poolToggle(id,active){ await updateApiPoolKey(id,{active:!active}); refreshPool(); }
+  async function poolReset(id){ await updateApiPoolKey(id,{exhausted_until:null,last_status:null,last_error:null}); refreshPool(); addToast('Key marked available','success'); }
   function set(path,val){setLocal(prev=>{const n=JSON.parse(JSON.stringify(prev));const parts=path.split('.');let o=n;for(let i=0;i<parts.length-1;i++)o=o[parts[i]];o[parts[parts.length-1]]=val;return n;});}
   const [newRepRole,setNewRepRole]=useState('employee');
   function addRep(){
@@ -4909,24 +4956,42 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
             </div>
           </div>
           <div className="drawer-section">
-            <div className="drawer-section-title">Per-Rep YouTube API Keys <span style={{fontSize:9,opacity:.6}}>Scraper quota</span></div>
+            <div className="drawer-section-title">Shared YouTube API Key Pool <span style={{fontSize:9,opacity:.6}}>Scraper quota · auto-rotates</span></div>
             <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:10,lineHeight:1.5}}>
-              Each Google Cloud project gets its own <b>10,000 units/day</b> (~100 scraper searches). Give every rep their own key here so the team doesn't share one quota bucket. Blank = falls back to the shared default.
+              The whole team shares these keys. Each Google Cloud project gives <b>10,000 units/day</b> (~19 scraper runs). When one key hits its daily cap the scraper <b>automatically rotates to the next</b>; a maxed key comes back at <b>midnight Pacific</b>. Add 2–3 keys from different Google projects for uninterrupted scraping.
               <div style={{marginTop:6}}>
                 <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer" style={{color:'var(--accent)'}}>console.cloud.google.com</a> → new project → enable “YouTube Data API v3” → Credentials → Create API key → paste below.
               </div>
             </div>
             <div className="edit-list">
-              {local.salesReps.map(r=>{
-                const k=(local.repApiKeys||{})[r]||'';
+              {apiPool.length===0 && (
+                <div style={{fontSize:11.5,color:'var(--text-light)',padding:'6px 2px'}}>No pooled keys yet — the scraper uses the shared fallback key. Add your keys below.</div>
+              )}
+              {apiPool.map(k=>{
+                const exhausted = k.exhausted_until && Date.parse(k.exhausted_until) > Date.now();
+                const mask = k.api_key ? (k.api_key.slice(0,6)+'…'+k.api_key.slice(-4)) : '';
+                const statusLabel = !k.active ? 'paused'
+                  : exhausted ? ('maxed · back '+new Date(k.exhausted_until).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}))
+                  : 'active';
+                const statusColor = !k.active ? 'var(--text-light)' : exhausted ? 'var(--warn)' : 'var(--success)';
                 return (
-                  <div className="edit-row" key={r}>
-                    <div style={{width:88,fontSize:12,fontWeight:600,color:'var(--text)',flexShrink:0}}>{r}</div>
-                    <input value={k} onChange={e=>setLocal(l=>({...l,repApiKeys:{...(l.repApiKeys||{}),[r]:e.target.value}}))} placeholder="AIza…   (paste rep's YouTube Data API key)" style={{flex:1,fontFamily:'monospace',fontSize:11.5}}/>
-                    <span style={{fontSize:10,color:k?'var(--success)':'var(--text-light)',whiteSpace:'nowrap'}} title={k?'Personal key set':'Falls back to shared key'}>{k?'✓ personal':'shared'}</span>
+                  <div className="edit-row" key={k.id} style={{alignItems:'center',gap:8}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:600,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{k.label||('Key #'+k.id)}</div>
+                      <div style={{fontSize:10.5,fontFamily:'monospace',color:'var(--text-light)'}}>{mask}</div>
+                    </div>
+                    <span style={{fontSize:10,fontWeight:600,whiteSpace:'nowrap',color:statusColor}} title={exhausted?('Quota maxed — resets '+new Date(k.exhausted_until).toLocaleString()):(k.active?'Available':'Paused')}>● {statusLabel}</span>
+                    {exhausted && <button className="btn btn-ghost btn-xs" onClick={()=>poolReset(k.id)} title="Mark available now (only if you know quota reset)">reset</button>}
+                    <button className="btn btn-ghost btn-xs" onClick={()=>poolToggle(k.id,k.active)} title={k.active?'Pause this key':'Resume this key'}>{k.active?'pause':'resume'}</button>
+                    <button className="btn btn-ghost btn-xs" onClick={()=>poolRemove(k.id)} title="Remove from pool" style={{color:'var(--danger)'}}>✕</button>
                   </div>
                 );
               })}
+            </div>
+            <div className="edit-row" style={{marginTop:8,gap:6}}>
+              <input value={poolDraft.label} onChange={e=>setPoolDraft(d=>({...d,label:e.target.value}))} placeholder="Label (e.g. Profile 1)" style={{width:132,fontSize:11.5}}/>
+              <input value={poolDraft.api_key} onChange={e=>setPoolDraft(d=>({...d,api_key:e.target.value}))} placeholder="AIza…   paste YouTube Data API key" style={{flex:1,fontFamily:'monospace',fontSize:11.5}}/>
+              <button className="btn btn-primary btn-sm" onClick={poolAdd} disabled={poolBusy||!poolDraft.api_key.trim()}>{poolBusy?'…':'+ Add'}</button>
             </div>
           </div>
           <div className="drawer-section">
