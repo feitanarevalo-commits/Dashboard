@@ -4958,7 +4958,7 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
           <div className="drawer-section">
             <div className="drawer-section-title">Shared YouTube API Key Pool <span style={{fontSize:9,opacity:.6}}>Scraper quota · auto-rotates</span></div>
             <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:10,lineHeight:1.5}}>
-              The whole team shares these keys. Each Google Cloud project gives <b>10,000 units/day</b> (~19 scraper runs). When one key hits its daily cap the scraper <b>automatically rotates to the next</b>; a maxed key comes back at <b>midnight Pacific</b>. Add 2–3 keys from different Google projects for uninterrupted scraping.
+              The whole team shares these keys. Each Google Cloud project allows <b>~100 YouTube searches/day</b> (the “Search queries per day” cap — that's the real limit, not the 10k unit budget), roughly <b>20 scraper runs</b>. When one key hits that cap the scraper <b>automatically rotates to the next</b>; a maxed key comes back at <b>midnight Pacific</b>. Add 2–3 keys from <b>different Google projects</b> for uninterrupted scraping.
               <div style={{marginTop:6}}>
                 <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer" style={{color:'var(--accent)'}}>console.cloud.google.com</a> → new project → enable “YouTube Data API v3” → Credentials → Create API key → paste below.
               </div>
