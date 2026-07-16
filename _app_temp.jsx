@@ -4226,11 +4226,10 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
 
     const br=FOLLOWER_BRACKETS.find(b=>b.v===minF)||FOLLOWER_BRACKETS[0];
     const isAnyBracket = !br.v;
-    // Widen the bracket DOWN by one tier so channels just under the threshold
-    // still count (e.g. "100K – 500K" also keeps 50K–100K). The upper bound is
-    // unchanged. effMin = the previous tier's min.
-    const brIdx=FOLLOWER_BRACKETS.indexOf(br);
-    const effMin = (!isAnyBracket && brIdx>0) ? FOLLOWER_BRACKETS[brIdx-1].min : br.min;
+    // STRICT bracket: keep only channels whose subs fall inside the chosen band.
+    // (Previously we widened DOWN one tier, which let below-range channels through —
+    // reps asked for the bracket to stick exactly, e.g. 10K–50K means 10K–50K.)
+    const effMin = br.min;
     const rangeLabel = isAnyBracket ? '' : (fmtFollowers(effMin)+' – '+(br.max===Infinity?'∞':fmtFollowers(br.max)));
     // YouTube search can't filter by subscriber count, so we fetch channels and
     // bucket them client-side. One 50-channel page rarely holds enough matches
