@@ -7038,10 +7038,18 @@ function RepDashboard({
   // imported) — unlike Close, which only takes Fresh leads. SmartReach dedupes
   // prospects by email on its side, so re-sends don't duplicate.
   const [srCsvCampaign, setSrCsvCampaign] = useState(''); // SmartReach CSV campaign filter ('' = all campaigns)
+  const [srDate, setSrDate] = useState(''); // SmartReach CSV date filter (YYYY-MM-DD; '' = all dates)
   // SmartReach CSV = the rep's workable (Potential/HT) leads that have an email,
-  // optionally scoped to ONE campaign. No filter → all of them.
+  // optionally scoped to ONE campaign and/or ONE assignment date. No filter → all.
   const smartReachBase = myLeads.filter(l => (l.emails || []).length > 0 && isWorkable(l));
-  const smartReachLeads = srCsvCampaign ? smartReachBase.filter(l => (l.campaigns || []).includes(srCsvCampaign)) : smartReachBase;
+  const smartReachByCamp = srCsvCampaign ? smartReachBase.filter(l => (l.campaigns || []).includes(srCsvCampaign)) : smartReachBase;
+  // Date scope: only leads ASSIGNED on the picked day. dateAssigned is stored in
+  // mixed formats (7/16/26 and 2026-07-16), so normalise both sides to a local
+  // YYYY-MM-DD before comparing.
+  const smartReachLeads = srDate ? smartReachByCamp.filter(l => {
+    const d = toLocalDay(l.dateAssigned);
+    return !!d && ymdLocal(d) === srDate;
+  }) : smartReachByCamp;
   const srCount = smartReachLeads.length;
   const contacted = myLeads.filter(l => isContacted(l)).length;
   const ht = myLeads.filter(l => l.tags.includes('HT')).length;
@@ -7177,7 +7185,7 @@ function RepDashboard({
     value: handedOffCount,
     title: `Leads ${rep} qualified & handed to the sales team — credited to ${rep} even after reassignment`
   });
-  const srFilename = `${rep}${srCsvCampaign ? '_' + srCsvCampaign.replace(/[^\w]+/g, '') : ''}_smartreach.csv`;
+  const srFilename = `${rep}${srCsvCampaign ? '_' + srCsvCampaign.replace(/[^\w]+/g, '') : ''}${srDate ? '_' + srDate : ''}_smartreach.csv`;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -7311,11 +7319,57 @@ function RepDashboard({
       background: '#1b1b23',
       color: '#f4f4f5'
     }
-  }, "SmartReach: ", c.label, " only")))), /*#__PURE__*/React.createElement("button", {
+  }, "SmartReach: ", c.label, " only")))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 4,
+      background: '#17171f',
+      border: `1px solid ${srDate ? '#4f46e5' : '#26262f'}`,
+      borderRadius: 9,
+      padding: '0 4px 0 9px',
+      height: 34
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: srDate ? '#a5b4fc' : '#71717a',
+      flexShrink: 0
+    }
+  }, "🗓"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: srDate,
+    max: todayStr,
+    onChange: e => setSrDate(e.target.value),
+    title: "Export only leads assigned on this date (blank = all dates)",
+    style: {
+      background: 'transparent',
+      border: 'none',
+      color: srDate ? '#f4f4f5' : '#8b8b96',
+      fontSize: 12.5,
+      fontFamily: 'inherit',
+      colorScheme: 'dark',
+      cursor: 'pointer',
+      outline: 'none'
+    }
+  }), srDate && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setSrDate(''),
+    title: "Clear date filter",
+    "aria-label": "Clear SmartReach date filter",
+    style: {
+      background: 'transparent',
+      border: 'none',
+      color: '#a1a1ac',
+      fontSize: 15,
+      lineHeight: 1,
+      cursor: 'pointer',
+      padding: '0 3px'
+    }
+  }, "×")), /*#__PURE__*/React.createElement("button", {
     onClick: () => exportSmartReachCSV(smartReachLeads, srFilename),
     disabled: !srCount,
     "aria-label": "Download SmartReach CSV",
-    title: srCount ? `Download the SmartReach CSV of ${rep}'s ${srCsvCampaign ? srCsvCampaign + ' ' : ''}Potential/HT leads that have an email (${srCount})` : 'No emailable Potential/HT leads to export for this selection',
+    title: srCount ? `Download the SmartReach CSV of ${rep}'s ${srCsvCampaign ? srCsvCampaign + ' ' : ''}${srDate ? 'assigned ' + srDate + ' ' : ''}Potential/HT leads that have an email (${srCount})` : `No emailable Potential/HT leads to export${srDate ? ' for ' + srDate : ''}${srCsvCampaign ? ' in ' + srCsvCampaign : ''}`,
     style: {
       display: 'flex',
       alignItems: 'center',
