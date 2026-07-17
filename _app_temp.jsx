@@ -1026,6 +1026,13 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, co
       const none=optionLeads.some(l=>(l.emails||[]).filter(Boolean).length===0);
       return [has&&'Has email', none&&'No email'].filter(Boolean);
     }
+    // Distinct assignment dates present, newest first. Normalised to YYYY-MM-DD so
+    // the mixed storage formats (7/16/26 and 2026-07-16) collapse to one option.
+    if(col==='dateAssigned'){
+      const all=new Set();
+      optionLeads.forEach(l=>{ const d=toLocalDay(l.dateAssigned); if(d) all.add(ymdLocal(d)); });
+      return [...all].sort().reverse();
+    }
     return [];
   }
 
@@ -1070,12 +1077,14 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, co
           <div className="col-filter-item" onClick={()=>handleSort('desc')}>Sort Z → A</div>
           {filterOpts.length>0&&<>
             <div className="col-filter-sep"/>
-            <div className="col-filter-section">Filter</div>
-            {filterOpts.map(opt=>(
-              <div key={opt} className={`col-filter-item${colFilter[col]===opt?' col-filter-active':''}`} onClick={()=>handleFilter(opt)}>
-                {opt}
-              </div>
-            ))}
+            <div className="col-filter-section">{col==='dateAssigned'?'Filter by date':'Filter'}</div>
+            <div style={{maxHeight:240,overflowY:'auto'}}>
+              {filterOpts.map(opt=>(
+                <div key={opt} className={`col-filter-item${colFilter[col]===opt?' col-filter-active':''}`} onClick={()=>handleFilter(opt)}>
+                  {opt}
+                </div>
+              ))}
+            </div>
           </>}
           {hasFilter&&<>
             <div className="col-filter-sep"/>
@@ -1277,7 +1286,7 @@ function LeadHistoryModal({lead,onClose}){
   );
 }
 
-function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,hideRepFilter=false,onClaim=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
+function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,hideRepFilter=false,onClaim=null,onDateFilterChange=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
   const [sel,setSel] = useState([]);
   const dupIndex = React.useContext(DupContext) || {};
   const [searchState,setSearchState] = useState('');
@@ -1303,6 +1312,9 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
   const [colFilter,setColFilter] = useState({});
   const [openFilterCol,setOpenFilterCol] = useState(null);
   const [srCampaign,setSrCampaign] = useState('');  // selected SmartReach campaign id (rep dashboard)
+  // Surface the Date-Assigned column filter to the parent (rep header) so the
+  // SmartReach export can scope to the same day the table is filtered to.
+  useEffect(()=>{ if(typeof onDateFilterChange==='function') onDateFilterChange(colFilter.dateAssigned||''); },[colFilter.dateAssigned]);
   const PAGE_SIZE=25;
 
   const cols = config.columns||{};
@@ -1346,6 +1358,12 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
     if(skipCol!=='emails' && cf.emails){
       const n=(l.emails||[]).filter(Boolean).length;
       if(cf.emails==='No email' ? n>0 : n===0) return false;
+    }
+    // Date-assigned filter = an exact YYYY-MM-DD. Normalise the lead's date first
+    // so the mixed storage formats (7/16/26 and 2026-07-16) both match.
+    if(skipCol!=='dateAssigned' && cf.dateAssigned){
+      const d=toLocalDay(l.dateAssigned);
+      if(!d || ymdLocal(d)!==cf.dateAssigned) return false;
     }
     return true;
   }
@@ -3288,16 +3306,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
                   {(config.campaigns||[]).map(c=><option key={c.id} value={c.id} style={{background:'#1b1b23',color:'#f4f4f5'}}>SmartReach: {c.label} only</option>)}
                 </select>
               </div>
-              {/* Date scope for the SmartReach export — pick a day to export only leads
-                  ASSIGNED that day (e.g. yesterday's dump); blank = all dates. */}
-              <div style={{display:'flex',alignItems:'center',gap:4,background:'#17171f',border:`1px solid ${srDate?'#4f46e5':'#26262f'}`,borderRadius:9,padding:'0 4px 0 9px',height:34}}>
-                <span style={{fontSize:12,color:srDate?'#a5b4fc':'#71717a',flexShrink:0}}>🗓</span>
-                <input type="date" value={srDate} max={todayStr} onChange={e=>setSrDate(e.target.value)}
-                  title="Export only leads assigned on this date (blank = all dates)"
-                  style={{background:'transparent',border:'none',color:srDate?'#f4f4f5':'#8b8b96',fontSize:12.5,fontFamily:'inherit',colorScheme:'dark',cursor:'pointer',outline:'none'}}/>
-                {srDate && <button onClick={()=>setSrDate('')} title="Clear date filter" aria-label="Clear SmartReach date filter"
-                  style={{background:'transparent',border:'none',color:'#a1a1ac',fontSize:15,lineHeight:1,cursor:'pointer',padding:'0 3px'}}>×</button>}
-              </div>
+              {srDate && <span title={`SmartReach export scoped to leads assigned ${srDate} — set from the Date Assigned column filter`}
+                style={{display:'flex',alignItems:'center',gap:5,background:'#1e1b4b',border:'1px solid #4f46e5',borderRadius:9,padding:'0 9px',height:34,color:'#c7d2fe',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>🗓 {srDate}</span>}
               <button onClick={()=>exportSmartReachCSV(smartReachLeads,srFilename)} disabled={!srCount}
                 aria-label="Download SmartReach CSV"
                 title={srCount?`Download the SmartReach CSV of ${rep}'s ${srCsvCampaign?srCsvCampaign+' ':''}${srDate?('assigned '+srDate+' '):''}Potential/HT leads that have an email (${srCount})`:`No emailable Potential/HT leads to export${srDate?' for '+srDate:''}${srCsvCampaign?' in '+srCsvCampaign:''}`}
@@ -3352,6 +3362,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
       <LeadsTable
         leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin hideRepFilter config={config} feats={feats} campColorMap={campColorMap}
+        onDateFilterChange={setSrDate}   /* Date-Assigned column filter also scopes the SmartReach export */
         smartReachSend={null}   /* SmartReach API auto-send removed — the team uses the manual "⬇ SmartReach CSV" import (the SmartReach API can't set prospect ownership on push) */
         closeSend={isLeadgen?null:{ onSend:(ls)=>importToClose(rep,ls) }}
         hideExport

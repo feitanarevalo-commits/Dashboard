@@ -1845,6 +1845,16 @@ function ColHeader({
       const none = optionLeads.some(l => (l.emails || []).filter(Boolean).length === 0);
       return [has && 'Has email', none && 'No email'].filter(Boolean);
     }
+    // Distinct assignment dates present, newest first. Normalised to YYYY-MM-DD so
+    // the mixed storage formats (7/16/26 and 2026-07-16) collapse to one option.
+    if (col === 'dateAssigned') {
+      const all = new Set();
+      optionLeads.forEach(l => {
+        const d = toLocalDay(l.dateAssigned);
+        if (d) all.add(ymdLocal(d));
+      });
+      return [...all].sort().reverse();
+    }
     return [];
   }
   const filterOpts = getOptions();
@@ -1923,11 +1933,16 @@ function ColHeader({
     className: "col-filter-sep"
   }), /*#__PURE__*/React.createElement("div", {
     className: "col-filter-section"
-  }, "Filter"), filterOpts.map(opt => /*#__PURE__*/React.createElement("div", {
+  }, col === 'dateAssigned' ? 'Filter by date' : 'Filter'), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxHeight: 240,
+      overflowY: 'auto'
+    }
+  }, filterOpts.map(opt => /*#__PURE__*/React.createElement("div", {
     key: opt,
     className: `col-filter-item${colFilter[col] === opt ? ' col-filter-active' : ''}`,
     onClick: () => handleFilter(opt)
-  }, opt))), hasFilter && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, opt)))), hasFilter && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "col-filter-sep"
   }), /*#__PURE__*/React.createElement("div", {
     className: "col-filter-item col-filter-clear",
@@ -2433,6 +2448,7 @@ function LeadsTable({
   hideExport = false,
   hideRepFilter = false,
   onClaim = null,
+  onDateFilterChange = null,
   config,
   feats,
   campColorMap,
@@ -2464,6 +2480,11 @@ function LeadsTable({
   const [colFilter, setColFilter] = useState({});
   const [openFilterCol, setOpenFilterCol] = useState(null);
   const [srCampaign, setSrCampaign] = useState(''); // selected SmartReach campaign id (rep dashboard)
+  // Surface the Date-Assigned column filter to the parent (rep header) so the
+  // SmartReach export can scope to the same day the table is filtered to.
+  useEffect(() => {
+    if (typeof onDateFilterChange === 'function') onDateFilterChange(colFilter.dateAssigned || '');
+  }, [colFilter.dateAssigned]);
   const PAGE_SIZE = 25;
   const cols = config.columns || {};
   const allReps = config.salesReps || [];
@@ -2512,6 +2533,12 @@ function LeadsTable({
     if (skipCol !== 'emails' && cf.emails) {
       const n = (l.emails || []).filter(Boolean).length;
       if (cf.emails === 'No email' ? n > 0 : n === 0) return false;
+    }
+    // Date-assigned filter = an exact YYYY-MM-DD. Normalise the lead's date first
+    // so the mixed storage formats (7/16/26 and 2026-07-16) both match.
+    if (skipCol !== 'dateAssigned' && cf.dateAssigned) {
+      const d = toLocalDay(l.dateAssigned);
+      if (!d || ymdLocal(d) !== cf.dateAssigned) return false;
     }
     return true;
   }
@@ -7319,53 +7346,23 @@ function RepDashboard({
       background: '#1b1b23',
       color: '#f4f4f5'
     }
-  }, "SmartReach: ", c.label, " only")))), /*#__PURE__*/React.createElement("div", {
+  }, "SmartReach: ", c.label, " only")))), srDate && /*#__PURE__*/React.createElement("span", {
+    title: `SmartReach export scoped to leads assigned ${srDate} — set from the Date Assigned column filter`,
     style: {
       display: 'flex',
       alignItems: 'center',
-      gap: 4,
-      background: '#17171f',
-      border: `1px solid ${srDate ? '#4f46e5' : '#26262f'}`,
+      gap: 5,
+      background: '#1e1b4b',
+      border: '1px solid #4f46e5',
       borderRadius: 9,
-      padding: '0 4px 0 9px',
-      height: 34
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
+      padding: '0 9px',
+      height: 34,
+      color: '#c7d2fe',
       fontSize: 12,
-      color: srDate ? '#a5b4fc' : '#71717a',
-      flexShrink: 0
+      fontWeight: 600,
+      whiteSpace: 'nowrap'
     }
-  }, "🗓"), /*#__PURE__*/React.createElement("input", {
-    type: "date",
-    value: srDate,
-    max: todayStr,
-    onChange: e => setSrDate(e.target.value),
-    title: "Export only leads assigned on this date (blank = all dates)",
-    style: {
-      background: 'transparent',
-      border: 'none',
-      color: srDate ? '#f4f4f5' : '#8b8b96',
-      fontSize: 12.5,
-      fontFamily: 'inherit',
-      colorScheme: 'dark',
-      cursor: 'pointer',
-      outline: 'none'
-    }
-  }), srDate && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setSrDate(''),
-    title: "Clear date filter",
-    "aria-label": "Clear SmartReach date filter",
-    style: {
-      background: 'transparent',
-      border: 'none',
-      color: '#a1a1ac',
-      fontSize: 15,
-      lineHeight: 1,
-      cursor: 'pointer',
-      padding: '0 3px'
-    }
-  }, "×")), /*#__PURE__*/React.createElement("button", {
+  }, "🗓 ", srDate), /*#__PURE__*/React.createElement("button", {
     onClick: () => exportSmartReachCSV(smartReachLeads, srFilename),
     disabled: !srCount,
     "aria-label": "Download SmartReach CSV",
@@ -7578,6 +7575,7 @@ function RepDashboard({
     config: config,
     feats: feats,
     campColorMap: campColorMap,
+    onDateFilterChange: setSrDate /* Date-Assigned column filter also scopes the SmartReach export */,
     smartReachSend: null /* SmartReach API auto-send removed — the team uses the manual "⬇ SmartReach CSV" import (the SmartReach API can't set prospect ownership on push) */,
     closeSend: isLeadgen ? null : {
       onSend: ls => importToClose(rep, ls)
