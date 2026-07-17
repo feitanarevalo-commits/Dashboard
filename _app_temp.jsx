@@ -3487,6 +3487,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
   const rows=contacted.filter(l=>{
     if(colFilter.campaign){ if(colFilter.campaign==='None'){ if((l.campaigns||[]).length>0) return false; } else if(!(l.campaigns||[]).includes(colFilter.campaign)) return false; }
     if(colFilter.assignedTo){ if(colFilter.assignedTo==='Unassigned'){ if(l.assignedTo) return false; } else if(l.assignedTo!==colFilter.assignedTo) return false; }
+    if(colFilter.emails){ const n=(l.emails||[]).filter(Boolean).length; if(colFilter.emails==='No email' ? n>0 : n===0) return false; }
     return true;
   }).sort((a,b)=>{
     if(!sortCol) return 0;
@@ -3498,6 +3499,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
     if(sortCol==='lastContact'){ const da=effectiveContact(a),db=effectiveContact(b); return dir*((da?da.date.getTime():0)-(db?db.date.getTime():0)); }
     if(sortCol==='daysSince'){ const ra=recycleInfo(a),rb=recycleInfo(b); return dir*((ra?ra.diff:-1)-(rb?rb.diff:-1)); }
     if(sortCol==='recycleIn'){ const ra=recycleInfo(a),rb=recycleInfo(b); return dir*((ra?ra.left:99999)-(rb?rb.left:99999)); }
+    if(sortCol==='emails'){ const ea=(a.emails||[]).filter(Boolean)[0]||'', eb=(b.emails||[]).filter(Boolean)[0]||''; if(!ea&&eb) return 1; if(ea&&!eb) return -1; return dir*ea.localeCompare(eb); }
     return 0;
   });
   return (
@@ -3508,11 +3510,24 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
         <div className="stat-card orange" style={{flex:1}}><div className="stat-label">MSN (90-day recycle)</div><div className="stat-value">{contacted.filter(l=>l.campaigns.includes('MSN')).length}</div></div>
         <div className="stat-card" style={{flex:1}}><div className="stat-label">Recycle Soon (&lt;14d)</div><div className="stat-value" style={{color:'var(--danger)'}}>{contacted.filter(l=>{const r=recycleInfo(l);return r&&r.left<=14&&r.left>0;}).length}</div></div>
       </div>
+      <div style={{padding:'10px 24px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
+        <span style={{fontSize:12.5,color:'var(--text-dim)'}}>
+          {(()=>{const f=!!(colFilter.campaign||colFilter.assignedTo||colFilter.emails);return `${rows.length} contacted lead${rows.length!==1?'s':''}${f?' (filtered)':''}`;})()}
+        </span>
+        <div style={{flex:1}}/>
+        <button className="btn btn-outline btn-sm" title="Download the leads shown below (filtered set if a filter is on, otherwise all contacted) as a CSV for back-tracking"
+          onClick={()=>{
+            if(!rows.length){ addToast&&addToast('No contacted leads to export','info'); return; }
+            const filtered=!!(colFilter.campaign||colFilter.assignedTo||colFilter.emails);
+            exportCSV(rows, `contacted_leads_${ymdLocal(today)}${filtered?'_filtered':''}.csv`);
+            addToast&&addToast(`Exported ${rows.length} contacted lead(s) as CSV`,'success');
+          }}>⬇ Download CSV</button>
+      </div>
       <table className="leads-table">
         <thead><tr>
           <ColHeader col="channelName" label="Channel" {...colHeaderProps}/>
           <ColHeader col="followers" label="Followers" {...colHeaderProps}/>
-          <th>Email</th>
+          <ColHeader col="emails" label="Email" {...colHeaderProps}/>
           <ColHeader col="campaign" label="Campaign" {...colHeaderProps}/>
           <ColHeader col="assignedTo" label="Assigned To" {...colHeaderProps}/>
           <ColHeader col="lastContact" label="Last Contacted" {...colHeaderProps}/>
