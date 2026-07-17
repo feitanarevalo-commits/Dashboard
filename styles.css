@@ -92,6 +92,7 @@ html[data-dark] tbody tr:hover { background: rgba(56,139,253,.07); }
 html[data-dark] .search-field { background: var(--bg); border-color: var(--border); }
 html[data-dark] .search-field input { color: var(--text); }
 html[data-dark] thead th { background: #0D1117; }
+html[data-dark] thead th.sortable:hover { background: linear-gradient(rgba(120,160,255,.09), rgba(120,160,255,.09)), #0D1117; }
 html[data-dark] .platform-badge { background: var(--bg); border-color: var(--border); color: var(--text-dim); }
 html[data-dark] .tag-duplicate { background: var(--bg); }
 html[data-dark] .drawer-section-title { background: var(--bg); }
@@ -256,7 +257,9 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead { position: sticky; top: 0; z-index: 2; }
 thead th { background: var(--card); color: var(--text-dim); padding: 11px 16px; text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); white-space: nowrap; }
 thead th.sortable { cursor: pointer; }
-thead th.sortable:hover { color: var(--accent); background: rgba(19,102,214,.04); }
+/* Composite the hover tint OVER the opaque card, so a sticky header never turns
+   see-through and let scrolled rows bleed through it. */
+thead th.sortable:hover { color: var(--accent); background: linear-gradient(rgba(19,102,214,.06), rgba(19,102,214,.06)), var(--card); }
 thead th.sort-asc, thead th.sort-desc { color: var(--accent); background: var(--accent-light); }
 .sort-chevron { font-size: 8px; margin-left: 3px; opacity: .35; vertical-align: middle; display: inline-block; }
 thead th.sort-asc .sort-chevron, thead th.sort-desc .sort-chevron { opacity: 1; }
