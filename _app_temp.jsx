@@ -1312,6 +1312,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
   const [colFilter,setColFilter] = useState({});
   const [openFilterCol,setOpenFilterCol] = useState(null);
   const [srCampaign,setSrCampaign] = useState('');  // selected SmartReach campaign id (rep dashboard)
+  const [recheckId,setRecheckId] = useState(null);  // lead id whose bad-link badge is being re-verified
   // Surface the Date-Assigned column filter to the parent (rep header) so the
   // SmartReach export can scope to the same day the table is filtered to.
   useEffect(()=>{ if(typeof onDateFilterChange==='function') onDateFilterChange(colFilter.dateAssigned||''); },[colFilter.dateAssigned]);
@@ -1474,6 +1475,25 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
   function toggleBulkTag(t){setBulkTags(ts=>ts.includes(t)?[]:[t]);}
   function toggleBulkCamp(c){setBulkCamps(cs=>cs.includes(c)?cs.filter(x=>x!==c):[...cs,c]);}
   function patchLead(id,patch){const l=leads.find(x=>x.id===id);if(l)onEdit({...l,...patch});}
+  // Re-check ONE lead's URL on demand — e.g. a rep replaced a broken link and
+  // wants the "bad link" badge to clear. Keyless yt-lookup (no API quota). Clears
+  // the flag (and fills channelId/followers) if it resolves now; leaves it if the
+  // URL still 404s. Also clears false positives from the bulk sweep.
+  async function recheckUrl(lead){
+    const wh=((config&&config.ytLookupWebhook)||'').trim();
+    if(!wh || !lead.url || recheckId===lead.id) return;
+    setRecheckId(lead.id);
+    try{
+      const r=await fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:lead.url})});
+      const j=await r.json().catch(()=>({}));
+      if(j && j.ok!==false){
+        const subs=String(j.subs||'').trim(), cid=String(j.channelId||'').trim(), nm=String(j.name||'').trim();
+        const dead=j.notFound || (!cid && !subs && !nm);
+        if(!dead) patchLead(lead.id,{ urlBroken:false, channelId:lead.channelId||cid, followers:String(lead.followers||'').trim()?lead.followers:(subs||lead.followers) });
+      }
+    }catch(e){}
+    setRecheckId(null);
+  }
   function handleCtx(e,lead){e.preventDefault();setCtxMenu({x:e.clientX,y:e.clientY,lead});}
 
   // leadsForCol (not the raw list) so each dropdown offers only values that still
@@ -1678,7 +1698,12 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                         })()}
                       </div>
                       {isInClose(lead) && <div className="in-close-badge" title="This channel already exists in your Close CRM">☁ In Close</div>}
-                      {lead.urlBroken && <div className="url-broken-badge" title="This channel URL returned 404 / no longer exists — find the correct URL">⚠ bad link</div>}
+                      {lead.urlBroken && (recheckId===lead.id
+                        ? <div className="url-broken-badge" style={{opacity:.65}}>⏳ checking…</div>
+                        : <span className="url-broken-badge" role="button" tabIndex={0} style={{cursor:'pointer'}}
+                            onClick={e=>{e.stopPropagation();recheckUrl(lead);}}
+                            onKeyDown={e=>{if(e.key==='Enter'){e.stopPropagation();recheckUrl(lead);}}}
+                            title="URL returned 404 when last checked. Replaced the link? Click to re-check — it clears if the URL resolves now.">⚠ bad link</span>)}
                       {lead.channels && lead.channels.length>1 && <div className="channel-sub">{lead.channels.length} channels</div>}
                     </td>
                   )}
@@ -3945,7 +3970,13 @@ function ProfilePanel({lead,config,campColorMap,onClose,onSave,onDelete,addToast
   function upd(k,v){ setForm(f=>({...f,[k]:v})); }
   function toggleTag(t){ setForm(f=>({...f,tags:f.tags.includes(t)?[]:[t]})); }
   function toggleCamp(c){ setForm(f=>({...f,campaigns:f.campaigns.includes(c)?f.campaigns.filter(x=>x!==c):[...f.campaigns,c]})); }
-  function save(){ onSave(form); addToast('Profile saved','success'); onClose(); }
+  function save(){
+    const patch={...form};
+    // Replacing the URL means the rep is fixing a link — clear the "bad link" flag
+    // so a corrected URL doesn't keep showing the stale badge.
+    if((patch.url||'')!==(lead.url||'')) patch.urlBroken=false;
+    onSave(patch); addToast('Profile saved','success'); onClose();
+  }
 
   const followersN=parseFollowers(lead.followers);
   const er=pseudoStat(lead.channelName,0.4,6.5).toFixed(1);
@@ -3982,7 +4013,13 @@ function ProfilePanel({lead,config,campColorMap,onClose,onSave,onDelete,addToast
             <div className="profile-section-title">Basic Information</div>
             <div className="profile-kv"><span>Niche</span><b>{lead.niche||'—'}</b></div>
             <div className="profile-kv"><span>Email</span><b>{lead.emails && lead.emails[0] ? lead.emails[0] : '—'}</b></div>
-            {lead.url && <div className="profile-kv"><span>Link</span><a href={lead.url} target="_blank" rel="noopener noreferrer">{lead.url.replace(/https?:\/\/(www\.)?/,'').slice(0,32)}</a></div>}
+            <div className="profile-kv" style={{alignItems:'center'}}><span>Link</span>
+              <div style={{display:'flex',alignItems:'center',gap:6,flex:1,minWidth:0}}>
+                <input value={form.url||''} onChange={e=>upd('url',e.target.value)} placeholder="youtube.com/@handle" style={{flex:1,minWidth:0,fontSize:12}}/>
+                {form.url && <a href={form.url} target="_blank" rel="noopener noreferrer" title="Open link" style={{flexShrink:0,textDecoration:'none'}}>↗</a>}
+              </div>
+            </div>
+            {lead.urlBroken && <div className="profile-kv"><span></span><span className="url-broken-badge" style={{fontSize:11}}>⚠ flagged bad link — replace the URL above &amp; save to clear</span></div>}
             <div className="profile-kv"><span>Origin</span>
               {leadOrigin(lead)==='Fresh'?<span className="origin-badge fresh">● Fresh</span>:<span className="origin-badge imported">↻ Imported</span>}
             </div>

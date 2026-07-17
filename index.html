@@ -2480,6 +2480,7 @@ function LeadsTable({
   const [colFilter, setColFilter] = useState({});
   const [openFilterCol, setOpenFilterCol] = useState(null);
   const [srCampaign, setSrCampaign] = useState(''); // selected SmartReach campaign id (rep dashboard)
+  const [recheckId, setRecheckId] = useState(null); // lead id whose bad-link badge is being re-verified
   // Surface the Date-Assigned column filter to the parent (rep header) so the
   // SmartReach export can scope to the same day the table is filtered to.
   useEffect(() => {
@@ -2700,6 +2701,39 @@ function LeadsTable({
       ...l,
       ...patch
     });
+  }
+  // Re-check ONE lead's URL on demand — e.g. a rep replaced a broken link and
+  // wants the "bad link" badge to clear. Keyless yt-lookup (no API quota). Clears
+  // the flag (and fills channelId/followers) if it resolves now; leaves it if the
+  // URL still 404s. Also clears false positives from the bulk sweep.
+  async function recheckUrl(lead) {
+    const wh = (config && config.ytLookupWebhook || '').trim();
+    if (!wh || !lead.url || recheckId === lead.id) return;
+    setRecheckId(lead.id);
+    try {
+      const r = await fetch(wh, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: lead.url
+        })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.ok !== false) {
+        const subs = String(j.subs || '').trim(),
+          cid = String(j.channelId || '').trim(),
+          nm = String(j.name || '').trim();
+        const dead = j.notFound || !cid && !subs && !nm;
+        if (!dead) patchLead(lead.id, {
+          urlBroken: false,
+          channelId: lead.channelId || cid,
+          followers: String(lead.followers || '').trim() ? lead.followers : subs || lead.followers
+        });
+      }
+    } catch (e) {}
+    setRecheckId(null);
   }
   function handleCtx(e, lead) {
     e.preventDefault();
@@ -3085,10 +3119,30 @@ function LeadsTable({
   })()), isInClose(lead) && /*#__PURE__*/React.createElement("div", {
     className: "in-close-badge",
     title: "This channel already exists in your Close CRM"
-  }, "☁ In Close"), lead.urlBroken && /*#__PURE__*/React.createElement("div", {
+  }, "☁ In Close"), lead.urlBroken && (recheckId === lead.id ? /*#__PURE__*/React.createElement("div", {
     className: "url-broken-badge",
-    title: "This channel URL returned 404 / no longer exists — find the correct URL"
-  }, "⚠ bad link"), lead.channels && lead.channels.length > 1 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      opacity: .65
+    }
+  }, "⏳ checking…") : /*#__PURE__*/React.createElement("span", {
+    className: "url-broken-badge",
+    role: "button",
+    tabIndex: 0,
+    style: {
+      cursor: 'pointer'
+    },
+    onClick: e => {
+      e.stopPropagation();
+      recheckUrl(lead);
+    },
+    onKeyDown: e => {
+      if (e.key === 'Enter') {
+        e.stopPropagation();
+        recheckUrl(lead);
+      }
+    },
+    title: "URL returned 404 when last checked. Replaced the link? Click to re-check — it clears if the URL resolves now."
+  }, "⚠ bad link")), lead.channels && lead.channels.length > 1 && /*#__PURE__*/React.createElement("div", {
     className: "channel-sub"
   }, lead.channels.length, " channels")), cols.url && /*#__PURE__*/React.createElement("td", {
     style: {
@@ -8860,7 +8914,13 @@ function ProfilePanel({
     }));
   }
   function save() {
-    onSave(form);
+    const patch = {
+      ...form
+    };
+    // Replacing the URL means the rep is fixing a link — clear the "bad link" flag
+    // so a corrected URL doesn't keep showing the stale badge.
+    if ((patch.url || '') !== (lead.url || '')) patch.urlBroken = false;
+    onSave(patch);
     addToast('Profile saved', 'success');
     onClose();
   }
@@ -8944,13 +9004,45 @@ function ProfilePanel({
     className: "profile-kv"
   }, /*#__PURE__*/React.createElement("span", null, "Niche"), /*#__PURE__*/React.createElement("b", null, lead.niche || '—')), /*#__PURE__*/React.createElement("div", {
     className: "profile-kv"
-  }, /*#__PURE__*/React.createElement("span", null, "Email"), /*#__PURE__*/React.createElement("b", null, lead.emails && lead.emails[0] ? lead.emails[0] : '—')), lead.url && /*#__PURE__*/React.createElement("div", {
-    className: "profile-kv"
-  }, /*#__PURE__*/React.createElement("span", null, "Link"), /*#__PURE__*/React.createElement("a", {
-    href: lead.url,
+  }, /*#__PURE__*/React.createElement("span", null, "Email"), /*#__PURE__*/React.createElement("b", null, lead.emails && lead.emails[0] ? lead.emails[0] : '—')), /*#__PURE__*/React.createElement("div", {
+    className: "profile-kv",
+    style: {
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Link"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: form.url || '',
+    onChange: e => upd('url', e.target.value),
+    placeholder: "youtube.com/@handle",
+    style: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 12
+    }
+  }), form.url && /*#__PURE__*/React.createElement("a", {
+    href: form.url,
     target: "_blank",
-    rel: "noopener noreferrer"
-  }, lead.url.replace(/https?:\/\/(www\.)?/, '').slice(0, 32))), /*#__PURE__*/React.createElement("div", {
+    rel: "noopener noreferrer",
+    title: "Open link",
+    style: {
+      flexShrink: 0,
+      textDecoration: 'none'
+    }
+  }, "↗"))), lead.urlBroken && /*#__PURE__*/React.createElement("div", {
+    className: "profile-kv"
+  }, /*#__PURE__*/React.createElement("span", null), /*#__PURE__*/React.createElement("span", {
+    className: "url-broken-badge",
+    style: {
+      fontSize: 11
+    }
+  }, "⚠ flagged bad link — replace the URL above & save to clear")), /*#__PURE__*/React.createElement("div", {
     className: "profile-kv"
   }, /*#__PURE__*/React.createElement("span", null, "Origin"), leadOrigin(lead) === 'Fresh' ? /*#__PURE__*/React.createElement("span", {
     className: "origin-badge fresh"
