@@ -2319,6 +2319,7 @@ function HomeView({leads,config,currentUser}) {
   const pdfRef=useRef(null);
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
+  const SG="'Space Grotesk',sans-serif";
 
   const pDef=PERIODS.find(p=>p.id===period)||PERIODS[2];
   const cutoff=new Date(); cutoff.setHours(0,0,0,0); cutoff.setDate(cutoff.getDate()-(pDef.days-1));
@@ -2383,6 +2384,23 @@ function HomeView({leads,config,currentUser}) {
   const avgFollTot=follAll.length?Math.round(follAll.reduce((a,b)=>a+b,0)/follAll.length):0;
   const kpiInfo={period:rangeLabel, rangeStart:custom?cStart:cutoff.toISOString().split('T')[0], rangeEnd:custom?cEnd:new Date().toISOString().split('T')[0], campaigns:campDefs, platforms:PLATFORMS};
 
+  // Rep cards: ranked by volume for the selected period. Reps with nothing in the
+  // period are collected into a single "no activity" tile instead of empty cards.
+  const rankedReps=[...repRows].sort((a,b)=>b.total-a.total);
+  const activeRepRows=rankedReps.filter(r=>r.total>0);
+  const idleReps=rankedReps.filter(r=>r.total===0).map(r=>r.rep);
+  // Team totals shown in the slim header strip (respects the rep filter).
+  const headerStats=[
+    {v:total,            l:'assigned',      c:'#ffffff'},
+    {v:freshTot,         l:'fresh',         c:'#34d399'},
+    {v:recycledTot,      l:'recycled',      c:'#fb923c'},
+    {v:contactedTot,     l:'contacted',     c:'#ffffff'},
+    {v:potentialTot,     l:'potential',     c:'#34d399'},
+    {v:withEmailTot,     l:'with email',    c:'#ffffff'},
+    {v:fmtFollowers(avgFollTot)||'0', l:'avg followers', c:'#ffffff'},
+    ...(repFilter?[]:[{v:leads.filter(l=>!l.assignedTo).length, l:'unassigned', c:'#fb923c'}]),
+  ];
+
   // Birthday reminders (next 14 days) from each user's profile birthday.
   const bdayNow=new Date();
   const bdays=(config.users||[]).map(u=>{ const d=daysUntilBirthday(getProfile(u.name).birthday,bdayNow); return d==null?null:{name:u.name,days:d}; })
@@ -2445,39 +2463,76 @@ function HomeView({leads,config,currentUser}) {
         </div>
       )}
 
-      <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
-        <div className="stat-card accent"><div className="stat-label">Assigned ({rangeLabel})</div><div className="stat-value">{total}</div><div className="stat-sub">{repFilter?`${repFilter} only`:'across all reps'}</div></div>
-        <div className="stat-card green"><div className="stat-label">Fresh Leads</div><div className="stat-value">{freshTot}</div><div className="stat-sub">never contacted</div></div>
-        <div className="stat-card orange"><div className="stat-label">Recycled</div><div className="stat-value">{recycledTot}</div><div className="stat-sub">previously worked</div></div>
-        <div className="stat-card"><div className="stat-label">Contacted</div><div className="stat-value">{contactedTot}</div><div className="stat-sub">{pct(contactedTot,total)}% contact rate</div></div>
-        <div className="stat-card green"><div className="stat-label">Potential</div><div className="stat-value">{potentialTot}</div><div className="stat-sub">{pct(potentialTot,total)}% · {htTot} high ticket</div></div>
-        <div className="stat-card"><div className="stat-label">With Email</div><div className="stat-value">{withEmailTot}</div><div className="stat-sub">{pct(withEmailTot,total)}% coverage</div></div>
-        <div className="stat-card accent"><div className="stat-label">Avg Followers</div><div className="stat-value">{fmtFollowers(avgFollTot)}</div><div className="stat-sub">per assigned lead</div></div>
-        {!repFilter && <div className="stat-card orange" title="Leads scraped/imported but not yet assigned to a rep — they don't count toward the period KPIs until assigned"><div className="stat-label">Unassigned</div><div className="stat-value">{leads.filter(l=>!l.assignedTo).length}</div><div className="stat-sub">in pipeline · not yet assigned</div></div>}
+      {/* Slim team-totals strip — one line for the whole team, for the selected period */}
+      <div style={{display:'flex',alignItems:'center',gap:22,flexWrap:'wrap',background:'#0d0d12',borderRadius:14,padding:'14px 20px',color:'#fff'}}
+        title={`Team totals for ${rangeLabel}${repFilter?` · ${repFilter} only`:''}`}>
+        <span style={{fontFamily:SG,fontSize:16,fontWeight:700,letterSpacing:'-.01em'}}>{repFilter||'Home'}</span>
+        {headerStats.map(m=>(
+          <span key={m.l} style={{display:'inline-flex',alignItems:'baseline',gap:6}}>
+            <b style={{fontFamily:SG,fontSize:19,fontWeight:700,color:m.c,letterSpacing:'-.02em',fontVariantNumeric:'tabular-nums'}}>
+              {typeof m.v==='number'?m.v.toLocaleString():m.v}
+            </b>
+            <span style={{fontSize:10.5,textTransform:'uppercase',letterSpacing:'.07em',color:'#8b8b96',whiteSpace:'nowrap'}}>{m.l}</span>
+          </span>
+        ))}
       </div>
 
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">Leads per Sales Rep — Fresh vs Recycled</div>
-          <div className="chart-legend">
-            <span><i style={{background:'var(--accent)'}}/>Fresh</span>
-            <span><i style={{background:'var(--warn)'}}/>Recycled</span>
-          </div>
-        </div>
-        <div className="card-body">
-          {repRows.length===0 && <div style={{color:'var(--text-dim)',padding:12}}>No sales reps configured.</div>}
-          {repRows.map(r=>(
-            <div className="grouped-bar-row" key={r.rep}>
-              <div className="bar-label">{r.rep}</div>
-              <div className="grouped-bar-track">
-                <div className="gbar" style={{width:`${r.fresh/maxRep*100}%`,background:'var(--accent)'}} title={`Fresh: ${r.fresh}`}/>
-                <div className="gbar" style={{width:`${r.recycled/maxRep*100}%`,background:'var(--warn)'}} title={`Recycled: ${r.recycled}`}/>
+      {/* One card per rep, ranked by volume for the selected period. The bar is the
+          rep's contact rate; the rows below are per-campaign volume + contact rate. */}
+      {repRows.length===0
+        ? <div className="card"><div className="card-body" style={{color:'var(--text-dim)'}}>No sales reps configured.</div></div>
+        : <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(330px,1fr))',gap:14}}>
+            {activeRepRows.map(r=>{
+              const cRate=pct(r.contacted,r.total);
+              const barColor=cRate>=70?'var(--success)':cRate>=40?'var(--warn)':'var(--danger)';
+              const rc=(config.repColors||{})[r.rep]||'#5b5bd6';
+              const roleTitle=(getProfile(r.rep).title||'').trim()||'Sales rep';
+              return (
+                <div className="card" key={r.rep} style={{padding:'16px 18px'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:11}}>
+                    <div style={{width:34,height:34,borderRadius:9,background:rc+'22',color:rc,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:800,flexShrink:0}}>{r.rep.slice(0,2).toUpperCase()}</div>
+                    <div style={{minWidth:0,flex:1}}>
+                      <div style={{fontWeight:700,fontSize:14.5,letterSpacing:'-.01em',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.rep}</div>
+                      <div style={{fontSize:11.5,color:'var(--text-dim)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{roleTitle}</div>
+                    </div>
+                    <div style={{textAlign:'right',flexShrink:0}}>
+                      <div style={{fontFamily:SG,fontSize:22,fontWeight:700,lineHeight:1,letterSpacing:'-.02em',fontVariantNumeric:'tabular-nums'}}>{r.total.toLocaleString()}</div>
+                      <div style={{fontSize:9.5,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text-light)'}}>leads</div>
+                    </div>
+                  </div>
+                  <div style={{height:6,borderRadius:99,background:'var(--border)',marginTop:12,overflow:'hidden'}} title={`Contact rate ${cRate}%`}>
+                    <div style={{width:`${Math.min(100,cRate)}%`,height:'100%',background:barColor,borderRadius:99}}/>
+                  </div>
+                  <div style={{display:'flex',gap:14,marginTop:8,fontSize:12,color:'var(--text-dim)',flexWrap:'wrap'}}>
+                    <span>Contacted <b style={{color:'var(--text)'}}>{r.contacted}</b> · {cRate}%</span>
+                    <span>Potential <b style={{color:'var(--text)'}}>{r.potential}</b></span>
+                    {r.ht>0 && <span>HT <b style={{color:'var(--warn)'}}>{r.ht}</b></span>}
+                  </div>
+                  {campDefs.length>0 && (
+                    <div style={{marginTop:11,display:'flex',flexDirection:'column',gap:5}}>
+                      {campDefs.map(c=>{
+                        const cs=r.campaignStats[c.id]||{total:0,contacted:0};
+                        return (
+                          <div key={c.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:12}} title={`${c.label}: ${cs.total} lead(s), ${cs.contacted} contacted`}>
+                            <span style={{width:7,height:7,borderRadius:'50%',background:campColorMap[c.id]||'var(--text-light)',flexShrink:0}}/>
+                            <span style={{color:'var(--text-dim)',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.label}</span>
+                            <b style={{fontVariantNumeric:'tabular-nums'}}>{cs.total}</b>
+                            <span style={{color:'var(--text-light)',width:46,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{cs.total?pct(cs.contacted,cs.total)+'%':'—'}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {idleReps.length>0 && (
+              <div style={{border:'1px dashed var(--border)',borderRadius:'var(--radius-lg)',padding:'16px 18px',display:'flex',flexDirection:'column',justifyContent:'center'}}>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--text-dim)',marginBottom:4}}>No activity · {rangeLabel}</div>
+                <div style={{fontSize:12.5,color:'var(--text-light)'}}>{idleReps.join(', ')}</div>
               </div>
-              <div className="bar-count">{r.total}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+            )}
+          </div>}
 
       <div className="card">
         <div className="card-header"><div className="card-title">Per-Rep KPI Breakdown ({rangeLabel}){repFilter?` · ${repFilter}`:''}</div></div>
