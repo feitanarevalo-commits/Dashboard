@@ -5265,21 +5265,6 @@ function HomeView({
       campaignStats
     };
   });
-  const maxRep = Math.max(1, ...repRows.map(r => r.total));
-  // Aggregate across reps for the table's "All Reps" footer row.
-  const sumRep = k => repRows.reduce((s, r) => s + (r[k] || 0), 0);
-  const repTot = {
-    total: sumRep('total'),
-    fresh: sumRep('fresh'),
-    recycled: sumRep('recycled'),
-    potential: sumRep('potential'),
-    contacted: sumRep('contacted'),
-    ht: sumRep('ht'),
-    nq: sumRep('nq'),
-    withEmail: sumRep('withEmail')
-  };
-  const repTotFollKnown = sumRep('follKnown');
-  repTot.avgFoll = repTotFollKnown ? Math.round(repRows.reduce((s, r) => s + (r.avgFoll || 0) * (r.follKnown || 0), 0) / repTotFollKnown) : 0;
   const periodLeads = leads.filter(l => repScope(l) && inPeriod(l));
   const total = periodLeads.length;
   const freshTot = periodLeads.filter(l => leadOrigin(l) === 'Fresh').length;
@@ -5290,13 +5275,6 @@ function HomeView({
   const htTot = periodLeads.filter(l => l.tags.includes('HT')).length;
   const follAll = periodLeads.map(l => parseFollowers(l.followers)).filter(n => n > 0);
   const avgFollTot = follAll.length ? Math.round(follAll.reduce((a, b) => a + b, 0) / follAll.length) : 0;
-  const kpiInfo = {
-    period: rangeLabel,
-    rangeStart: custom ? cStart : cutoff.toISOString().split('T')[0],
-    rangeEnd: custom ? cEnd : new Date().toISOString().split('T')[0],
-    campaigns: campDefs,
-    platforms: PLATFORMS
-  };
 
   // Rep cards: ranked by volume for the selected period. Reps with nothing in the
   // period are collected into a single "no activity" tile instead of empty cards.
@@ -5372,7 +5350,7 @@ function HomeView({
     className: "home-hero-title"
   }, repFilter ? `${repFilter}'s performance` : 'Sales performance at a glance.'), /*#__PURE__*/React.createElement("p", {
     className: "home-hero-sub"
-  }, "Track every rep, every lead, every day — KPIs, fresh vs recycled, and per-rep breakdown."), /*#__PURE__*/React.createElement("div", {
+  }, "Team totals and per-rep performance for the selected period — pick a range below."), /*#__PURE__*/React.createElement("div", {
     className: "home-hero-controls"
   }, /*#__PURE__*/React.createElement("div", {
     className: "period-toggle",
@@ -5388,7 +5366,7 @@ function HomeView({
       setCStart('');
       setCEnd('');
     }
-  }, p.label))), lockedRep ? /*#__PURE__*/React.createElement("span", {
+  }, p.label))), lockedRep && /*#__PURE__*/React.createElement("span", {
     title: "You see your own metrics",
     style: {
       padding: '7px 12px',
@@ -5398,21 +5376,7 @@ function HomeView({
       background: 'rgba(255,255,255,.12)',
       color: '#fff'
     }
-  }, "👤 Your metrics") : /*#__PURE__*/React.createElement("select", {
-    value: repFilter,
-    onChange: e => setRepFilter(e.target.value),
-    title: "Filter KPIs by sales rep",
-    style: {
-      padding: '7px 12px',
-      fontSize: 13,
-      fontFamily: 'inherit'
-    }
-  }, /*#__PURE__*/React.createElement("option", {
-    value: ""
-  }, "👥 All reps"), (config.salesReps || []).map(r => /*#__PURE__*/React.createElement("option", {
-    key: r,
-    value: r
-  }, r))), /*#__PURE__*/React.createElement("div", {
+  }, "👤 Your metrics"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       alignItems: 'center',
@@ -5451,19 +5415,7 @@ function HomeView({
       setCEnd('');
     },
     title: "Clear date range"
-  }, "✕")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginLeft: 'auto',
-      display: 'flex',
-      gap: 8
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-outline btn-sm",
-    onClick: () => exportKpiCSV(repRows, kpiInfo, `enfinity_sales_kpis_${period}.csv`)
-  }, "⬇ CSV"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-outline btn-sm",
-    onClick: () => exportPDF('Rep KPI Report')
-  }, "🖨 PDF"))))), /*#__PURE__*/React.createElement("div", {
+  }, "✕"))))), /*#__PURE__*/React.createElement("div", {
     className: "home-body"
   }, bdays.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: `bday-banner no-print${bdayToday.length ? ' today' : ''}`
@@ -5712,205 +5664,7 @@ function HomeView({
       fontSize: 12.5,
       color: 'var(--text-light)'
     }
-  }, idleReps.join(', ')))), /*#__PURE__*/React.createElement("div", {
-    className: "card"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-header"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-title"
-  }, "Per-Rep KPI Breakdown (", rangeLabel, ")", repFilter ? ` · ${repFilter}` : '')), /*#__PURE__*/React.createElement("div", {
-    className: "card-body",
-    style: {
-      padding: 0,
-      overflowX: 'auto'
-    }
-  }, /*#__PURE__*/React.createElement("table", {
-    className: "kpi-table"
-  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Sales Rep"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Fresh"), /*#__PURE__*/React.createElement("th", null, "Recycled"), /*#__PURE__*/React.createElement("th", null, "Potential"), /*#__PURE__*/React.createElement("th", null, "Contacted"), /*#__PURE__*/React.createElement("th", null, "High Ticket"), /*#__PURE__*/React.createElement("th", {
-    title: "Contacted ÷ Total"
-  }, "Contact %"), /*#__PURE__*/React.createElement("th", {
-    title: "Potential ÷ Total"
-  }, "Pot %"), /*#__PURE__*/React.createElement("th", {
-    title: "Leads with at least one email ÷ Total"
-  }, "Email %"), /*#__PURE__*/React.createElement("th", null, "Avg Followers"), /*#__PURE__*/React.createElement("th", {
-    className: "no-print"
-  }, "Report"))), /*#__PURE__*/React.createElement("tbody", null, repRows.map(r => /*#__PURE__*/React.createElement("tr", {
-    key: r.rep
-  }, /*#__PURE__*/React.createElement("td", {
-    style: {
-      fontWeight: 600
-    }
-  }, r.rep), /*#__PURE__*/React.createElement("td", null, r.total), /*#__PURE__*/React.createElement("td", {
-    style: {
-      color: 'var(--accent)',
-      fontWeight: 600
-    }
-  }, r.fresh), /*#__PURE__*/React.createElement("td", {
-    style: {
-      color: 'var(--warn)',
-      fontWeight: 600
-    }
-  }, r.recycled), /*#__PURE__*/React.createElement("td", null, r.potential), /*#__PURE__*/React.createElement("td", null, r.contacted), /*#__PURE__*/React.createElement("td", null, r.ht), /*#__PURE__*/React.createElement("td", null, pct(r.contacted, r.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(r.potential, r.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(r.withEmail, r.total), "%"), /*#__PURE__*/React.createElement("td", null, fmtFollowers(r.avgFoll || 0)), /*#__PURE__*/React.createElement("td", {
-    className: "no-print"
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost btn-xs",
-    title: "Download this rep's leads as CSV",
-    onClick: () => exportCSV(leads.filter(l => l.assignedTo === r.rep && inPeriod(l)), `${r.rep}_${period}_leads.csv`)
-  }, "⬇ CSV")))), repRows.length > 0 && /*#__PURE__*/React.createElement("tr", {
-    style: {
-      borderTop: '2px solid var(--border)',
-      fontWeight: 700
-    }
-  }, /*#__PURE__*/React.createElement("td", null, "All Reps"), /*#__PURE__*/React.createElement("td", null, repTot.total), /*#__PURE__*/React.createElement("td", {
-    style: {
-      color: 'var(--accent)'
-    }
-  }, repTot.fresh), /*#__PURE__*/React.createElement("td", {
-    style: {
-      color: 'var(--warn)'
-    }
-  }, repTot.recycled), /*#__PURE__*/React.createElement("td", null, repTot.potential), /*#__PURE__*/React.createElement("td", null, repTot.contacted), /*#__PURE__*/React.createElement("td", null, repTot.ht), /*#__PURE__*/React.createElement("td", null, pct(repTot.contacted, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(repTot.potential, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, pct(repTot.withEmail, repTot.total), "%"), /*#__PURE__*/React.createElement("td", null, fmtFollowers(repTot.avgFoll || 0)), /*#__PURE__*/React.createElement("td", {
-    className: "no-print"
-  })))))), campDefs.length > 0 && /*#__PURE__*/React.createElement("div", {
-    className: "card"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-header"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-title"
-  }, "Per-Rep × Campaign KPIs (", pDef.label, ")")), /*#__PURE__*/React.createElement("div", {
-    className: "card-body",
-    style: {
-      padding: 0,
-      overflowX: 'auto'
-    }
-  }, /*#__PURE__*/React.createElement("table", {
-    className: "kpi-table"
-  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Sales Rep"), /*#__PURE__*/React.createElement("th", null, "Campaign"), /*#__PURE__*/React.createElement("th", null, "Total"), /*#__PURE__*/React.createElement("th", null, "Potential"), /*#__PURE__*/React.createElement("th", {
-    title: "Potential ÷ this campaign's total for the rep"
-  }, "Pot %"), /*#__PURE__*/React.createElement("th", null, "Contacted"), /*#__PURE__*/React.createElement("th", {
-    title: "Contacted ÷ this campaign's total for the rep"
-  }, "Contact %"), /*#__PURE__*/React.createElement("th", null, "High Ticket"))), /*#__PURE__*/React.createElement("tbody", null, repRows.map(r => campDefs.map((c, ci) => {
-    const s = r.campaignStats[c.id] || {
-      total: 0,
-      potential: 0,
-      contacted: 0,
-      ht: 0
-    };
-    const color = campColorMap[c.id] || 'var(--accent)';
-    return /*#__PURE__*/React.createElement("tr", {
-      key: r.rep + '|' + c.id,
-      style: ci === campDefs.length - 1 ? {
-        borderBottom: '1px solid var(--border)'
-      } : {}
-    }, ci === 0 && /*#__PURE__*/React.createElement("td", {
-      style: {
-        fontWeight: 600
-      },
-      rowSpan: campDefs.length
-    }, r.rep), /*#__PURE__*/React.createElement("td", {
-      style: {
-        whiteSpace: 'nowrap'
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        color,
-        fontWeight: 700
-      }
-    }, "●"), " ", c.label), /*#__PURE__*/React.createElement("td", null, s.total), /*#__PURE__*/React.createElement("td", {
-      style: {
-        color: 'var(--success,#00875A)',
-        fontWeight: 600
-      }
-    }, s.potential), /*#__PURE__*/React.createElement("td", null, pct(s.potential, s.total), "%"), /*#__PURE__*/React.createElement("td", null, s.contacted), /*#__PURE__*/React.createElement("td", null, pct(s.contacted, s.total), "%"), /*#__PURE__*/React.createElement("td", null, s.ht));
-  })), repRows.length > 0 && campDefs.map((c, ci) => {
-    const t = repRows.reduce((a, r) => {
-      const s = r.campaignStats[c.id] || {};
-      a.total += s.total || 0;
-      a.potential += s.potential || 0;
-      a.contacted += s.contacted || 0;
-      a.ht += s.ht || 0;
-      return a;
-    }, {
-      total: 0,
-      potential: 0,
-      contacted: 0,
-      ht: 0
-    });
-    const color = campColorMap[c.id] || 'var(--accent)';
-    return /*#__PURE__*/React.createElement("tr", {
-      key: 'all|' + c.id,
-      style: {
-        fontWeight: 700,
-        ...(ci === 0 ? {
-          borderTop: '2px solid var(--border)'
-        } : {})
-      }
-    }, ci === 0 && /*#__PURE__*/React.createElement("td", {
-      rowSpan: campDefs.length
-    }, "All Reps"), /*#__PURE__*/React.createElement("td", {
-      style: {
-        whiteSpace: 'nowrap'
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        color
-      }
-    }, "●"), " ", c.label), /*#__PURE__*/React.createElement("td", null, t.total), /*#__PURE__*/React.createElement("td", null, t.potential), /*#__PURE__*/React.createElement("td", null, pct(t.potential, t.total), "%"), /*#__PURE__*/React.createElement("td", null, t.contacted), /*#__PURE__*/React.createElement("td", null, pct(t.contacted, t.total), "%"), /*#__PURE__*/React.createElement("td", null, t.ht));
-  }))))), /*#__PURE__*/React.createElement("div", {
-    className: "grid-2"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-header"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-title"
-  }, "Campaign Distribution")), /*#__PURE__*/React.createElement("div", {
-    className: "card-body"
-  }, (config.campaigns || []).map(c => {
-    const cnt = periodLeads.filter(l => l.campaigns.includes(c.id)).length;
-    return /*#__PURE__*/React.createElement("div", {
-      className: "bar-row",
-      key: c.id
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "bar-label"
-    }, c.label), /*#__PURE__*/React.createElement("div", {
-      className: "bar-track"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "bar-fill",
-      style: {
-        width: `${total ? cnt / total * 100 : 0}%`,
-        background: c.color
-      }
-    })), /*#__PURE__*/React.createElement("div", {
-      className: "bar-count"
-    }, cnt));
-  }))), /*#__PURE__*/React.createElement("div", {
-    className: "card"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-header"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card-title"
-  }, "Platform Split")), /*#__PURE__*/React.createElement("div", {
-    className: "card-body"
-  }, PLATFORMS.map(p => {
-    const cnt = periodLeads.filter(l => l.platform === p).length;
-    return /*#__PURE__*/React.createElement("div", {
-      className: "bar-row",
-      key: p
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "bar-label"
-    }, PLATFORM_ICON[p], " ", p), /*#__PURE__*/React.createElement("div", {
-      className: "bar-track"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "bar-fill",
-      style: {
-        width: `${total ? cnt / total * 100 : 0}%`,
-        background: 'var(--purple)'
-      }
-    })), /*#__PURE__*/React.createElement("div", {
-      className: "bar-count"
-    }, cnt));
-  }))))));
+  }, idleReps.join(', '))))));
 }
 
 // ─── REP AVATAR COMPONENT ────────────────────────────────

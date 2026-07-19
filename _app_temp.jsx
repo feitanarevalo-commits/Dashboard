@@ -2365,12 +2365,6 @@ function HomeView({leads,config,currentUser}) {
       byCampaign, byPlatform, campaignStats,
     };
   });
-  const maxRep=Math.max(1,...repRows.map(r=>r.total));
-  // Aggregate across reps for the table's "All Reps" footer row.
-  const sumRep=k=>repRows.reduce((s,r)=>s+(r[k]||0),0);
-  const repTot={total:sumRep('total'),fresh:sumRep('fresh'),recycled:sumRep('recycled'),potential:sumRep('potential'),contacted:sumRep('contacted'),ht:sumRep('ht'),nq:sumRep('nq'),withEmail:sumRep('withEmail')};
-  const repTotFollKnown=sumRep('follKnown');
-  repTot.avgFoll=repTotFollKnown?Math.round(repRows.reduce((s,r)=>s+(r.avgFoll||0)*(r.follKnown||0),0)/repTotFollKnown):0;
 
   const periodLeads=leads.filter(l=>repScope(l)&&inPeriod(l));
   const total=periodLeads.length;
@@ -2382,7 +2376,6 @@ function HomeView({leads,config,currentUser}) {
   const htTot=periodLeads.filter(l=>l.tags.includes('HT')).length;
   const follAll=periodLeads.map(l=>parseFollowers(l.followers)).filter(n=>n>0);
   const avgFollTot=follAll.length?Math.round(follAll.reduce((a,b)=>a+b,0)/follAll.length):0;
-  const kpiInfo={period:rangeLabel, rangeStart:custom?cStart:cutoff.toISOString().split('T')[0], rangeEnd:custom?cEnd:new Date().toISOString().split('T')[0], campaigns:campDefs, platforms:PLATFORMS};
 
   // Rep cards: ranked by volume for the selected period. Reps with nothing in the
   // period are collected into a single "no activity" tile instead of empty cards.
@@ -2420,20 +2413,14 @@ function HomeView({leads,config,currentUser}) {
         <div className="home-hero-inner">
           <div className="home-hero-eyebrow">SALES OVERVIEW · {rangeLabel.toUpperCase()}</div>
           <h1 className="home-hero-title">{repFilter?`${repFilter}'s performance`:'Sales performance at a glance.'}</h1>
-          <p className="home-hero-sub">Track every rep, every lead, every day — KPIs, fresh vs recycled, and per-rep breakdown.</p>
+          <p className="home-hero-sub">Team totals and per-rep performance for the selected period — pick a range below.</p>
           <div className="home-hero-controls">
             <div className="period-toggle" style={{opacity:custom?0.4:1}} title={custom?'Using the custom date range below':''}>
               {PERIODS.map(p=>(
                 <button key={p.id} className={`period-btn${period===p.id?' active':''}`} onClick={()=>{setPeriod(p.id);setCStart('');setCEnd('');}}>{p.label}</button>
               ))}
             </div>
-            {lockedRep
-              ? <span title="You see your own metrics" style={{padding:'7px 12px',fontSize:13,fontWeight:600,borderRadius:8,background:'rgba(255,255,255,.12)',color:'#fff'}}>👤 Your metrics</span>
-              : <select value={repFilter} onChange={e=>setRepFilter(e.target.value)} title="Filter KPIs by sales rep"
-                  style={{padding:'7px 12px',fontSize:13,fontFamily:'inherit'}}>
-                  <option value="">👥 All reps</option>
-                  {(config.salesReps||[]).map(r=><option key={r} value={r}>{r}</option>)}
-                </select>}
+            {lockedRep && <span title="You see your own metrics" style={{padding:'7px 12px',fontSize:13,fontWeight:600,borderRadius:8,background:'rgba(255,255,255,.12)',color:'#fff'}}>👤 Your metrics</span>}
             <div style={{display:'flex',alignItems:'center',gap:6}} title="Custom date range (overrides the period preset)">
               <input type="date" value={cStart} max={cEnd||undefined} onChange={e=>setCStart(e.target.value)}
                 style={{padding:'6px 10px',fontSize:12,fontFamily:'inherit'}}/>
@@ -2441,10 +2428,6 @@ function HomeView({leads,config,currentUser}) {
               <input type="date" value={cEnd} min={cStart||undefined} onChange={e=>setCEnd(e.target.value)}
                 style={{padding:'6px 10px',fontSize:12,fontFamily:'inherit'}}/>
               {(cStart||cEnd) && <button className="btn btn-ghost btn-sm" onClick={()=>{setCStart('');setCEnd('');}} title="Clear date range">✕</button>}
-            </div>
-            <div style={{marginLeft:'auto',display:'flex',gap:8}}>
-              <button className="btn btn-outline btn-sm" onClick={()=>exportKpiCSV(repRows,kpiInfo,`enfinity_sales_kpis_${period}.csv`)}>⬇ CSV</button>
-              <button className="btn btn-outline btn-sm" onClick={()=>exportPDF('Rep KPI Report')}>🖨 PDF</button>
             </div>
           </div>
         </div>
@@ -2533,129 +2516,6 @@ function HomeView({leads,config,currentUser}) {
               </div>
             )}
           </div>}
-
-      <div className="card">
-        <div className="card-header"><div className="card-title">Per-Rep KPI Breakdown ({rangeLabel}){repFilter?` · ${repFilter}`:''}</div></div>
-        <div className="card-body" style={{padding:0,overflowX:'auto'}}>
-          <table className="kpi-table">
-            <thead><tr>
-              <th>Sales Rep</th><th>Total</th><th>Fresh</th><th>Recycled</th>
-              <th>Potential</th><th>Contacted</th><th>High Ticket</th>
-              <th title="Contacted ÷ Total">Contact %</th><th title="Potential ÷ Total">Pot %</th>
-              <th title="Leads with at least one email ÷ Total">Email %</th><th>Avg Followers</th>
-              <th className="no-print">Report</th>
-            </tr></thead>
-            <tbody>
-              {repRows.map(r=>(
-                <tr key={r.rep}>
-                  <td style={{fontWeight:600}}>{r.rep}</td>
-                  <td>{r.total}</td>
-                  <td style={{color:'var(--accent)',fontWeight:600}}>{r.fresh}</td>
-                  <td style={{color:'var(--warn)',fontWeight:600}}>{r.recycled}</td>
-                  <td>{r.potential}</td><td>{r.contacted}</td><td>{r.ht}</td>
-                  <td>{pct(r.contacted,r.total)}%</td>
-                  <td>{pct(r.potential,r.total)}%</td>
-                  <td>{pct(r.withEmail,r.total)}%</td>
-                  <td>{fmtFollowers(r.avgFoll||0)}</td>
-                  <td className="no-print">
-                    <button className="btn btn-ghost btn-xs" title="Download this rep's leads as CSV"
-                      onClick={()=>exportCSV(leads.filter(l=>l.assignedTo===r.rep && inPeriod(l)),`${r.rep}_${period}_leads.csv`)}>⬇ CSV</button>
-                  </td>
-                </tr>
-              ))}
-              {repRows.length>0 && <tr style={{borderTop:'2px solid var(--border)',fontWeight:700}}>
-                <td>All Reps</td>
-                <td>{repTot.total}</td>
-                <td style={{color:'var(--accent)'}}>{repTot.fresh}</td>
-                <td style={{color:'var(--warn)'}}>{repTot.recycled}</td>
-                <td>{repTot.potential}</td>
-                <td>{repTot.contacted}</td>
-                <td>{repTot.ht}</td>
-                <td>{pct(repTot.contacted,repTot.total)}%</td>
-                <td>{pct(repTot.potential,repTot.total)}%</td>
-                <td>{pct(repTot.withEmail,repTot.total)}%</td>
-                <td>{fmtFollowers(repTot.avgFoll||0)}</td>
-                <td className="no-print"/>
-              </tr>}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {campDefs.length>0 && <div className="card">
-        <div className="card-header"><div className="card-title">Per-Rep × Campaign KPIs ({pDef.label})</div></div>
-        <div className="card-body" style={{padding:0,overflowX:'auto'}}>
-          <table className="kpi-table">
-            <thead><tr>
-              <th>Sales Rep</th><th>Campaign</th><th>Total</th>
-              <th>Potential</th><th title="Potential ÷ this campaign's total for the rep">Pot %</th>
-              <th>Contacted</th><th title="Contacted ÷ this campaign's total for the rep">Contact %</th>
-              <th>High Ticket</th>
-            </tr></thead>
-            <tbody>
-              {repRows.map(r=>campDefs.map((c,ci)=>{
-                const s=r.campaignStats[c.id]||{total:0,potential:0,contacted:0,ht:0};
-                const color=campColorMap[c.id]||'var(--accent)';
-                return (
-                  <tr key={r.rep+'|'+c.id} style={ci===campDefs.length-1?{borderBottom:'1px solid var(--border)'}:{}}>
-                    {ci===0 && <td style={{fontWeight:600}} rowSpan={campDefs.length}>{r.rep}</td>}
-                    <td style={{whiteSpace:'nowrap'}}><span style={{color,fontWeight:700}}>●</span> {c.label}</td>
-                    <td>{s.total}</td>
-                    <td style={{color:'var(--success,#00875A)',fontWeight:600}}>{s.potential}</td>
-                    <td>{pct(s.potential,s.total)}%</td>
-                    <td>{s.contacted}</td>
-                    <td>{pct(s.contacted,s.total)}%</td>
-                    <td>{s.ht}</td>
-                  </tr>
-                );
-              }))}
-              {repRows.length>0 && campDefs.map((c,ci)=>{
-                const t=repRows.reduce((a,r)=>{const s=r.campaignStats[c.id]||{};a.total+=s.total||0;a.potential+=s.potential||0;a.contacted+=s.contacted||0;a.ht+=s.ht||0;return a;},{total:0,potential:0,contacted:0,ht:0});
-                const color=campColorMap[c.id]||'var(--accent)';
-                return (
-                  <tr key={'all|'+c.id} style={{fontWeight:700,...(ci===0?{borderTop:'2px solid var(--border)'}:{})}}>
-                    {ci===0 && <td rowSpan={campDefs.length}>All Reps</td>}
-                    <td style={{whiteSpace:'nowrap'}}><span style={{color}}>●</span> {c.label}</td>
-                    <td>{t.total}</td>
-                    <td>{t.potential}</td>
-                    <td>{pct(t.potential,t.total)}%</td>
-                    <td>{t.contacted}</td>
-                    <td>{pct(t.contacted,t.total)}%</td>
-                    <td>{t.ht}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>}
-
-      <div className="grid-2">
-        <div className="card">
-          <div className="card-header"><div className="card-title">Campaign Distribution</div></div>
-          <div className="card-body">
-            {(config.campaigns||[]).map(c=>{const cnt=periodLeads.filter(l=>l.campaigns.includes(c.id)).length;return(
-              <div className="bar-row" key={c.id}>
-                <div className="bar-label">{c.label}</div>
-                <div className="bar-track"><div className="bar-fill" style={{width:`${total?cnt/total*100:0}%`,background:c.color}}></div></div>
-                <div className="bar-count">{cnt}</div>
-              </div>
-            );})}
-          </div>
-        </div>
-        <div className="card">
-          <div className="card-header"><div className="card-title">Platform Split</div></div>
-          <div className="card-body">
-            {PLATFORMS.map(p=>{const cnt=periodLeads.filter(l=>l.platform===p).length;return(
-              <div className="bar-row" key={p}>
-                <div className="bar-label">{PLATFORM_ICON[p]} {p}</div>
-                <div className="bar-track"><div className="bar-fill" style={{width:`${total?cnt/total*100:0}%`,background:'var(--purple)'}}></div></div>
-                <div className="bar-count">{cnt}</div>
-              </div>
-            );})}
-          </div>
-        </div>
-      </div>
       </div>{/* /.home-body */}
     </div>
   );
