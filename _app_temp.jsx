@@ -3224,15 +3224,21 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   // imported) — unlike Close, which only takes Fresh leads. SmartReach dedupes
   // prospects by email on its side, so re-sends don't duplicate.
   const [srCsvCampaign,setSrCsvCampaign]=useState('');   // SmartReach CSV campaign filter ('' = all campaigns)
-  const [srDate,setSrDate]=useState('');                 // SmartReach CSV date filter (YYYY-MM-DD; '' = all dates)
-  // SmartReach CSV = the rep's workable (Potential/HT) leads that have an email,
-  // optionally scoped to ONE campaign and/or ONE assignment date. No filter → all.
+  // ── Dashboard "viewing day" ────────────────────────────────────────────────
+  // The rep dashboard is scoped to ONE assignment day at a time (default = TODAY)
+  // so reps work a clean daily batch instead of one big mixed list. '' = All dates.
+  // A lead "belongs" to its assignment day (leadDayStr = dateAssigned, mixed formats
+  // normalised). This day drives the leads table, the Contacted count, and the
+  // SmartReach export together, so everything the rep sees stays in sync.
+  const todayStr=ymdLocal(new Date());
+  const [quotaDay,setQuotaDay]=useState(todayStr);   // YYYY-MM-DD, or '' for All dates
+  const isDayView=!!quotaDay;
+  const dayMatch=l=>leadDayStr(l)===quotaDay;
+  // SmartReach CSV = the rep's workable (Potential/HT) leads with an email, scoped to
+  // the campaign filter AND the viewing day (All dates → every day).
   const smartReachBase=myLeads.filter(l=>(l.emails||[]).length>0 && isWorkable(l));
   const smartReachByCamp=srCsvCampaign?smartReachBase.filter(l=>(l.campaigns||[]).includes(srCsvCampaign)):smartReachBase;
-  // Date scope: only leads ASSIGNED on the picked day. dateAssigned is stored in
-  // mixed formats (7/16/26 and 2026-07-16), so normalise both sides to a local
-  // YYYY-MM-DD before comparing.
-  const smartReachLeads=srDate?smartReachByCamp.filter(l=>{ const d=toLocalDay(l.dateAssigned); return !!d && ymdLocal(d)===srDate; }):smartReachByCamp;
+  const smartReachLeads=isDayView?smartReachByCamp.filter(dayMatch):smartReachByCamp;
   const srCount=smartReachLeads.length;
   const contacted=myLeads.filter(l=>isContacted(l)).length;
   const ht=myLeads.filter(l=>l.tags.includes('HT')).length;
@@ -3248,15 +3254,16 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   // not yet Contacted) leads the rep has per campaign. Because status is
   // single-select, a lead tagged Contacted loses its Potential tag and drops
   // out of these counts — so the day's potentials clear as she works them.
-  const todayStr=ymdLocal(new Date());
-  const [quotaDay,setQuotaDay]=useState(todayStr);
   const [showClose,setShowClose]=useState(false);
   const [showAdd,setShowAdd]=useState(false);
-  const dayLeads=myLeads.filter(l=>leadDayStr(l)===quotaDay);
-  // "Contacted (today)" = leads the rep freshly tagged "Contacted" ON the selected
-  // day. Scoped by lastContactDate (stamped when the "Contacted" tag is applied),
-  // NOT the assignment day, and it excludes imported "Recently Contacted" leads.
-  const dayContacted=myLeads.filter(l=>isDirectContacted(l) && String(l.lastContactDate||'').slice(0,10)===quotaDay).length;
+  // The leads TABLE, scoped to the viewing day (All dates → the full working set).
+  const tableLeads=isDayView?activeLeads.filter(dayMatch):activeLeads;
+  // "Contacted" count = leads the rep freshly tagged "Contacted" ON the viewing day
+  // (by lastContactDate, not assignment day; excludes imported "Recently Contacted").
+  // All dates → every direct-contacted lead.
+  const dayContacted=isDayView
+    ? myLeads.filter(l=>isDirectContacted(l) && String(l.lastContactDate||'').slice(0,10)===quotaDay).length
+    : myLeads.filter(isDirectContacted).length;
   // ALL-TIME open potentials per campaign — the rep's real current pipeline. These
   // sum to the "Potential" card so every number on the dashboard is consistent
   // with the rep's actual leads (not scoped to a single day).
@@ -3295,12 +3302,12 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
     {label:'Total',chip:'#818cf8',val:'#c7d2fe',value:total,title:`${rep}'s workable leads = Potential + High Ticket (${totalAssigned} total assigned incl. pending/contacted)`},
     {label:'Potential',chip:'#34d399',val:'#a7f3d0',value:potential},
     {label:'Fresh',chip:'#a1a1aa',val:'#e4e4e7',value:fresh,title:'Fresh Potential/HT leads not yet on Close — the import queue'},
-    {label:quotaDay===todayStr?'Contacted (today)':'Contacted (that day)',chip:'#e4e4e7',val:'#ffffff',value:dayContacted,title:'Contacted count for the day picked in the row below'},
+    {label:!isDayView?'Contacted (all)':(quotaDay===todayStr?'Contacted (today)':'Contacted (that day)'),chip:'#e4e4e7',val:'#ffffff',value:dayContacted,title:'Contacted count for the viewing day (or all dates)'},
     {label:'High Ticket',chip:'#fb923c',val:'#fed7aa',value:ht},
     ...(config.campaigns||[]).map(c=>({label:c.label,chip:c.color,val:c.color,value:openPotential(c.id),title:`${rep}'s open (uncontacted) Potential leads in ${c.label}`})),
   ];
   if(isLeadgen||handedOffCount>0) stripMetrics.push({label:'Handed Off',chip:'#a78bfa',val:'#ddd6fe',value:handedOffCount,title:`Leads ${rep} qualified & handed to the sales team — credited to ${rep} even after reassignment`});
-  const srFilename=`${rep}${srCsvCampaign?'_'+srCsvCampaign.replace(/[^\w]+/g,''):''}${srDate?'_'+srDate:''}_smartreach.csv`;
+  const srFilename=`${rep}${srCsvCampaign?'_'+srCsvCampaign.replace(/[^\w]+/g,''):''}${isDayView?'_'+quotaDay:''}_smartreach.csv`;
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
       <header className="no-print" style={{background:'#0d0d12',color:'#fff',padding:'14px 28px 16px',flexShrink:0}}>
@@ -3331,11 +3338,9 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
                   {(config.campaigns||[]).map(c=><option key={c.id} value={c.id} style={{background:'#1b1b23',color:'#f4f4f5'}}>SmartReach: {c.label} only</option>)}
                 </select>
               </div>
-              {srDate && <span title={`SmartReach export scoped to leads assigned ${srDate} — set from the Date Assigned column filter`}
-                style={{display:'flex',alignItems:'center',gap:5,background:'#1e1b4b',border:'1px solid #4f46e5',borderRadius:9,padding:'0 9px',height:34,color:'#c7d2fe',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>🗓 {srDate}</span>}
               <button onClick={()=>exportSmartReachCSV(smartReachLeads,srFilename)} disabled={!srCount}
                 aria-label="Download SmartReach CSV"
-                title={srCount?`Download the SmartReach CSV of ${rep}'s ${srCsvCampaign?srCsvCampaign+' ':''}${srDate?('assigned '+srDate+' '):''}Potential/HT leads that have an email (${srCount})`:`No emailable Potential/HT leads to export${srDate?' for '+srDate:''}${srCsvCampaign?' in '+srCsvCampaign:''}`}
+                title={srCount?`Download the SmartReach CSV of ${rep}'s ${srCsvCampaign?srCsvCampaign+' ':''}${isDayView?('assigned '+quotaDay+' '):''}Potential/HT leads that have an email (${srCount})`:`No emailable Potential/HT leads to export${isDayView?' for '+quotaDay:''}${srCsvCampaign?' in '+srCsvCampaign:''}`}
                 style={{display:'flex',alignItems:'center',gap:5,height:34,padding:'0 12px',background:srCount?'#17171f':'#141419',border:'1px solid #26262f',borderRadius:9,color:srCount?'#d4d4d8':'#52525b',fontSize:13,fontWeight:600,fontFamily:'inherit',cursor:srCount?'pointer':'not-allowed'}}>
                 ⬇{srCount?` ${srCount}`:''}
               </button>
@@ -3373,21 +3378,23 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             </div>
           ))}
         </div>
-        {/* row 3 — date context (drives the Contacted metric) */}
-        <div style={{display:'flex',alignItems:'center',gap:14,fontSize:12.5,marginTop:12,flexWrap:'wrap'}}>
-          <span style={{color:'#d4d4d8',fontWeight:500}}>🗓 Contacted by day</span>
-          <span style={{color:'#71717a'}}>date sets the “Contacted” count · potentials are your full pipeline</span>
+        {/* row 3 — VIEWING DAY: scopes the leads table + Contacted count + SmartReach export */}
+        <div style={{display:'flex',alignItems:'center',gap:10,fontSize:12.5,marginTop:12,flexWrap:'wrap'}}>
+          <span style={{color:'#d4d4d8',fontWeight:600}}>🗓 Viewing</span>
+          <span style={{color:'#71717a'}}>{isDayView?`leads assigned ${quotaDay===todayStr?'today':quotaDay} · ${tableLeads.length} shown`:`all dates · ${tableLeads.length} lead${tableLeads.length!==1?'s':''}`}</span>
           <div style={{flex:1,minWidth:8}}></div>
-          <input type="date" value={quotaDay} max={todayStr} onChange={e=>setQuotaDay(e.target.value||todayStr)}
-            style={{background:'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'6px 11px',color:'#d4d4d8',fontSize:12.5,fontFamily:'inherit',colorScheme:'dark'}}/>
+          <input type="date" value={quotaDay} max={todayStr} onChange={e=>setQuotaDay(e.target.value)}
+            title="Pick a day to see only the leads assigned that day"
+            style={{background:'#17171f',border:`1px solid ${isDayView?'#4f46e5':'#26262f'}`,borderRadius:8,padding:'6px 11px',color:isDayView?'#f4f4f5':'#8b8b96',fontSize:12.5,fontFamily:'inherit',colorScheme:'dark',cursor:'pointer'}}/>
           <button onClick={()=>setQuotaDay(todayStr)} disabled={quotaDay===todayStr}
-            style={{background:'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'6px 13px',color:quotaDay===todayStr?'#52525b':'#d4d4d8',fontSize:12.5,fontFamily:'inherit',cursor:quotaDay===todayStr?'default':'pointer'}}>Today</button>
+            style={{background:quotaDay===todayStr?'#4f46e5':'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'6px 13px',color:quotaDay===todayStr?'#fff':'#d4d4d8',fontSize:12.5,fontWeight:600,fontFamily:'inherit',cursor:quotaDay===todayStr?'default':'pointer'}}>Today</button>
+          <button onClick={()=>setQuotaDay('')} disabled={!isDayView} title="Show every day's leads"
+            style={{background:!isDayView?'#4f46e5':'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'6px 13px',color:!isDayView?'#fff':'#d4d4d8',fontSize:12.5,fontWeight:600,fontFamily:'inherit',cursor:!isDayView?'default':'pointer'}}>All dates</button>
         </div>
       </header>
       <LeadsTable
-        leads={activeLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
+        leads={tableLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin hideRepFilter config={config} feats={feats} campColorMap={campColorMap}
-        onDateFilterChange={setSrDate}   /* Date-Assigned column filter also scopes the SmartReach export */
         smartReachSend={null}   /* SmartReach API auto-send removed — the team uses the manual "⬇ SmartReach CSV" import (the SmartReach API can't set prospect ownership on push) */
         closeSend={isLeadgen?null:{ onSend:(ls)=>importToClose(rep,ls) }}
         hideExport

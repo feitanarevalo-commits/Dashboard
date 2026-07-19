@@ -7119,18 +7119,21 @@ function RepDashboard({
   // imported) — unlike Close, which only takes Fresh leads. SmartReach dedupes
   // prospects by email on its side, so re-sends don't duplicate.
   const [srCsvCampaign, setSrCsvCampaign] = useState(''); // SmartReach CSV campaign filter ('' = all campaigns)
-  const [srDate, setSrDate] = useState(''); // SmartReach CSV date filter (YYYY-MM-DD; '' = all dates)
-  // SmartReach CSV = the rep's workable (Potential/HT) leads that have an email,
-  // optionally scoped to ONE campaign and/or ONE assignment date. No filter → all.
+  // ── Dashboard "viewing day" ────────────────────────────────────────────────
+  // The rep dashboard is scoped to ONE assignment day at a time (default = TODAY)
+  // so reps work a clean daily batch instead of one big mixed list. '' = All dates.
+  // A lead "belongs" to its assignment day (leadDayStr = dateAssigned, mixed formats
+  // normalised). This day drives the leads table, the Contacted count, and the
+  // SmartReach export together, so everything the rep sees stays in sync.
+  const todayStr = ymdLocal(new Date());
+  const [quotaDay, setQuotaDay] = useState(todayStr); // YYYY-MM-DD, or '' for All dates
+  const isDayView = !!quotaDay;
+  const dayMatch = l => leadDayStr(l) === quotaDay;
+  // SmartReach CSV = the rep's workable (Potential/HT) leads with an email, scoped to
+  // the campaign filter AND the viewing day (All dates → every day).
   const smartReachBase = myLeads.filter(l => (l.emails || []).length > 0 && isWorkable(l));
   const smartReachByCamp = srCsvCampaign ? smartReachBase.filter(l => (l.campaigns || []).includes(srCsvCampaign)) : smartReachBase;
-  // Date scope: only leads ASSIGNED on the picked day. dateAssigned is stored in
-  // mixed formats (7/16/26 and 2026-07-16), so normalise both sides to a local
-  // YYYY-MM-DD before comparing.
-  const smartReachLeads = srDate ? smartReachByCamp.filter(l => {
-    const d = toLocalDay(l.dateAssigned);
-    return !!d && ymdLocal(d) === srDate;
-  }) : smartReachByCamp;
+  const smartReachLeads = isDayView ? smartReachByCamp.filter(dayMatch) : smartReachByCamp;
   const srCount = smartReachLeads.length;
   const contacted = myLeads.filter(l => isContacted(l)).length;
   const ht = myLeads.filter(l => l.tags.includes('HT')).length;
@@ -7146,15 +7149,14 @@ function RepDashboard({
   // not yet Contacted) leads the rep has per campaign. Because status is
   // single-select, a lead tagged Contacted loses its Potential tag and drops
   // out of these counts — so the day's potentials clear as she works them.
-  const todayStr = ymdLocal(new Date());
-  const [quotaDay, setQuotaDay] = useState(todayStr);
   const [showClose, setShowClose] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-  const dayLeads = myLeads.filter(l => leadDayStr(l) === quotaDay);
-  // "Contacted (today)" = leads the rep freshly tagged "Contacted" ON the selected
-  // day. Scoped by lastContactDate (stamped when the "Contacted" tag is applied),
-  // NOT the assignment day, and it excludes imported "Recently Contacted" leads.
-  const dayContacted = myLeads.filter(l => isDirectContacted(l) && String(l.lastContactDate || '').slice(0, 10) === quotaDay).length;
+  // The leads TABLE, scoped to the viewing day (All dates → the full working set).
+  const tableLeads = isDayView ? activeLeads.filter(dayMatch) : activeLeads;
+  // "Contacted" count = leads the rep freshly tagged "Contacted" ON the viewing day
+  // (by lastContactDate, not assignment day; excludes imported "Recently Contacted").
+  // All dates → every direct-contacted lead.
+  const dayContacted = isDayView ? myLeads.filter(l => isDirectContacted(l) && String(l.lastContactDate || '').slice(0, 10) === quotaDay).length : myLeads.filter(isDirectContacted).length;
   // ALL-TIME open potentials per campaign — the rep's real current pipeline. These
   // sum to the "Potential" card so every number on the dashboard is consistent
   // with the rep's actual leads (not scoped to a single day).
@@ -7242,11 +7244,11 @@ function RepDashboard({
     value: fresh,
     title: 'Fresh Potential/HT leads not yet on Close — the import queue'
   }, {
-    label: quotaDay === todayStr ? 'Contacted (today)' : 'Contacted (that day)',
+    label: !isDayView ? 'Contacted (all)' : quotaDay === todayStr ? 'Contacted (today)' : 'Contacted (that day)',
     chip: '#e4e4e7',
     val: '#ffffff',
     value: dayContacted,
-    title: 'Contacted count for the day picked in the row below'
+    title: 'Contacted count for the viewing day (or all dates)'
   }, {
     label: 'High Ticket',
     chip: '#fb923c',
@@ -7266,7 +7268,7 @@ function RepDashboard({
     value: handedOffCount,
     title: `Leads ${rep} qualified & handed to the sales team — credited to ${rep} even after reassignment`
   });
-  const srFilename = `${rep}${srCsvCampaign ? '_' + srCsvCampaign.replace(/[^\w]+/g, '') : ''}${srDate ? '_' + srDate : ''}_smartreach.csv`;
+  const srFilename = `${rep}${srCsvCampaign ? '_' + srCsvCampaign.replace(/[^\w]+/g, '') : ''}${isDayView ? '_' + quotaDay : ''}_smartreach.csv`;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -7400,27 +7402,11 @@ function RepDashboard({
       background: '#1b1b23',
       color: '#f4f4f5'
     }
-  }, "SmartReach: ", c.label, " only")))), srDate && /*#__PURE__*/React.createElement("span", {
-    title: `SmartReach export scoped to leads assigned ${srDate} — set from the Date Assigned column filter`,
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 5,
-      background: '#1e1b4b',
-      border: '1px solid #4f46e5',
-      borderRadius: 9,
-      padding: '0 9px',
-      height: 34,
-      color: '#c7d2fe',
-      fontSize: 12,
-      fontWeight: 600,
-      whiteSpace: 'nowrap'
-    }
-  }, "🗓 ", srDate), /*#__PURE__*/React.createElement("button", {
+  }, "SmartReach: ", c.label, " only")))), /*#__PURE__*/React.createElement("button", {
     onClick: () => exportSmartReachCSV(smartReachLeads, srFilename),
     disabled: !srCount,
     "aria-label": "Download SmartReach CSV",
-    title: srCount ? `Download the SmartReach CSV of ${rep}'s ${srCsvCampaign ? srCsvCampaign + ' ' : ''}${srDate ? 'assigned ' + srDate + ' ' : ''}Potential/HT leads that have an email (${srCount})` : `No emailable Potential/HT leads to export${srDate ? ' for ' + srDate : ''}${srCsvCampaign ? ' in ' + srCsvCampaign : ''}`,
+    title: srCount ? `Download the SmartReach CSV of ${rep}'s ${srCsvCampaign ? srCsvCampaign + ' ' : ''}${isDayView ? 'assigned ' + quotaDay + ' ' : ''}Potential/HT leads that have an email (${srCount})` : `No emailable Potential/HT leads to export${isDayView ? ' for ' + quotaDay : ''}${srCsvCampaign ? ' in ' + srCsvCampaign : ''}`,
     style: {
       display: 'flex',
       alignItems: 'center',
@@ -7569,7 +7555,7 @@ function RepDashboard({
     style: {
       display: 'flex',
       alignItems: 'center',
-      gap: 14,
+      gap: 10,
       fontSize: 12.5,
       marginTop: 12,
       flexWrap: 'wrap'
@@ -7577,13 +7563,13 @@ function RepDashboard({
   }, /*#__PURE__*/React.createElement("span", {
     style: {
       color: '#d4d4d8',
-      fontWeight: 500
+      fontWeight: 600
     }
-  }, "🗓 Contacted by day"), /*#__PURE__*/React.createElement("span", {
+  }, "🗓 Viewing"), /*#__PURE__*/React.createElement("span", {
     style: {
       color: '#71717a'
     }
-  }, "date sets the “Contacted” count · potentials are your full pipeline"), /*#__PURE__*/React.createElement("div", {
+  }, isDayView ? `leads assigned ${quotaDay === todayStr ? 'today' : quotaDay} · ${tableLeads.length} shown` : `all dates · ${tableLeads.length} lead${tableLeads.length !== 1 ? 's' : ''}`), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
       minWidth: 8
@@ -7592,32 +7578,50 @@ function RepDashboard({
     type: "date",
     value: quotaDay,
     max: todayStr,
-    onChange: e => setQuotaDay(e.target.value || todayStr),
+    onChange: e => setQuotaDay(e.target.value),
+    title: "Pick a day to see only the leads assigned that day",
     style: {
       background: '#17171f',
-      border: '1px solid #26262f',
+      border: `1px solid ${isDayView ? '#4f46e5' : '#26262f'}`,
       borderRadius: 8,
       padding: '6px 11px',
-      color: '#d4d4d8',
+      color: isDayView ? '#f4f4f5' : '#8b8b96',
       fontSize: 12.5,
       fontFamily: 'inherit',
-      colorScheme: 'dark'
+      colorScheme: 'dark',
+      cursor: 'pointer'
     }
   }), /*#__PURE__*/React.createElement("button", {
     onClick: () => setQuotaDay(todayStr),
     disabled: quotaDay === todayStr,
     style: {
-      background: '#17171f',
+      background: quotaDay === todayStr ? '#4f46e5' : '#17171f',
       border: '1px solid #26262f',
       borderRadius: 8,
       padding: '6px 13px',
-      color: quotaDay === todayStr ? '#52525b' : '#d4d4d8',
+      color: quotaDay === todayStr ? '#fff' : '#d4d4d8',
       fontSize: 12.5,
+      fontWeight: 600,
       fontFamily: 'inherit',
       cursor: quotaDay === todayStr ? 'default' : 'pointer'
     }
-  }, "Today"))), /*#__PURE__*/React.createElement(LeadsTable, {
-    leads: activeLeads,
+  }, "Today"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setQuotaDay(''),
+    disabled: !isDayView,
+    title: "Show every day's leads",
+    style: {
+      background: !isDayView ? '#4f46e5' : '#17171f',
+      border: '1px solid #26262f',
+      borderRadius: 8,
+      padding: '6px 13px',
+      color: !isDayView ? '#fff' : '#d4d4d8',
+      fontSize: 12.5,
+      fontWeight: 600,
+      fontFamily: 'inherit',
+      cursor: !isDayView ? 'default' : 'pointer'
+    }
+  }, "All dates"))), /*#__PURE__*/React.createElement(LeadsTable, {
+    leads: tableLeads,
     onEdit: onEdit,
     onDelete: onDelete,
     onBulkDelete: onBulkDelete,
@@ -7629,7 +7633,6 @@ function RepDashboard({
     config: config,
     feats: feats,
     campColorMap: campColorMap,
-    onDateFilterChange: setSrDate /* Date-Assigned column filter also scopes the SmartReach export */,
     smartReachSend: null /* SmartReach API auto-send removed — the team uses the manual "⬇ SmartReach CSV" import (the SmartReach API can't set prospect ownership on push) */,
     closeSend: isLeadgen ? null : {
       onSend: ls => importToClose(rep, ls)
