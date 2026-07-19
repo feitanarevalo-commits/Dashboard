@@ -6852,9 +6852,13 @@ function App() {
             // been marked synced. This is what was reverting Pending→Potential.
             const staleForThisLead=(writeStampRef.current[id]||0)>=fetchStartedAt;
             if(r===undefined){ if(!(id in synced)||dirty||staleForThisLead) out.push(l); /* else: deleted by another rep */ }
-            else { const take=(dirty||staleForThisLead)?l:r; out.push(take); if(take===r) leadVersionsRef.current[id]=remoteVersions[id]; }  // adopted shared row → track its version
+            // Adopting the shared row: track its version AND mark it synced. Skipping
+            // the synced-snapshot update made the next debounce treat every adopted row
+            // as a local edit and re-push it — two tabs then ping-pong forever, churning
+            // versions and REJECTING reps' real tags (the "tag keeps reverting" storm).
+            else { const take=(dirty||staleForThisLead)?l:r; out.push(take); if(take===r){ leadVersionsRef.current[id]=remoteVersions[id]; leadsSyncRef.current[id]=JSON.stringify(r); } }
           });
-          remote.forEach(l=>{ const id=String(l.id); if(!localIds.has(id)){ out.push(l); leadVersionsRef.current[id]=remoteVersions[id]; } });   // new from other reps
+          remote.forEach(l=>{ const id=String(l.id); if(!localIds.has(id)){ out.push(l); leadVersionsRef.current[id]=remoteVersions[id]; leadsSyncRef.current[id]=JSON.stringify(l); } });   // new from other reps → track version + mark synced
           if(out.length===local.length){
             const lm={}; local.forEach(l=>lm[String(l.id)]=JSON.stringify(l));
             if(out.every(l=>lm[String(l.id)]===JSON.stringify(l))) return local;  // no change → no churn
