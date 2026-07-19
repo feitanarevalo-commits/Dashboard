@@ -2315,6 +2315,7 @@ function HomeView({leads,config,currentUser}) {
   const [repFilter,setRepFilter]=useState(lockedRep||'');     // '' = all reps, else a single rep
   const [cStart,setCStart]=useState('');           // custom date range (overrides period)
   const [cEnd,setCEnd]=useState('');
+  const [detail,setDetail]=useState('');           // person whose performance detail is open ('' = closed)
   const custom=!!(cStart&&cEnd);
   const pdfRef=useRef(null);
   const campColorMap={};
@@ -2377,6 +2378,54 @@ function HomeView({leads,config,currentUser}) {
   const follAll=periodLeads.map(l=>parseFollowers(l.followers)).filter(n=>n>0);
   const avgFollTot=follAll.length?Math.round(follAll.reduce((a,b)=>a+b,0)/follAll.length):0;
 
+  // ── Performance detail ────────────────────────────────────
+  // Anyone who can own or source leads: sales reps + leadgens. Non-admins can
+  // only ever open their own detail.
+  const leadgenNames=(config.users||[]).filter(u=>u.role==='leadgen').map(u=>u.name);
+  const people=[...new Set([...(config.salesReps||[]), ...leadgenNames])]
+    .filter(n=>!lockedRep || n===lockedRep);
+  // Sourcing is dated by when the lead was added, not when it was assigned —
+  // that's what measures a leadgen's output for the period.
+  function inSourcedPeriod(l){
+    const d=String(l.addedAt||l.dateAssigned||'').slice(0,10);
+    if(!d) return false;
+    if(custom) return d>=cStart && d<=cEnd;
+    return new Date(d+'T00:00:00')>=cutoff;
+  }
+  // Full KPI picture for one person: leads assigned to them (sales side) and
+  // leads they sourced (leadgen side), both for the selected period.
+  function perfFor(name){
+    const mine=leads.filter(l=>l.assignedTo===name && inPeriod(l));
+    const sourced=leads.filter(l=>l.scrapedBy===name && inSourcedPeriod(l));
+    const follNums=mine.map(l=>parseFollowers(l.followers)).filter(n=>n>0);
+    const camp=campDefs.map(c=>{
+      const cm=mine.filter(l=>l.campaigns.includes(c.id));
+      return {id:c.id,label:c.label,total:cm.length,
+        potential:cm.filter(l=>l.tags.includes('Potential')).length,
+        contacted:cm.filter(l=>isContacted(l)).length,
+        ht:cm.filter(l=>l.tags.includes('HT')).length};
+    });
+    const plat=PLATFORMS.map(p=>({p,n:mine.filter(l=>l.platform===p).length})).filter(x=>x.n>0);
+    return {
+      name, mine, sourced, camp, plat,
+      total:mine.length,
+      fresh:mine.filter(l=>leadOrigin(l)==='Fresh').length,
+      recycled:mine.filter(l=>isRecycled(l)).length,
+      potential:mine.filter(l=>l.tags.includes('Potential')).length,
+      contacted:mine.filter(l=>isContacted(l)).length,
+      ht:mine.filter(l=>l.tags.includes('HT')).length,
+      nq:mine.filter(l=>l.tags.includes('Not Qualified')).length,
+      withEmail:mine.filter(l=>(l.emails||[]).length>0).length,
+      avgFoll:follNums.length?Math.round(follNums.reduce((a,b)=>a+b,0)/follNums.length):0,
+      srcTotal:sourced.length,
+      srcEmail:sourced.filter(l=>(l.emails||[]).length>0).length,
+      srcAssigned:sourced.filter(l=>!!l.assignedTo).length,
+      srcContacted:sourced.filter(l=>isContacted(l)).length,
+      srcPotential:sourced.filter(l=>l.tags.includes('Potential')).length,
+      srcBad:sourced.filter(l=>l.urlBroken).length,
+    };
+  }
+
   // Rep cards: ranked by volume for the selected period. Reps with nothing in the
   // period are collected into a single "no activity" tile instead of empty cards.
   const rankedReps=[...repRows].sort((a,b)=>b.total-a.total);
@@ -2429,6 +2478,16 @@ function HomeView({leads,config,currentUser}) {
                 style={{padding:'6px 10px',fontSize:12,fontFamily:'inherit'}}/>
               {(cStart||cEnd) && <button className="btn btn-ghost btn-sm" onClick={()=>{setCStart('');setCEnd('');}} title="Clear date range">✕</button>}
             </div>
+            {people.length>0 && (
+              <select value="" onChange={e=>{ if(e.target.value) setDetail(e.target.value); }}
+                title="Open a full performance breakdown for one person"
+                style={{padding:'7px 12px',fontSize:13,fontFamily:'inherit'}}>
+                <option value="">🔎 View performance…</option>
+                {people.map(n=>(
+                  <option key={n} value={n}>{n}{leadgenNames.includes(n)?' · leadgen':''}</option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
       </div>
@@ -2470,8 +2529,11 @@ function HomeView({leads,config,currentUser}) {
               const barColor=cRate>=70?'var(--success)':cRate>=40?'var(--warn)':'var(--danger)';
               const rc=(config.repColors||{})[r.rep]||'#5b5bd6';
               const roleTitle=(getProfile(r.rep).title||'').trim()||'Sales rep';
+              const canOpen=people.includes(r.rep);
               return (
-                <div className="card" key={r.rep} style={{padding:'16px 18px'}}>
+                <div className="card" key={r.rep} style={{padding:'16px 18px',cursor:canOpen?'pointer':'default'}}
+                  onClick={canOpen?()=>setDetail(r.rep):undefined}
+                  title={canOpen?`View ${r.rep}'s full performance`:undefined}>
                   <div style={{display:'flex',alignItems:'center',gap:11}}>
                     <div style={{width:34,height:34,borderRadius:9,background:rc+'22',color:rc,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:800,flexShrink:0}}>{r.rep.slice(0,2).toUpperCase()}</div>
                     <div style={{minWidth:0,flex:1}}>
@@ -2511,11 +2573,144 @@ function HomeView({leads,config,currentUser}) {
             })}
             {idleReps.length>0 && (
               <div style={{border:'1px dashed var(--border)',borderRadius:'var(--radius-lg)',padding:'16px 18px',display:'flex',flexDirection:'column',justifyContent:'center'}}>
-                <div style={{fontSize:13,fontWeight:600,color:'var(--text-dim)',marginBottom:4}}>No activity · {rangeLabel}</div>
-                <div style={{fontSize:12.5,color:'var(--text-light)'}}>{idleReps.join(', ')}</div>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--text-dim)',marginBottom:6}}>No activity · {rangeLabel}</div>
+                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                  {idleReps.map(n=>(
+                    <button key={n} className="btn btn-ghost btn-xs" onClick={()=>setDetail(n)}
+                      title={`View ${n}'s performance`} style={{color:'var(--text-light)'}}>{n}</button>
+                  ))}
+                </div>
               </div>
             )}
           </div>}
+      {detail && (()=>{
+        const d=perfFor(detail);
+        const pr=getProfile(detail);
+        const rc=(config.repColors||{})[detail]||pr.color||'#5b5bd6';
+        const isLG=leadgenNames.includes(detail);
+        const roleTitle=(pr.title||'').trim()||(isLG?'Lead gen':'Sales rep');
+        const tiles=[
+          {l:'Assigned',   v:d.total},
+          {l:'Fresh',      v:d.fresh,     c:'var(--accent)'},
+          {l:'Recycled',   v:d.recycled,  c:'var(--warn)'},
+          {l:'Contacted',  v:d.contacted},
+          {l:'Potential',  v:d.potential, c:'var(--success,#00875A)'},
+          {l:'High ticket',v:d.ht,        c:'var(--warn)'},
+          {l:'Not qualified',v:d.nq},
+          {l:'With email', v:d.withEmail},
+        ];
+        const rates=[
+          {l:'Contact rate', v:pct(d.contacted,d.total)+'%', t:'Contacted ÷ assigned'},
+          {l:'Potential rate',v:pct(d.potential,d.total)+'%', t:'Potential ÷ assigned'},
+          {l:'Email coverage',v:pct(d.withEmail,d.total)+'%', t:'Leads with at least one email ÷ assigned'},
+          {l:'Avg followers', v:fmtFollowers(d.avgFoll||0)||'—', t:'Average followers across leads with a known count'},
+        ];
+        return (
+          <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setDetail('')}>
+            <div className="modal" style={{width:760,maxWidth:'95vw'}}>
+              <div className="modal-header">
+                <div style={{display:'flex',alignItems:'center',gap:12,minWidth:0}}>
+                  <div style={{width:42,height:42,borderRadius:11,background:rc+'22',color:rc,display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:800,flexShrink:0}}>{detail.slice(0,2).toUpperCase()}</div>
+                  <div style={{minWidth:0}}>
+                    <h2 style={{margin:0}}>{detail}</h2>
+                    <p style={{margin:0}}>{roleTitle} · {rangeLabel}</p>
+                  </div>
+                </div>
+                <button className="btn btn-ghost btn-sm" onClick={()=>setDetail('')} title="Close">✕</button>
+              </div>
+
+              {/* Sales side — leads assigned to them in this period */}
+              <div style={{fontSize:11,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text-light)',marginBottom:8}}>Assigned leads</div>
+              {d.total===0
+                ? <div style={{fontSize:13,color:'var(--text-dim)',padding:'6px 0 4px'}}>No leads assigned in this period.</div>
+                : <React.Fragment>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:8}}>
+                      {tiles.map(t=>(
+                        <div key={t.l} style={{border:'1px solid var(--border)',borderRadius:12,padding:'10px 12px'}}>
+                          <div style={{fontFamily:SG,fontSize:19,fontWeight:700,letterSpacing:'-.02em',color:t.c||'var(--text)',fontVariantNumeric:'tabular-nums'}}>{t.v.toLocaleString()}</div>
+                          <div style={{fontSize:10.5,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-light)'}}>{t.l}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{display:'flex',gap:18,flexWrap:'wrap',marginTop:12,paddingTop:12,borderTop:'1px solid var(--border)'}}>
+                      {rates.map(r=>(
+                        <div key={r.l} title={r.t}>
+                          <div style={{fontFamily:SG,fontSize:17,fontWeight:700,fontVariantNumeric:'tabular-nums'}}>{r.v}</div>
+                          <div style={{fontSize:10.5,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-light)'}}>{r.l}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {d.camp.some(c=>c.total>0) && (
+                      <div style={{marginTop:18,overflowX:'auto'}}>
+                        <table className="kpi-table">
+                          <thead><tr>
+                            <th>Campaign</th><th>Total</th><th>Potential</th><th title="Potential ÷ this campaign's total">Pot %</th>
+                            <th>Contacted</th><th title="Contacted ÷ this campaign's total">Contact %</th><th>High Ticket</th>
+                          </tr></thead>
+                          <tbody>
+                            {d.camp.map(c=>(
+                              <tr key={c.id}>
+                                <td style={{whiteSpace:'nowrap'}}><span style={{color:campColorMap[c.id]||'var(--accent)',fontWeight:700}}>●</span> {c.label}</td>
+                                <td>{c.total}</td><td>{c.potential}</td><td>{pct(c.potential,c.total)}%</td>
+                                <td>{c.contacted}</td><td>{pct(c.contacted,c.total)}%</td><td>{c.ht}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {d.plat.length>0 && (
+                      <div style={{marginTop:14,display:'flex',gap:14,flexWrap:'wrap',fontSize:12.5,color:'var(--text-dim)'}}>
+                        <span style={{color:'var(--text-light)'}}>Platforms:</span>
+                        {d.plat.map(x=><span key={x.p}>{PLATFORM_ICON[x.p]} {x.p} <b style={{color:'var(--text)'}}>{x.n}</b></span>)}
+                      </div>
+                    )}
+                  </React.Fragment>}
+
+              {/* Leadgen side — leads this person sourced in the period, and what became of them */}
+              {(isLG || d.srcTotal>0) && (
+                <div style={{marginTop:22,paddingTop:16,borderTop:'1px solid var(--border)'}}>
+                  <div style={{fontSize:11,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text-light)',marginBottom:8}}>Leads sourced <span style={{textTransform:'none',letterSpacing:0}}>(by date added)</span></div>
+                  {d.srcTotal===0
+                    ? <div style={{fontSize:13,color:'var(--text-dim)'}}>Nothing sourced in this period.</div>
+                    : <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:8}}>
+                        {[
+                          {l:'Sourced',   v:d.srcTotal},
+                          {l:'With email',v:d.srcEmail},
+                          {l:'Assigned',  v:d.srcAssigned},
+                          {l:'Contacted', v:d.srcContacted},
+                          {l:'Potential', v:d.srcPotential, c:'var(--success,#00875A)'},
+                          {l:'Bad link',  v:d.srcBad, c:d.srcBad?'var(--danger)':undefined},
+                        ].map(t=>(
+                          <div key={t.l} style={{border:'1px solid var(--border)',borderRadius:12,padding:'10px 12px'}}>
+                            <div style={{fontFamily:SG,fontSize:19,fontWeight:700,letterSpacing:'-.02em',color:t.c||'var(--text)',fontVariantNumeric:'tabular-nums'}}>{t.v.toLocaleString()}</div>
+                            <div style={{fontSize:10.5,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-light)'}}>{t.l}</div>
+                          </div>
+                        ))}
+                      </div>}
+                  {d.srcTotal>0 && (
+                    <div style={{marginTop:10,fontSize:12.5,color:'var(--text-dim)'}}>
+                      {pct(d.srcEmail,d.srcTotal)}% came with an email · {pct(d.srcContacted,d.srcTotal)}% have been contacted
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="modal-footer">
+                <div style={{display:'flex',gap:8}}>
+                  {d.total>0 && <button className="btn btn-outline btn-sm"
+                    onClick={()=>exportCSV(d.mine,`${detail}_assigned_${custom?cStart+'_'+cEnd:period}.csv`)}>⬇ Assigned CSV</button>}
+                  {d.srcTotal>0 && <button className="btn btn-outline btn-sm"
+                    onClick={()=>exportCSV(d.sourced,`${detail}_sourced_${custom?cStart+'_'+cEnd:period}.csv`)}>⬇ Sourced CSV</button>}
+                </div>
+                <div className="modal-footer-right">
+                  <button className="btn btn-primary btn-sm" onClick={()=>setDetail('')}>Close</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       </div>{/* /.home-body */}
     </div>
   );
