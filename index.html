@@ -5197,7 +5197,8 @@ function KnowledgeBaseView({
 function HomeView({
   leads,
   config,
-  currentUser
+  currentUser,
+  onOpenRep = null
 }) {
   // Non-admins only ever see THEIR OWN metrics: the rep filter is locked to them
   // and the picker is hidden. Admins keep the full all-reps view + picker.
@@ -5562,15 +5563,20 @@ function HomeView({
     const rc = (config.repColors || {})[r.rep] || '#5b5bd6';
     const roleTitle = (getProfile(r.rep).title || '').trim() || 'Sales rep';
     const canOpen = people.includes(r.rep);
+    const canJump = canOpen && !!onOpenRep;
+    // Remaining work queue — the count the sidebar shortcut used to show.
+    // NOT period-scoped (it's "what's still on their plate right now"), so
+    // it's labelled separately from the period lead count above.
+    const queue = leads.filter(l => l.assignedTo === r.rep && isWorkable(l)).length;
     return /*#__PURE__*/React.createElement("div", {
       className: "card",
       key: r.rep,
       style: {
         padding: '16px 18px',
-        cursor: canOpen ? 'pointer' : 'default'
+        cursor: canJump ? 'pointer' : 'default'
       },
-      onClick: canOpen ? () => setDetail(r.rep) : undefined,
-      title: canOpen ? `View ${r.rep}'s full performance` : undefined
+      onClick: canJump ? () => onOpenRep(r.rep) : undefined,
+      title: canJump ? `Open ${r.rep}'s dashboard` : undefined
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         display: 'flex',
@@ -5721,7 +5727,46 @@ function HomeView({
           fontVariantNumeric: 'tabular-nums'
         }
       }, cs.total ? pct(cs.contacted, cs.total) + '%' : '—'));
-    })));
+    })), (canOpen || canJump) && /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 10,
+        paddingTop: 10,
+        borderTop: '1px solid var(--border)'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11.5,
+        color: 'var(--text-dim)'
+      },
+      title: "Leads still to work (Potential / HT) — not limited to the selected period"
+    }, /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: queue ? 'var(--text)' : 'var(--text-light)'
+      }
+    }, queue), " to work"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginLeft: 'auto',
+        display: 'flex',
+        gap: 6
+      }
+    }, canOpen && /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost btn-xs",
+      title: `${r.rep}'s full KPI breakdown`,
+      onClick: e => {
+        e.stopPropagation();
+        setDetail(r.rep);
+      }
+    }, "📊 KPIs"), canJump && /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-outline btn-xs",
+      title: `Open ${r.rep}'s dashboard`,
+      onClick: e => {
+        e.stopPropagation();
+        onOpenRep(r.rep);
+      }
+    }, "Dashboard →"))));
   }), idleReps.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       border: '1px dashed var(--border)',
@@ -5747,8 +5792,10 @@ function HomeView({
   }, idleReps.map(n => /*#__PURE__*/React.createElement("button", {
     key: n,
     className: "btn btn-ghost btn-xs",
-    onClick: () => setDetail(n),
-    title: `View ${n}'s performance`,
+    onClick: () => {
+      if (onOpenRep && people.includes(n)) onOpenRep(n);else setDetail(n);
+    },
+    title: onOpenRep ? `Open ${n}'s dashboard` : `View ${n}'s performance`,
     style: {
       color: 'var(--text-light)'
     }
@@ -6056,7 +6103,14 @@ function HomeView({
       onClick: () => exportCSV(d.sourced, `${detail}_sourced_${custom ? cStart + '_' + cEnd : period}.csv`)
     }, "⬇ Sourced CSV")), /*#__PURE__*/React.createElement("div", {
       className: "modal-footer-right"
-    }, /*#__PURE__*/React.createElement("button", {
+    }, onOpenRep && people.includes(detail) && /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-outline btn-sm",
+      onClick: () => {
+        const who = detail;
+        setDetail('');
+        onOpenRep(who);
+      }
+    }, "Open ", detail, "'s dashboard →"), /*#__PURE__*/React.createElement("button", {
       className: "btn btn-primary btn-sm",
       onClick: () => setDetail('')
     }, "Close")))));
@@ -16247,7 +16301,12 @@ function App() {
     if (tab === 'home') return /*#__PURE__*/React.createElement(HomeView, {
       leads: vLeads,
       config: config,
-      currentUser: currentUser
+      currentUser: currentUser,
+      onOpenRep: r => {
+        setShowRepSelect(false);
+        setActiveRep(r);
+        setTab('rep-home');
+      }
     });
     if (tab === 'leaves') return /*#__PURE__*/React.createElement(LeavesView, {
       leaves: leaves,
@@ -16270,7 +16329,12 @@ function App() {
     }) : /*#__PURE__*/React.createElement(HomeView, {
       leads: vLeads,
       config: config,
-      currentUser: currentUser
+      currentUser: currentUser,
+      onOpenRep: r => {
+        setShowRepSelect(false);
+        setActiveRep(r);
+        setTab('rep-home');
+      }
     });
     if (tab === 'scraper') return /*#__PURE__*/React.createElement(ScraperView, {
       leads: nonPoolLeads,
@@ -16412,14 +16476,24 @@ function App() {
     }) : /*#__PURE__*/React.createElement(HomeView, {
       leads: vLeads,
       config: config,
-      currentUser: currentUser
+      currentUser: currentUser,
+      onOpenRep: r => {
+        setShowRepSelect(false);
+        setActiveRep(r);
+        setTab('rep-home');
+      }
     });
     if (tab === 'errors') return isAdmin ? /*#__PURE__*/React.createElement(ErrorLogView, {
       addToast: addToast
     }) : /*#__PURE__*/React.createElement(HomeView, {
       leads: vLeads,
       config: config,
-      currentUser: currentUser
+      currentUser: currentUser,
+      onOpenRep: r => {
+        setShowRepSelect(false);
+        setActiveRep(r);
+        setTab('rep-home');
+      }
     });
     if (tab === 'google-import') return /*#__PURE__*/React.createElement(GoogleImportView, {
       onImport: importLeads,
@@ -16446,7 +16520,12 @@ function App() {
       if (!poolVisibleToUser(pid)) return /*#__PURE__*/React.createElement(HomeView, {
         leads: vLeads,
         config: config,
-        currentUser: currentUser
+        currentUser: currentUser,
+        onOpenRep: r => {
+          setShowRepSelect(false);
+          setActiveRep(r);
+          setTab('rep-home');
+        }
       });
       if (pool) return /*#__PURE__*/React.createElement(LeadsTable, {
         leads: poolTabLeads(pid),
@@ -16898,36 +16977,6 @@ function App() {
         color: c.color
       }
     }, "●"), c.label, /*#__PURE__*/React.createElement("span", {
-      className: "nav-badge"
-    }, cnt));
-  })), isAdmin && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: "nav-divider"
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "sidebar-section-label"
-  }, "Sales Reps"), (config.salesReps || []).map(r => {
-    // Active (non-contacted) leads — the rep's remaining work queue.
-    const cnt = vLeads.filter(l => l.assignedTo === r && isWorkable(l)).length;
-    return /*#__PURE__*/React.createElement("div", {
-      key: r,
-      title: r,
-      className: `nav-item ${tab === 'rep-home' && activeRep === r ? 'active' : ''}`,
-      onClick: () => {
-        setShowRepSelect(false);
-        setActiveRep(r);
-        setTab('rep-home');
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        position: 'relative',
-        flexShrink: 0
-      }
-    }, /*#__PURE__*/React.createElement(RepAvatar, {
-      rep: r,
-      config: config,
-      size: 20,
-      online: activeRep === r,
-      bgOverride: "var(--sidebar)"
-    })), r, /*#__PURE__*/React.createElement("span", {
       className: "nav-badge"
     }, cnt));
   })), /*#__PURE__*/React.createElement("div", {

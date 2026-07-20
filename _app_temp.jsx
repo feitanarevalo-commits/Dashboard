@@ -2307,7 +2307,7 @@ function KnowledgeBaseView({articles,isAdmin,onSave,onDelete,dark}){
   </>;
 }
 
-function HomeView({leads,config,currentUser}) {
+function HomeView({leads,config,currentUser,onOpenRep=null}) {
   // Non-admins only ever see THEIR OWN metrics: the rep filter is locked to them
   // and the picker is hidden. Admins keep the full all-reps view + picker.
   const lockedRep = (currentUser && currentUser.role!=='admin') ? currentUser.name : null;
@@ -2530,10 +2530,15 @@ function HomeView({leads,config,currentUser}) {
               const rc=(config.repColors||{})[r.rep]||'#5b5bd6';
               const roleTitle=(getProfile(r.rep).title||'').trim()||'Sales rep';
               const canOpen=people.includes(r.rep);
+              const canJump=canOpen&&!!onOpenRep;
+              // Remaining work queue — the count the sidebar shortcut used to show.
+              // NOT period-scoped (it's "what's still on their plate right now"), so
+              // it's labelled separately from the period lead count above.
+              const queue=leads.filter(l=>l.assignedTo===r.rep && isWorkable(l)).length;
               return (
-                <div className="card" key={r.rep} style={{padding:'16px 18px',cursor:canOpen?'pointer':'default'}}
-                  onClick={canOpen?()=>setDetail(r.rep):undefined}
-                  title={canOpen?`View ${r.rep}'s full performance`:undefined}>
+                <div className="card" key={r.rep} style={{padding:'16px 18px',cursor:canJump?'pointer':'default'}}
+                  onClick={canJump?()=>onOpenRep(r.rep):undefined}
+                  title={canJump?`Open ${r.rep}'s dashboard`:undefined}>
                   <div style={{display:'flex',alignItems:'center',gap:11}}>
                     <div style={{width:34,height:34,borderRadius:9,background:rc+'22',color:rc,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:800,flexShrink:0}}>{r.rep.slice(0,2).toUpperCase()}</div>
                     <div style={{minWidth:0,flex:1}}>
@@ -2568,6 +2573,21 @@ function HomeView({leads,config,currentUser}) {
                       })}
                     </div>
                   )}
+                  {/* Footer: what's still on their plate + the two ways in. Buttons
+                      stop propagation so they don't also trigger the card's jump. */}
+                  {(canOpen||canJump) && (
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginTop:10,paddingTop:10,borderTop:'1px solid var(--border)'}}>
+                      <span style={{fontSize:11.5,color:'var(--text-dim)'}} title="Leads still to work (Potential / HT) — not limited to the selected period">
+                        <b style={{color:queue?'var(--text)':'var(--text-light)'}}>{queue}</b> to work
+                      </span>
+                      <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+                        {canOpen && <button className="btn btn-ghost btn-xs" title={`${r.rep}'s full KPI breakdown`}
+                          onClick={e=>{e.stopPropagation();setDetail(r.rep);}}>📊 KPIs</button>}
+                        {canJump && <button className="btn btn-outline btn-xs" title={`Open ${r.rep}'s dashboard`}
+                          onClick={e=>{e.stopPropagation();onOpenRep(r.rep);}}>Dashboard →</button>}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -2576,8 +2596,9 @@ function HomeView({leads,config,currentUser}) {
                 <div style={{fontSize:13,fontWeight:600,color:'var(--text-dim)',marginBottom:6}}>No activity · {rangeLabel}</div>
                 <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
                   {idleReps.map(n=>(
-                    <button key={n} className="btn btn-ghost btn-xs" onClick={()=>setDetail(n)}
-                      title={`View ${n}'s performance`} style={{color:'var(--text-light)'}}>{n}</button>
+                    <button key={n} className="btn btn-ghost btn-xs"
+                      onClick={()=>{ if(onOpenRep && people.includes(n)) onOpenRep(n); else setDetail(n); }}
+                      title={onOpenRep?`Open ${n}'s dashboard`:`View ${n}'s performance`} style={{color:'var(--text-light)'}}>{n}</button>
                   ))}
                 </div>
               </div>
@@ -2704,6 +2725,8 @@ function HomeView({leads,config,currentUser}) {
                     onClick={()=>exportCSV(d.sourced,`${detail}_sourced_${custom?cStart+'_'+cEnd:period}.csv`)}>⬇ Sourced CSV</button>}
                 </div>
                 <div className="modal-footer-right">
+                  {onOpenRep && people.includes(detail) && <button className="btn btn-outline btn-sm"
+                    onClick={()=>{ const who=detail; setDetail(''); onOpenRep(who); }}>Open {detail}'s dashboard →</button>}
                   <button className="btn btn-primary btn-sm" onClick={()=>setDetail('')}>Close</button>
                 </div>
               </div>
@@ -7315,10 +7338,10 @@ function App() {
   function renderMain(){
     if(showRepSelect) return <RepSelectScreen leads={vLeads} config={config} activeRep={activeRep} onSelect={r=>{if(r){setActiveRep(r);setTab('rep-home');}setShowRepSelect(false);}}/>;
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead} isLeadgen={!!(currentUser&&currentUser.role==='leadgen')}/>;
-    if(tab==='home') return <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
+    if(tab==='home') return <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
     if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle} dark={darkMode}/>;
-    if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
+    if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}/>;
     if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={nonPoolLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
@@ -7331,8 +7354,8 @@ function App() {
     if(tab==='partner') return <LeadsTable leads={vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="already_partner" printTitle="Already Partner"/>;
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
     if(tab==='duplicates') return <DuplicatesView groups={myDupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
-    if(tab==='archive') return isAdmin ? <ArchiveView loadArchived={loadArchivedFromSupabase} onRestore={restoreArchived} config={config} campColorMap={campColorMap} addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
-    if(tab==='errors') return isAdmin ? <ErrorLogView addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
+    if(tab==='archive') return isAdmin ? <ArchiveView loadArchived={loadArchivedFromSupabase} onRestore={restoreArchived} config={config} campColorMap={campColorMap} addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}/>;
+    if(tab==='errors') return isAdmin ? <ErrorLogView addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}/>;
     if(tab==='google-import') return <GoogleImportView onImport={importLeads} addToast={addToast}/>;
     if(tab==='agency') return <AgencyView agencies={agencies} setAgencies={setAgencies} leads={vLeads} config={config} currentUser={currentUser} isAdmin={isAdmin} addToast={addToast} onImportSheet={importAgencyLeads}/>;
     if(tab==='close-data') return <CloseSearchView config={config}/>;
@@ -7341,7 +7364,7 @@ function App() {
       const pool=POOLS.find(p=>p.id===pid);
       // High Ticket is JC-only; JC in turn only works High Ticket. Bounce to Home
       // anyone who reaches a pool they shouldn't see.
-      if(!poolVisibleToUser(pid)) return <HomeView leads={vLeads} config={config} currentUser={currentUser}/>;
+      if(!poolVisibleToUser(pid)) return <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}/>;
       if(pool) return <LeadsTable leads={poolTabLeads(pid)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} showAssigned showOrigin showCampaign hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename={`pool_${pid}`} printTitle={`${pool.label} Pool`}/>;
     }
     const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);
@@ -7533,25 +7556,9 @@ function App() {
               );
             })}
           </>}
-          {/* Admins navigate every rep here; a rep reaches their OWN dashboard via
-              the topbar profile button (so there's a single profile control). */}
-          {isAdmin && <>
-          <div className="nav-divider"/>
-          <div className="sidebar-section-label">Sales Reps</div>
-          {(config.salesReps||[]).map(r=>{
-            // Active (non-contacted) leads — the rep's remaining work queue.
-            const cnt=vLeads.filter(l=>l.assignedTo===r && isWorkable(l)).length;
-            return(
-              <div key={r} title={r} className={`nav-item ${tab==='rep-home'&&activeRep===r?'active':''}`} onClick={()=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}>
-                <div style={{position:'relative',flexShrink:0}}>
-                  <RepAvatar rep={r} config={config} size={20} online={activeRep===r} bgOverride="var(--sidebar)"/>
-                </div>
-                {r}
-                <span className="nav-badge">{cnt}</span>
-              </div>
-            );
-          })}
-          </>}
+          {/* The per-rep shortcuts that used to live here are now the rep cards on
+              Home — one place that shows their numbers AND opens their dashboard.
+              A rep reaches their OWN dashboard via the topbar profile button. */}
           <div style={{flex:1}}/>
           <div className="sidebar-footer">
             {/* Change Password + Logout live under the topbar profile menu now. */}
