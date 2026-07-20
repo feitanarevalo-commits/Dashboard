@@ -2090,7 +2090,7 @@ function getKbExcerpt(body, n){
   return '';
 }
 // Unified Knowledge Base UI — Tools launchpad + Manual articles (same design language).
-function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmin,onAddArticle,onEditArticle,onDeleteArticle,dark}) {
+function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmin,onAddArticle,onEditArticle,onDeleteArticle,onDeleteTool,dark}) {
   // Accent options: Blue #2f6bf0/#7db0ff · Indigo #5b5bd6/#a6a6ff · Teal #0f9b8e/#67e8d5 · Violet #7c5cfc/#c4a6ff
   const accent='#5b5bd6', accentLight='#a6a6ff';
   // KB surface palette — the dark hero is fixed; the reading surfaces (page,
@@ -2227,7 +2227,7 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
                 </div>
               );})
             : items.map((t,i)=>{ const cc=CAT_COLORS[t.category]||accent; return (
-                <a key={t.name} className="kbl-tile" href={t.primaryHref} target="_blank" rel="noopener noreferrer" aria-label={'Open '+t.name} style={{display:'flex',flexDirection:'column',textDecoration:'none',background:S.card,border:`1px solid ${S.cardBorder}`,borderRadius:18,padding:20,animationDelay:(i*0.04).toFixed(2)+'s'}}>
+                <a key={t.name} className="kbl-tile" href={t.primaryHref} target="_blank" rel="noopener noreferrer" aria-label={'Open '+t.name} style={{position:'relative',display:'flex',flexDirection:'column',textDecoration:'none',background:S.card,border:`1px solid ${S.cardBorder}`,borderRadius:18,padding:20,animationDelay:(i*0.04).toFixed(2)+'s'}}>
                   <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:13}}>
                     <div style={{flex:'0 0 46px',width:46,height:46,borderRadius:13,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:SG,fontWeight:700,fontSize:18,color:'#fff',background:t.color,boxShadow:`0 7px 16px -6px ${t.color}`}}>{t.name[0].toUpperCase()}</div>
                     <div style={{flex:1,minWidth:0}}>
@@ -2240,9 +2240,13 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
                   </div>
                   <p style={{fontSize:13.5,lineHeight:1.55,color:S.textDim,margin:'0 0 14px',flex:1}}>{t.desc}</p>
                   {t.note && <div style={{display:'flex',alignItems:'flex-start',gap:7,fontSize:12,lineHeight:1.45,color:S.noteText,background:S.noteBg,border:`1px solid ${S.noteBorder}`,borderRadius:9,padding:'8px 11px',marginBottom:12}}><span>⚠️</span><span>{t.note}</span></div>}
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingTop:13,borderTop:`1px solid ${S.cardBorderSoft}`}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,paddingTop:13,borderTop:`1px solid ${S.cardBorderSoft}`}}>
                     <span style={{fontSize:12,fontWeight:600,color:S.textFaint,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.domain}</span>
-                    <span style={{fontSize:10.5,fontWeight:700,letterSpacing:'.05em',padding:'3px 9px',borderRadius:999,color:cc,background:hexA(cc,.12)}}>{t.category}</span>
+                    <span style={{display:'flex',alignItems:'center',gap:8,flex:'0 0 auto'}}>
+                      {isAdmin && onDeleteTool && <button onClick={e=>{e.preventDefault(); e.stopPropagation(); onDeleteTool(t.name);}} title={`Remove ${t.name} from Tools`}
+                        style={{width:26,height:26,borderRadius:7,border:`1px solid ${S.cardBorder}`,background:S.card,color:'#c0453a',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0}}>🗑</button>}
+                      <span style={{fontSize:10.5,fontWeight:700,letterSpacing:'.05em',padding:'3px 9px',borderRadius:999,color:cc,background:hexA(cc,.12)}}>{t.category}</span>
+                    </span>
                   </div>
                 </a>
               );})}
@@ -2281,8 +2285,8 @@ function renderKbBody(text){
   });
   flush(); return out;
 }
-function KnowledgeBaseView({articles,isAdmin,onSave,onDelete,dark}){
-  const tools=(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[]);
+function KnowledgeBaseView({articles,tools:toolsProp,isAdmin,onSave,onDelete,onDeleteTool,dark}){
+  const tools=toolsProp||(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[]);
   const [view,setView]=useState('tools');           // 'tools' | 'manual'
   const [selectedId,setSelectedId]=useState(null);
   const [editing,setEditing]=useState(null);        // null | 'new' | article object
@@ -2298,6 +2302,7 @@ function KnowledgeBaseView({articles,isAdmin,onSave,onDelete,dark}){
       onAddArticle={()=>setEditing('new')}
       onEditArticle={a=>setEditing(a)}
       onDeleteArticle={id=>{ onDelete(id); setSelectedId(null); }}
+      onDeleteTool={onDeleteTool}
     />
     {editing && <ArticleEditModal
       article={editing==='new'?null:editing}
@@ -6155,6 +6160,18 @@ function App() {
     setKbArticles(arr=>arr.filter(x=>x.id!==id));
     deleteKbArticleFromSupabase(id).then(r=>{ if(!r.ok) addToast('Delete failed','error'); else addToast('Article deleted','info'); });
   }
+  // Remove a tool from the KB launchpad. Tools live in config.kbTools (an
+  // app_config override, seeded from the KB_TOOLS constant on first delete), so
+  // the removal persists for the whole team through the normal config save.
+  function deleteKbTool(name){
+    if(!isAdmin){ addToast('Only admins can remove tools','error'); return; }
+    const current=config.kbTools||(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[]);
+    const tool=current.find(t=>t.name===name); if(!tool) return;
+    if(!window.confirm(`Remove “${name}” from the Tools launchpad? You can ask an admin to add it back later.`)) return;
+    const next=current.filter(t=>t.name!==name);
+    applyConfig({...config, kbTools:next});
+    addToast(`“${name}” removed from Tools`,'info');
+  }
   // Auto attendance: a login session is created when a user signs in (resumed on
   // reload within 30 min), last_seen is heartbeat-updated while the tab is open,
   // and logout_at is set on sign-out / tab close. No manual buttons.
@@ -7409,7 +7426,7 @@ function App() {
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead} isLeadgen={!!(currentUser&&currentUser.role==='leadgen')}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
-    if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle} dark={darkMode}/>;
+    if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} tools={config.kbTools||(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[])} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle} onDeleteTool={deleteKbTool} dark={darkMode}/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory}/>;
