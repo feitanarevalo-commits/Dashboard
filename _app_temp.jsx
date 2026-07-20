@@ -2321,6 +2321,9 @@ function KnowledgeBaseView({articles,tools:toolsProp,isAdmin,onSave,onDelete,onD
 // A rep row expands to a per-campaign breakdown and can drill into the rep's
 // live dashboard or full KPI detail (preserving the earlier Home features).
 const HOME_PERIODS=[{id:'daily',label:'Daily'},{id:'weekly',label:'Weekly'},{id:'monthly',label:'Monthly'}];
+// Fixed display order for the KPI rep list. Anyone not listed falls to the end
+// (then by furthest-behind quota). Edit this to reorder the board.
+const REP_ORDER=['Chase','Mikka','Pen','Rein','JC','Bella','Mica','Jon','Chai','Czarina'];
 const HOME_PERIOD_DAYS={daily:1,weekly:7,monthly:30};
 
 // Seed quotas: the design's targets mapped onto whatever campaigns exist, by
@@ -2406,7 +2409,9 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
     rows.forEach(row=>{ const q=Math.max(0,Number(qset[row.id]))||0; row.quota=q; row.quotaPct=q>0?(row.contacted/q)*100:100; });
     return {rep,imported,contacted,fresh:imported-contacted,rows,tier,totalQuota,quotaPct};
   });
-  reps.sort((a,b)=>a.quotaPct-b.quotaPct);   // furthest behind first
+  // Fixed team order (REP_ORDER); unlisted reps fall to the end, worst-quota first.
+  const orderIdx=n=>{ const i=REP_ORDER.indexOf(n); return i<0?REP_ORDER.length+1:i; };
+  reps.sort((a,b)=> (orderIdx(a.rep)-orderIdx(b.rep)) || (a.quotaPct-b.quotaPct));
 
   function statusOf(pct){
     if(pct>=100) return {label:'On track', fg:'#2f8f5b', bg:'rgba(47,143,91,.15)'};
@@ -2558,7 +2563,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
 
         {/* Column key */}
         <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) 150px 92px 92px 24px',gap:20,padding:'0 24px 10px',fontSize:11,fontWeight:700,letterSpacing:'.05em',textTransform:'uppercase',color:'var(--text-light)'}}>
-          <span>Rep · attention first</span><span>Status · vs quota</span>
+          <span>Rep</span><span>Status · vs quota</span>
           <span style={{textAlign:'right'}}>Imported</span><span style={{textAlign:'right'}}>Fresh</span><span/>
         </div>
 
