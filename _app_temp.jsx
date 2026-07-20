@@ -2350,7 +2350,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const SG="'Space Grotesk',sans-serif";
   const MONO="'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace";
 
-  const [period,setPeriod]=useState('monthly');
+  const [period,setPeriod]=useState('daily');      // default to today's quota
   const [dayOffset,setDayOffset]=useState(0);      // ≤0, days from today (daily view)
   const [expanded,setExpanded]=useState({});
   const [detail,setDetail]=useState('');           // rep whose full-KPI modal is open
@@ -2482,8 +2482,8 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const canOpenRep=name=>!!onOpenRep && allReps.includes(name);
 
   return (
-    <div className="home-content" style={{fontFamily:SG,color:'var(--text)',padding:'28px 24px 56px'}}>
-      <div style={{maxWidth:980,margin:'0 auto'}}>
+    <div className="home-content" style={{fontFamily:SG,color:'var(--text)',padding:'24px 28px 56px'}}>
+      <div style={{width:'100%',maxWidth:1400,margin:'0 auto'}}>
 
         {/* Title + period toggle */}
         <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:16,flexWrap:'wrap',marginBottom:22}}>
