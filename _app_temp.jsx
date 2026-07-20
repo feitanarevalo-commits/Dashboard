@@ -2429,8 +2429,12 @@ function HomeView({leads,config,currentUser,onOpenRep=null}) {
   // ── KPI reference: Day / Week / Month, always visible ─────
   // Fixed windows, deliberately INDEPENDENT of the period toggle, so a card
   // answers "today / this week / this month" at a glance without switching.
-  //   Potential — counted by DATE ASSIGNED (leads they were given in the window
-  //               that are tagged Potential).
+  //   Potential — counted by the QUALIFYING ACTION: how many leads this person
+  //               tagged Potential in the window, read from each lead's history
+  //               ('qualified' events, which pushHist never trims). Counting the
+  //               tag STATE instead read as 0 for every working rep — the moment
+  //               they move a lead on to Contacted it stopped counting, so good
+  //               reps looked idle.
   //   Contacted — counted by LAST CONTACT DATE (work actually done in the
   //               window, even on older leads). Same basis as the rep
   //               dashboard's own "Contacted (today)" tile, so the two agree.
@@ -2440,12 +2444,26 @@ function HomeView({leads,config,currentUser,onOpenRep=null}) {
   function winStart(days){ const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-(days-1)); return ymdLocal(d); }
   const KPI_WINDOWS=[{label:'Day',from:winStart(1)},{label:'Week',from:winStart(7)},{label:'Month',from:winStart(30)}];
   function inWin(dstr,from){ const d=String(dstr||'').slice(0,10); return !!d && d>=from && d<=todayYmd; }
+  // Qualifying actions per person, tallied in ONE pass over every lead's history
+  // (doing it per card would mean re-walking thousands of timelines on each
+  // render). {actor: [day, week, month]}.
+  const qualifiedByActor=React.useMemo(()=>{
+    const m={};
+    leads.forEach(l=>(l.history||[]).forEach(e=>{
+      if(!e || e.type!=='qualified') return;
+      const a=e.actor||''; if(!a) return;
+      const d=String(e.ts||'').slice(0,10); if(!d) return;
+      const row=m[a]||(m[a]=[0,0,0]);
+      KPI_WINDOWS.forEach((w,i)=>{ if(d>=w.from && d<=todayYmd) row[i]++; });
+    }));
+    return m;
+  },[leads,todayYmd]);
   function kpiRef(name){
     const mine=leads.filter(l=>l.assignedTo===name);
     const src=leads.filter(l=>l.scrapedBy===name);
     const across=(arr,dateKey,pred)=>KPI_WINDOWS.map(w=>arr.filter(l=>pred(l)&&inWin(l[dateKey],w.from)).length);
     return {
-      potential: across(mine,'dateAssigned',l=>(l.tags||[]).includes('Potential')),
+      potential: qualifiedByActor[name]||[0,0,0],
       contacted: across(mine,'lastContactDate',isDirectContacted),
       scraped:   across(src,'addedAt',()=>true),
     };
@@ -2597,7 +2615,10 @@ function HomeView({leads,config,currentUser,onOpenRep=null}) {
                       <span/>{KPI_WINDOWS.map(w=><span key={w.label} style={{textAlign:'right'}}>{w.label}</span>)}
                     </div>
                     {kpiRefRows(r.rep).map(row=>(
-                      <div key={row.label} style={{display:'grid',gridTemplateColumns:'1fr 42px 42px 48px',fontSize:12,padding:'2px 0'}}>
+                      <div key={row.label} style={{display:'grid',gridTemplateColumns:'1fr 42px 42px 48px',fontSize:12,padding:'2px 0'}}
+                        title={row.label==='Potential'?'Leads they tagged Potential in the window'
+                          :row.label==='Contacted'?'Leads they contacted in the window (by last contact date)'
+                          :'Leads they sourced in the window (by date added)'}>
                         <span style={{color:'var(--text-dim)'}}>{row.label}</span>
                         {row.vals.map((v,i)=>(
                           <b key={i} style={{textAlign:'right',fontVariantNumeric:'tabular-nums',color:v?'var(--text)':'var(--text-light)',fontWeight:v?700:500}}>{v}</b>
@@ -2704,7 +2725,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null}) {
                         <td style={{fontWeight:600}}>{row.label}</td>
                         {row.vals.map((v,i)=><td key={i} style={{fontVariantNumeric:'tabular-nums'}}>{v}</td>)}
                         <td style={{color:'var(--text-light)',fontSize:12}}>
-                          {row.label==='Potential'?'date assigned':row.label==='Contacted'?'last contact date':'date added'}
+                          {row.label==='Potential'?'when they tagged it Potential':row.label==='Contacted'?'last contact date':'date added'}
                         </td>
                       </tr>
                     ))}
