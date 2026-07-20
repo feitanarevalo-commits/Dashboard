@@ -7,85 +7,90 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    // set theme before paint to avoid flash
+    (function(){ try{
+      var t = localStorage.getItem('clips-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.setAttribute('data-theme', t);
+    }catch(e){ document.documentElement.setAttribute('data-theme','dark'); } })();
+  </script>
   <style>
-    :root{
-      --bg:#12101c; --bg2:#171522; --card:#1f1d2b; --card-hi:#262434;
-      --line:#302e40; --line-hi:#3a3848;
+    :root, :root[data-theme="dark"]{
+      --bg:#12101c; --bg2:#171522; --card:#1f1d2b; --line:#302e40; --line-hi:#3a3848;
       --text:#e6e5ec; --muted:#9c99a8; --faint:#6f6c7e;
       --accent:#5b5bd6; --accent-2:#a6a6ff; --accent-soft:rgba(91,91,214,.16);
       --good:#3fb950; --warn:#d29922; --bad:#ef4444;
-      --shadow:0 8px 24px rgba(0,0,0,.35);
-      --r:14px;
-      --head:'Space Grotesk',system-ui,sans-serif;
-      --body:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;
+      --shadow:0 8px 24px rgba(0,0,0,.35); --shimmer:rgba(255,255,255,.05);
+      --cat-l:78%; --cat-bg-l:22%; --cat-bg-a:.55; --cat-bd-l:45%;
+    }
+    :root[data-theme="light"]{
+      --bg:#f4f3fb; --bg2:#ffffff; --card:#ffffff; --line:#e6e4f0; --line-hi:#d6d3e6;
+      --text:#1b1930; --muted:#67647d; --faint:#9c99a8;
+      --accent:#5b5bd6; --accent-2:#4b40c0; --accent-soft:rgba(91,91,214,.12);
+      --good:#1a9e42; --warn:#b4791a; --bad:#dc2f2f;
+      --shadow:0 10px 28px rgba(80,70,140,.14); --shimmer:rgba(0,0,0,.05);
+      --cat-l:34%; --cat-bg-l:93%; --cat-bg-a:1; --cat-bd-l:82%;
     }
     *{box-sizing:border-box}
     html,body{margin:0}
     body{
-      background:radial-gradient(1200px 600px at 50% -200px,rgba(91,91,214,.14),transparent 70%),var(--bg);
-      color:var(--text); font-family:var(--body); line-height:1.45;
-      min-height:100vh; -webkit-font-smoothing:antialiased;
+      background:radial-gradient(1200px 600px at 50% -200px,var(--accent-soft),transparent 70%),var(--bg);
+      color:var(--text); font-family:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif; line-height:1.45;
+      min-height:100vh; -webkit-font-smoothing:antialiased; transition:background-color .2s,color .2s;
     }
-    .wrap{max-width:1080px; margin:0 auto; padding:28px 18px 80px}
+    .wrap{max-width:1080px; margin:0 auto; padding:24px 18px 80px}
 
     /* header */
-    .brand{display:flex; align-items:center; gap:14px; margin-bottom:22px}
+    .brand{display:flex; align-items:center; gap:14px; margin-bottom:20px}
     .logo{width:44px; height:44px; border-radius:12px; flex:none;
-      background:linear-gradient(135deg,var(--accent),#8f7bff);
-      display:grid; place-items:center; box-shadow:var(--shadow);}
+      background:linear-gradient(135deg,var(--accent),#8f7bff); display:grid; place-items:center; box-shadow:var(--shadow)}
     .logo svg{width:24px; height:24px; stroke:#fff}
-    .brand h1{font-family:var(--head); font-size:22px; margin:0; letter-spacing:-.01em}
+    .brand h1{font-family:'Space Grotesk',sans-serif; font-size:22px; margin:0; letter-spacing:-.01em}
     .brand p{margin:2px 0 0; color:var(--muted); font-size:13px}
     .brand b{color:var(--accent-2); font-weight:600}
+    .head-actions{margin-left:auto; display:flex; gap:8px}
+    .hbtn{font:600 13px 'Plus Jakarta Sans',sans-serif; color:var(--text); background:var(--card);
+      border:1px solid var(--line); border-radius:10px; padding:9px 13px; cursor:pointer;
+      display:inline-flex; align-items:center; gap:7px; transition:.12s}
+    .hbtn:hover{border-color:var(--line-hi); background:var(--bg2)}
+    .hbtn.icon{padding:9px; width:40px; justify-content:center}
+    .hbtn svg{width:17px; height:17px}
+    [data-theme="light"] .moon,[data-theme="dark"] .sun{display:none}
 
-    /* search bar */
-    .search{position:sticky; top:0; z-index:5; padding:14px 0 12px;
-      background:linear-gradient(180deg,var(--bg) 70%,rgba(18,16,28,0));}
+    /* search */
+    .search{position:sticky; top:0; z-index:5; padding:12px 0 12px;
+      background:linear-gradient(180deg,var(--bg) 72%,transparent)}
     .searchrow{display:flex; gap:10px; flex-wrap:wrap}
     .field{position:relative; flex:1; min-width:240px}
-    .field svg{position:absolute; left:14px; top:50%; transform:translateY(-50%);
-      width:18px; height:18px; stroke:var(--faint); pointer-events:none}
-    #q{width:100%; font:500 15px var(--body); color:var(--text);
-      background:var(--card); border:1px solid var(--line); border-radius:12px;
-      padding:13px 40px 13px 42px; outline:none; transition:border-color .15s,box-shadow .15s}
+    .field svg{position:absolute; left:14px; top:50%; transform:translateY(-50%); width:18px; height:18px; stroke:var(--faint); pointer-events:none}
+    #q{width:100%; font:500 15px 'Plus Jakarta Sans',sans-serif; color:var(--text);
+      background:var(--card); border:1px solid var(--line); border-radius:12px; padding:13px 40px 13px 42px; outline:none; transition:border-color .15s,box-shadow .15s}
     #q:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
     #q::placeholder{color:var(--faint)}
-    .clear{position:absolute; right:8px; top:50%; transform:translateY(-50%);
-      width:26px; height:26px; border:0; border-radius:8px; cursor:pointer; display:none;
-      background:transparent; color:var(--muted); font-size:17px}
+    .clear{position:absolute; right:8px; top:50%; transform:translateY(-50%); width:26px; height:26px; border:0; border-radius:8px; cursor:pointer; display:none; background:transparent; color:var(--muted); font-size:17px}
     .clear:hover{background:var(--line); color:var(--text)}
-    select{font:500 14px var(--body); color:var(--text); background:var(--card);
-      border:1px solid var(--line); border-radius:12px; padding:0 34px 0 14px; height:48px;
-      cursor:pointer; outline:none; appearance:none;
+    select{font:500 14px 'Plus Jakarta Sans',sans-serif; color:var(--text); background:var(--card);
+      border:1px solid var(--line); border-radius:12px; padding:0 34px 0 14px; height:48px; cursor:pointer; outline:none; appearance:none;
       background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239c99a8' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");
       background-repeat:no-repeat; background-position:right 12px center}
     select:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+    .statusrow{display:flex; align-items:center; gap:8px; min-height:22px; color:var(--muted); font-size:13px; margin:4px 2px 16px}
+    .kbd{font:500 11px 'Plus Jakarta Sans',sans-serif; color:var(--muted); background:var(--card); border:1px solid var(--line); border-bottom-width:2px; border-radius:6px; padding:1px 6px}
 
-    .statusrow{display:flex; align-items:center; gap:8px; min-height:22px;
-      color:var(--muted); font-size:13px; margin:4px 2px 16px}
-    .kbd{font:500 11px var(--body); color:var(--muted); background:var(--card);
-      border:1px solid var(--line); border-bottom-width:2px; border-radius:6px; padding:1px 6px}
-
-    /* results grid */
+    /* results */
     .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px}
-    .card{background:var(--card); border:1px solid var(--line); border-radius:var(--r);
-      padding:15px 16px 14px; display:flex; flex-direction:column; gap:10px; min-width:0;
-      transition:transform .12s,border-color .12s,box-shadow .12s}
+    .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:15px 16px 14px; display:flex; flex-direction:column; gap:10px; min-width:0; transition:transform .12s,border-color .12s,box-shadow .12s}
     .card:hover{transform:translateY(-2px); border-color:var(--line-hi); box-shadow:var(--shadow)}
     .card-top{display:flex; align-items:center; justify-content:space-between; gap:8px}
-    .cat{font:600 11px var(--body); text-transform:uppercase; letter-spacing:.04em;
-      padding:3px 9px; border-radius:999px;
-      color:hsl(var(--h) 70% 78%); background:hsl(var(--h) 60% 22% / .55);
-      border:1px solid hsl(var(--h) 55% 45% / .4)}
-    .conf{display:flex; align-items:center; gap:6px; font:600 12px var(--body); color:var(--muted)}
+    .cat{font:600 11px 'Plus Jakarta Sans',sans-serif; text-transform:uppercase; letter-spacing:.04em; padding:3px 9px; border-radius:999px;
+      color:hsl(var(--h) 65% var(--cat-l)); background:hsl(var(--h) 60% var(--cat-bg-l) / var(--cat-bg-a)); border:1px solid hsl(var(--h) 55% var(--cat-bd-l) / .5)}
+    .conf{display:flex; align-items:center; gap:6px; font:600 12px 'Plus Jakarta Sans',sans-serif; color:var(--muted)}
     .dot{width:8px; height:8px; border-radius:50%}
-    .conf.high .dot{background:var(--good)} .conf.mid .dot{background:var(--warn)}
-    .conf.low .dot{background:var(--bad)} .conf.none .dot{background:var(--faint)}
-    .title{font:600 15.5px var(--head); margin:0; letter-spacing:-.01em; line-height:1.3;
+    .conf.high .dot{background:var(--good)} .conf.mid .dot{background:var(--warn)} .conf.low .dot{background:var(--bad)} .conf.none .dot{background:var(--faint)}
+    .title{font:600 15.5px 'Space Grotesk',sans-serif; margin:0; letter-spacing:-.01em; line-height:1.3;
       display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-height:2.6em}
     .chips{display:flex; flex-wrap:wrap; gap:6px; min-width:0; max-width:100%}
-    .chip{font:600 12px var(--body); color:var(--muted); background:var(--bg2);
-      border:1px solid var(--line); border-radius:8px; padding:3px 9px; display:inline-flex; gap:5px; align-items:center}
+    .chip{font:600 12px 'Plus Jakarta Sans',sans-serif; color:var(--muted); background:var(--bg2); border:1px solid var(--line); border-radius:8px; padding:3px 9px; display:inline-flex; gap:5px; align-items:center}
     .chip.copy{cursor:pointer; color:var(--accent-2)}
     .chip.copy:hover{border-color:var(--accent); background:var(--accent-soft)}
     .chip.status{text-transform:capitalize}
@@ -93,9 +98,7 @@
     .chip.code .ctext{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
     .chip.code .cicon{flex:none; opacity:.7}
     .actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:2px}
-    .btn{font:600 13px var(--body); border-radius:9px; padding:8px 13px; cursor:pointer;
-      text-decoration:none; display:inline-flex; align-items:center; gap:6px;
-      border:1px solid var(--line); background:var(--bg2); color:var(--text); transition:.12s}
+    .btn{font:600 13px 'Plus Jakarta Sans',sans-serif; border-radius:9px; padding:8px 13px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); background:var(--bg2); color:var(--text); transition:.12s}
     .btn:hover{border-color:var(--line-hi)}
     .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
     .btn.primary:hover{background:#6d6de0}
@@ -106,19 +109,31 @@
     /* states */
     .empty{grid-column:1/-1; text-align:center; color:var(--muted); padding:56px 20px}
     .empty svg{width:46px; height:46px; stroke:var(--faint); margin-bottom:12px}
-    .empty h3{font:600 16px var(--head); color:var(--text); margin:0 0 4px}
-    .skel{background:var(--card); border:1px solid var(--line); border-radius:var(--r); height:150px;
-      position:relative; overflow:hidden}
-    .skel::after{content:""; position:absolute; inset:0;
-      background:linear-gradient(90deg,transparent,rgba(255,255,255,.05),transparent);
-      transform:translateX(-100%); animation:sh 1.1s infinite}
+    .empty h3{font:600 16px 'Space Grotesk',sans-serif; color:var(--text); margin:0 0 4px}
+    .skel{background:var(--card); border:1px solid var(--line); border-radius:14px; height:150px; position:relative; overflow:hidden}
+    .skel::after{content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent,var(--shimmer),transparent); transform:translateX(-100%); animation:sh 1.1s infinite}
     @keyframes sh{100%{transform:translateX(100%)}}
-    .toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
-      background:var(--card); border:1px solid var(--line-hi); color:var(--text);
-      padding:10px 16px; border-radius:10px; font:600 13px var(--body); box-shadow:var(--shadow);
-      opacity:0; pointer-events:none; transition:.2s}
+    .toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--card); border:1px solid var(--line-hi); color:var(--text); padding:10px 16px; border-radius:10px; font:600 13px 'Plus Jakarta Sans',sans-serif; box-shadow:var(--shadow); opacity:0; pointer-events:none; transition:.2s; z-index:60}
     .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
-    @media (max-width:520px){ .grid{grid-template-columns:1fr} .brand h1{font-size:20px} }
+
+    /* modal */
+    .modal{position:fixed; inset:0; z-index:50; background:rgba(8,6,16,.6); backdrop-filter:blur(3px); display:grid; place-items:center; padding:18px}
+    .modal[hidden]{display:none}
+    .modal-card{background:var(--card); border:1px solid var(--line-hi); border-radius:16px; width:100%; max-width:460px; padding:22px; box-shadow:var(--shadow); position:relative}
+    .modal-card h2{font:700 18px 'Space Grotesk',sans-serif; margin:0 0 6px}
+    .mnote{color:var(--muted); font-size:12.5px; margin:0 0 16px; line-height:1.5}
+    .modal-card label{display:block; font-size:12.5px; font-weight:600; color:var(--muted); margin-bottom:12px}
+    .modal-card input[type=text],.modal-card input[type=password],.modal-card input[type=file]{
+      width:100%; margin-top:5px; font:500 14px 'Plus Jakarta Sans',sans-serif; color:var(--text);
+      background:var(--bg2); border:1px solid var(--line); border-radius:10px; padding:10px 12px; outline:none}
+    .modal-card input:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+    .modal-card input[type=file]{padding:9px 12px; cursor:pointer}
+    .mprogress{font-size:13px; color:var(--muted); min-height:18px; margin:2px 0 14px; white-space:pre-line}
+    .mprogress.ok{color:var(--good)} .mprogress.err{color:var(--bad)}
+    .mactions{display:flex; gap:8px; justify-content:flex-end}
+    .modal-x{position:absolute; top:14px; right:14px; width:30px; height:30px; border:0; border-radius:8px; background:var(--bg2); color:var(--muted); cursor:pointer; font-size:15px}
+    .modal-x:hover{color:var(--text)}
+    @media (max-width:520px){ .grid{grid-template-columns:1fr} .brand h1{font-size:19px} .brand p{font-size:12px} .hbtn span{display:none} }
   </style>
 </head>
 <body>
@@ -130,6 +145,16 @@
       <div>
         <h1>Clips Search</h1>
         <p><b id="totalCount">…</b> clips · search by ID, code, title or category</p>
+      </div>
+      <div class="head-actions">
+        <button class="hbtn" id="importBtn" title="Import a CSV file">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v10"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>
+          <span>Import CSV</span>
+        </button>
+        <button class="hbtn icon" id="themeBtn" title="Toggle light / dark">
+          <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>
+          <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
       </div>
     </div>
 
@@ -148,128 +173,191 @@
 
     <div class="grid" id="results"></div>
   </div>
+
+  <!-- import modal -->
+  <div class="modal" id="importModal" hidden>
+    <div class="modal-card">
+      <button class="modal-x" id="importClose">✕</button>
+      <h2>Import clips from CSV</h2>
+      <p class="mnote">Adds rows to the search library. The file's header row should include any of:
+        <b>id, code, title, category, library_status, ai_confidence, source, created_at, dropbox_url, r2_url</b> — missing columns are stored blank.</p>
+      <label>Dataset label
+        <input type="text" id="impDataset" placeholder="e.g. batch-2026-07">
+      </label>
+      <label>Import passphrase
+        <input type="password" id="impPass" placeholder="Required to import" autocomplete="off">
+      </label>
+      <label>CSV file
+        <input type="file" id="impFile" accept=".csv,text/csv">
+      </label>
+      <div class="mprogress" id="impStatus"></div>
+      <div class="mactions">
+        <button class="btn" id="impCancel">Cancel</button>
+        <button class="btn primary" id="impRun">Import</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script>
     const SUPABASE_URL = 'https://wokrdfqzwrausazzoedi.supabase.co';
     const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indva3JkZnF6d3JhdXNhenpvZWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTE5NDAsImV4cCI6MjA5Nzk2Nzk0MH0.YE0CvsTs3XlEJ0n0mBgdKVFy5Nwpys2C0wO96F8F0ho';
+    const IMPORT_FN = SUPABASE_URL + '/functions/v1/import_clips';
     const LIMIT = 300;
     const HEADERS = { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY };
 
-    const q = document.getElementById('q');
-    const srcSel = document.getElementById('src');
-    const catSel = document.getElementById('cat');
-    const status = document.getElementById('status');
-    const results = document.getElementById('results');
-    const clearBtn = document.getElementById('clear');
-    const toast = document.getElementById('toast');
+    const $ = id => document.getElementById(id);
+    const q=$('q'), srcSel=$('src'), catSel=$('cat'), status=$('status'), results=$('results'), clearBtn=$('clear'), toast=$('toast');
     let reqId = 0;
 
-    // total count for the header
-    fetch(SUPABASE_URL + '/rest/v1/clips?select=pk&limit=1', { headers: { ...HEADERS, Prefer: 'count=exact' } })
-      .then(r => { const t = (r.headers.get('content-range')||'').split('/')[1]; if(t) document.getElementById('totalCount').textContent = (+t).toLocaleString(); })
-      .catch(()=>{});
+    // ---- theme toggle ----
+    $('themeBtn').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', cur);
+      try { localStorage.setItem('clips-theme', cur); } catch(e){}
+    });
 
-    // dropdowns
-    fetch(SUPABASE_URL + '/rest/v1/rpc/clip_filters', {
-      method:'POST', headers:{ ...HEADERS, 'Content-Type':'application/json' }, body:'{}'
-    }).then(r=>r.json()).then(f=>{ fill(srcSel, f.datasets||[]); fill(catSel, f.categories||[]); }).catch(()=>{});
+    // ---- header total + dropdowns ----
+    loadTotal(); loadFilters();
+    function loadTotal(){
+      fetch(SUPABASE_URL + '/rest/v1/clips?select=pk&limit=1', { headers:{ ...HEADERS, Prefer:'count=exact' } })
+        .then(r => { const t=(r.headers.get('content-range')||'').split('/')[1]; if(t) $('totalCount').textContent=(+t).toLocaleString(); }).catch(()=>{});
+    }
+    function loadFilters(){
+      fetch(SUPABASE_URL + '/rest/v1/rpc/clip_filters', { method:'POST', headers:{ ...HEADERS,'Content-Type':'application/json' }, body:'{}' })
+        .then(r=>r.json()).then(f=>{ resetSel(srcSel,'All datasets',f.datasets||[]); resetSel(catSel,'All categories',f.categories||[]); }).catch(()=>{});
+    }
 
-    q.addEventListener('input', () => { clearBtn.style.display = q.value ? 'block' : 'none'; debounced(); });
+    q.addEventListener('input', () => { clearBtn.style.display = q.value ? 'block':'none'; debounced(); });
     srcSel.addEventListener('change', run);
     catSel.addEventListener('change', run);
     clearBtn.addEventListener('click', () => { q.value=''; clearBtn.style.display='none'; q.focus(); run(); });
     document.addEventListener('keydown', e => {
-      if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus(); }
-      if (e.key === 'Escape' && document.activeElement === q) { q.value=''; clearBtn.style.display='none'; run(); }
+      if (e.key==='/' && document.activeElement!==q && !isModalOpen()){ e.preventDefault(); q.focus(); }
+      if (e.key==='Escape'){ if(isModalOpen()) closeModal(); else if(document.activeElement===q){ q.value=''; clearBtn.style.display='none'; run(); } }
     });
     const debounced = debounce(run, 160);
 
     async function run(){
-      const term = q.value.trim(), src = srcSel.value, cat = catSel.value;
-      if (!term && !cat && !src){ status.innerHTML = 'Start typing to search…  <span class="kbd">/</span> to focus'; results.innerHTML=''; return; }
-
+      const term=q.value.trim(), src=srcSel.value, cat=catSel.value;
+      if (!term && !cat && !src){ status.innerHTML='Start typing to search…  <span class="kbd">/</span> to focus'; results.innerHTML=''; return; }
       const mine = ++reqId;
-      results.innerHTML = Array.from({length:6}).map(()=> '<div class="skel"></div>').join('');
+      results.innerHTML = Array.from({length:6}).map(()=>'<div class="skel"></div>').join('');
       status.textContent = 'Searching…';
-
       const p = new URLSearchParams();
       p.set('select','id,code,title,category,library_status,ai_confidence,dropbox_url,r2_url,dataset');
-      p.set('limit', LIMIT);
-      p.set('order','ai_confidence.desc.nullslast');
+      p.set('limit', LIMIT); p.set('order','ai_confidence.desc.nullslast');
       if (term) p.set('search_text','ilike.*'+term+'*');
       if (cat)  p.set('category','eq.'+cat);
       if (src)  p.set('dataset','eq.'+src);
-
       const t0 = performance.now();
       try{
         const res = await fetch(SUPABASE_URL + '/rest/v1/clips?' + p.toString(), { headers:{ ...HEADERS, Prefer:'count=exact' } });
-        if (mine !== reqId) return;
+        if (mine!==reqId) return;
         const rows = await res.json();
-        const ms = Math.max(1, Math.round(performance.now() - t0));
-        const total = parseInt((res.headers.get('content-range')||'').split('/')[1], 10) || rows.length;
-
-        if (!rows.length){
-          status.textContent = '';
-          results.innerHTML = emptyState(term || cat || src);
-          return;
-        }
+        const ms = Math.max(1, Math.round(performance.now()-t0));
+        const total = parseInt((res.headers.get('content-range')||'').split('/')[1],10) || rows.length;
+        if (!rows.length){ status.textContent=''; results.innerHTML=emptyState(term||cat||src); return; }
         status.innerHTML = '<b style="color:var(--text)">'+total.toLocaleString()+'</b>&nbsp;result'+(total===1?'':'s')+
-          (total>rows.length ? ' · showing first '+rows.length : '') + ' · <span style="color:var(--good)">'+ms+' ms</span>';
+          (total>rows.length?' · showing first '+rows.length:'') + ' · <span style="color:var(--good)">'+ms+' ms</span>';
         results.innerHTML = rows.map(card).join('');
-      }catch(e){
-        if (mine !== reqId) return;
-        status.textContent = 'Error: ' + e.message;
-        results.innerHTML = '';
-      }
+      }catch(e){ if(mine!==reqId) return; status.textContent='Error: '+e.message; results.innerHTML=''; }
     }
 
-    // copy via delegation
     results.addEventListener('click', e => {
       const el = e.target.closest('[data-copy]'); if(!el) return;
-      navigator.clipboard.writeText(el.dataset.copy).then(()=>{
-        showToast('Copied to clipboard');
-        if (el.classList.contains('btn')){ el.classList.add('copied'); const t=el.dataset.label||el.textContent; el.textContent='Copied ✓'; setTimeout(()=>{ el.classList.remove('copied'); el.textContent=t; },1200); }
-      });
+      navigator.clipboard.writeText(el.dataset.copy).then(()=>{ showToast('Copied to clipboard');
+        if(el.classList.contains('btn')){ el.classList.add('copied'); const t=el.dataset.label||el.textContent; el.textContent='Copied ✓'; setTimeout(()=>{el.classList.remove('copied'); el.textContent=t;},1200);} });
     });
+
+    // ---- import modal ----
+    $('importBtn').addEventListener('click', openModal);
+    $('importClose').addEventListener('click', closeModal);
+    $('impCancel').addEventListener('click', closeModal);
+    $('importModal').addEventListener('click', e => { if(e.target.id==='importModal') closeModal(); });
+    $('impRun').addEventListener('click', runImport);
+    $('impFile').addEventListener('change', () => { const f=$('impFile').files[0]; if(f && !$('impDataset').value) $('impDataset').value = f.name.replace(/\.csv$/i,''); });
+
+    function isModalOpen(){ return !$('importModal').hasAttribute('hidden'); }
+    function openModal(){ $('importModal').removeAttribute('hidden'); setImp('',''); $('impPass').focus(); }
+    function closeModal(){ $('importModal').setAttribute('hidden',''); }
+    function setImp(msg, cls){ const s=$('impStatus'); s.textContent=msg; s.className='mprogress'+(cls?' '+cls:''); }
+
+    async function runImport(){
+      const pass=$('impPass').value.trim(), dataset=$('impDataset').value.trim(), file=$('impFile').files[0];
+      if(!pass){ setImp('Enter the import passphrase.','err'); return; }
+      if(!file){ setImp('Choose a CSV file.','err'); return; }
+      setImp('Reading file…');
+      let text; try{ text = await file.text(); }catch(e){ setImp('Could not read file.','err'); return; }
+      const objs = csvToObjects(text);
+      if(!objs.length){ setImp('No data rows found in the file.','err'); return; }
+
+      $('impRun').disabled = true;
+      const SIZE = 1000; let done = 0, failed = false;
+      try{
+        for(let i=0;i<objs.length;i+=SIZE){
+          const batch = objs.slice(i, i+SIZE);
+          setImp('Importing… '+done+' / '+objs.length);
+          const res = await fetch(IMPORT_FN, {
+            method:'POST',
+            headers:{ 'Content-Type':'application/json', 'x-admin-token':pass, apikey:ANON_KEY },
+            body: JSON.stringify({ dataset: dataset||'imported', rows: batch })
+          });
+          if(!res.ok){ const j=await res.json().catch(()=>({})); throw new Error(j.error || ('HTTP '+res.status)); }
+          done += batch.length;
+        }
+      }catch(e){ failed=true; setImp('Import failed: '+e.message, 'err'); }
+      $('impRun').disabled = false;
+      if(failed) return;
+      setImp('✓ Imported '+done.toLocaleString()+' rows into “'+(dataset||'imported')+'”.', 'ok');
+      showToast('Imported '+done.toLocaleString()+' clips');
+      loadTotal(); loadFilters();
+    }
+
+    // parse CSV (RFC-style: quotes, commas, newlines) -> array of objects keyed by header
+    function csvToObjects(text){
+      if(text.charCodeAt(0)===0xFEFF) text = text.slice(1); // strip BOM
+      const rows=[]; let f='', row=[], inQ=false;
+      for(let i=0;i<text.length;i++){ const c=text[i];
+        if(inQ){ if(c==='"'){ if(text[i+1]==='"'){f+='"';i++;} else inQ=false; } else f+=c; }
+        else { if(c==='"') inQ=true; else if(c===','){ row.push(f); f=''; } else if(c==='\n'){ row.push(f); rows.push(row); row=[]; f=''; } else if(c!=='\r') f+=c; }
+      }
+      if(f!=='' || row.length){ row.push(f); rows.push(row); }
+      if(rows.length<2) return [];
+      const header = rows[0].map(h=>h.trim().toLowerCase());
+      const out=[];
+      for(let r=1;r<rows.length;r++){
+        if(rows[r].length===1 && rows[r][0].trim()==='') continue;
+        const o={}; header.forEach((h,idx)=>{ o[h]=rows[r][idx]; });
+        out.push(o);
+      }
+      return out;
+    }
 
     // ---- render ----
     function card(r){
-      const h = hue(r.category);
-      const lvl = confLevel(r.ai_confidence);
+      const h=hue(r.category), lvl=confLevel(r.ai_confidence);
       const cat = r.category ? '<span class="cat" style="--h:'+h+'">'+esc(r.category)+'</span>' : '<span class="cat" style="--h:250">Uncategorized</span>';
       const conf = '<span class="conf '+lvl.k+'"><span class="dot"></span>'+lvl.t+'</span>';
-      let acts = '';
-      if (r.r2_url) acts += '<a class="btn primary" href="'+esc(r.r2_url)+'" target="_blank" rel="noopener">'+play()+'R2</a>';
-      if (r.dropbox_url) acts += '<a class="btn" href="'+esc(r.dropbox_url)+'" target="_blank" rel="noopener">Dropbox</a>';
-      const copyUrl = r.r2_url || r.dropbox_url;
-      if (copyUrl) acts += '<button class="btn ghost" data-copy="'+esc(copyUrl)+'" data-label="Copy link">'+link()+'Copy link</button>';
+      let acts='';
+      if(r.r2_url) acts += '<a class="btn primary" href="'+esc(r.r2_url)+'" target="_blank" rel="noopener">'+play()+'R2</a>';
+      if(r.dropbox_url) acts += '<a class="btn" href="'+esc(r.dropbox_url)+'" target="_blank" rel="noopener">Dropbox</a>';
+      const cp=r.r2_url||r.dropbox_url; if(cp) acts += '<button class="btn ghost" data-copy="'+esc(cp)+'" data-label="Copy link">'+link()+'Copy link</button>';
       return '<article class="card">'+
         '<div class="card-top">'+cat+conf+'</div>'+
         '<h3 class="title" title="'+esc(r.title||'')+'">'+esc(r.title||'Untitled')+'</h3>'+
-        '<div class="chips">'+
-          '<span class="chip code copy" data-copy="'+esc(r.code||'')+'" title="'+esc(r.code||'')+' — click to copy">'+
-            '<span class="ctext">'+esc(r.code||'—')+'</span><span class="cicon">⧉</span></span>'+
-        '</div>'+
-        '<div class="chips">'+
-          '<span class="chip">ID '+esc(r.id)+'</span>'+
-          '<span class="chip status">'+esc(r.library_status||'—')+'</span>'+
-          '<span class="chip">'+esc(r.dataset)+'</span>'+
-        '</div>'+
-        (acts ? '<div class="actions">'+acts+'</div>' : '')+
+        '<div class="chips"><span class="chip code copy" data-copy="'+esc(r.code||'')+'" title="'+esc(r.code||'')+' — click to copy"><span class="ctext">'+esc(r.code||'—')+'</span><span class="cicon">⧉</span></span></div>'+
+        '<div class="chips"><span class="chip">ID '+esc(r.id)+'</span><span class="chip status">'+esc(r.library_status||'—')+'</span><span class="chip">'+esc(r.dataset)+'</span></div>'+
+        (acts?'<div class="actions">'+acts+'</div>':'')+
       '</article>';
     }
-    function emptyState(t){
-      return '<div class="empty">'+
-        '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>'+
-        '<h3>No matches</h3><p>Nothing found for “'+esc(t)+'”. Try a different term, code, or ID.</p></div>';
-    }
+    function emptyState(t){ return '<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><h3>No matches</h3><p>Nothing found for “'+esc(t)+'”. Try a different term, code, or ID.</p></div>'; }
 
     // ---- helpers ----
-    function confLevel(v){ if(v==null||v==='') return {k:'none',t:'—'};
-      const n=+v; return { k:n>=.7?'high':n>=.4?'mid':'low', t:n.toFixed(2) }; }
+    function confLevel(v){ if(v==null||v==='') return {k:'none',t:'—'}; const n=+v; return {k:n>=.7?'high':n>=.4?'mid':'low', t:n.toFixed(2)}; }
     function hue(s){ if(!s) return 250; let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))%360; return h; }
-    function fill(sel, vals){ vals.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); }); }
+    function resetSel(sel, first, vals){ sel.innerHTML='<option value="">'+first+'</option>'; vals.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); }); }
     function debounce(fn,ms){ let t; return ()=>{ clearTimeout(t); t=setTimeout(fn,ms); }; }
     function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     let toastT; function showToast(m){ toast.textContent=m; toast.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>toast.classList.remove('show'),1600); }
