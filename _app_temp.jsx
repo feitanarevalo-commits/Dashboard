@@ -2361,21 +2361,10 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const leadgenNames=(config.users||[]).filter(u=>u.role==='leadgen').map(u=>u.name);
   const newHires=(config.newHires&&config.newHires.length?config.newHires:['Bella','Mica']);
 
-  // Editable quotas — local for instant recompute, debounced-persisted to config.
-  const seededQuotas=mergeQuotas(defaultQuotas(campaigns), config.quotas);
-  const [quotas,setQuotas]=useState(seededQuotas);
-  const quotaSaveRef=useRef(null);
-  function editQuota(tier,camp,raw){
-    const v=raw===''?0:Math.max(0,Number(raw)||0);
-    setQuotas(q=>{
-      const next={...q,[tier]:{...q[tier],[period]:{...(q[tier][period]||{}),[camp]:v}}};
-      if(onSaveConfig){
-        if(quotaSaveRef.current) clearTimeout(quotaSaveRef.current);
-        quotaSaveRef.current=setTimeout(()=>{ onSaveConfig({...config, quotas:next, newHires}); }, 700);
-      }
-      return next;
-    });
-  }
+  // Quotas are READ here (status/sort); they're edited in Customize → Settings.
+  // Computed fresh each render (not useState) so it always reflects the loaded
+  // campaigns — seeding off first-render campaigns would lock onto stale ids.
+  const quotas=mergeQuotas(defaultQuotas(campaigns), config.quotas);
 
   // ── Period window (by dateAssigned) ─────────────────────────
   const today=new Date(); today.setHours(0,0,0,0);
@@ -2492,29 +2481,6 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
 
   const canOpenRep=name=>!!onOpenRep && allReps.includes(name);
 
-  // Reusable quota-editor row.
-  function QuotaRow(tier,label,mb){
-    const qset=(quotas[tier]||{})[period]||{};
-    return (
-      <div key={tier} style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',background:'var(--card)',border:'1px solid var(--border)',borderRadius:14,padding:'13px 18px',marginBottom:mb}}>
-        <span style={{fontSize:12,fontWeight:700,letterSpacing:'.04em',textTransform:'uppercase',color:'var(--text-dim)'}}>{label}</span>
-        <div style={{display:'flex',gap:10,flexWrap:'wrap',marginLeft:'auto',alignItems:'center'}}>
-          {campDefs.map(c=>(
-            <label key={c.id} style={{display:'inline-flex',alignItems:'center',gap:9,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:'6px 8px 6px 12px'}}>
-              <span style={{display:'inline-flex',alignItems:'center',gap:7,fontSize:12.5,fontWeight:700,color:'var(--text-dim)'}}>
-                <span style={{width:9,height:9,borderRadius:'50%',background:c.color}}/>{c.label}
-              </span>
-              <input type="number" min="0" value={qset[c.id]!=null?qset[c.id]:0} disabled={!isAdmin}
-                onChange={e=>editQuota(tier,c.id,e.target.value)}
-                style={{width:66,border:'1px solid var(--border)',background:isAdmin?'var(--card)':'transparent',borderRadius:7,padding:'6px 9px',fontFamily:MONO,fontSize:14,fontWeight:600,color:'var(--text)',textAlign:'right'}}/>
-            </label>
-          ))}
-        </div>
-      </div>
-    );
-  }
-  const quotaWord={daily:'Daily quota',weekly:'Weekly quota',monthly:'Monthly quota'}[period];
-
   return (
     <div className="home-content" style={{fontFamily:SG,color:'var(--text)',padding:'28px 24px 56px'}}>
       <div style={{maxWidth:980,margin:'0 auto'}}>
@@ -2530,13 +2496,6 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
             ))}
           </div>
         </div>
-
-        {/* Quota editors (admin) */}
-        {isAdmin && <>
-          {QuotaRow('main', quotaWord, 10)}
-          {QuotaRow('newHire', `New-hire ${quotaWord.toLowerCase()} · ${newHires.join(' · ')}`, 10)}
-          {QuotaRow('jc', `JC ${quotaWord.toLowerCase()}`, 14)}
-        </>}
 
         {/* Day picker (daily only) */}
         <div style={{maxHeight:period==='daily'?80:0, opacity:period==='daily'?1:0, overflow:'hidden', transition:'max-height .3s cubic-bezier(.4,0,.2,1),opacity .24s ease'}}>
@@ -5087,6 +5046,26 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   function addCamp(){const lab=newCamp.label.trim().toUpperCase();if(!lab)return;setLocal(l=>({...l,campaigns:[...l.campaigns,{id:lab,label:lab,color:newCamp.color}]}));setNewCamp({label:'',color:'#1366D6'});}
   function remCamp(id){setLocal(l=>({...l,campaigns:l.campaigns.filter(c=>c.id!==id)}));}
   function updCampColor(id,col){setLocal(l=>({...l,campaigns:l.campaigns.map(c=>c.id===id?{...c,color:col}:c)}));}
+  // ── Sales-rep quota editor ──────────────────────────────────
+  // Quotas drive the Home Performance-KPI board (contacted target per tier per
+  // campaign). Seeded off the CURRENT (loaded) campaigns so ids always match.
+  const [qPeriod,setQPeriod]=useState('monthly');
+  const localQuotas=mergeQuotas(defaultQuotas(local.campaigns||[]), local.quotas);
+  const localNewHires=(local.newHires&&local.newHires.length?local.newHires:['Bella','Mica']);
+  function editQuota(tier,camp,raw){
+    const v=raw===''?0:Math.max(0,Number(raw)||0);
+    setLocal(l=>{
+      const base=mergeQuotas(defaultQuotas(l.campaigns||[]), l.quotas);
+      base[tier]={...base[tier],[qPeriod]:{...(base[tier][qPeriod]||{}),[camp]:v}};
+      return {...l, quotas:base, newHires:localNewHires};
+    });
+  }
+  function toggleNewHire(name){
+    setLocal(l=>{ const cur=(l.newHires&&l.newHires.length?l.newHires:['Bella','Mica']);
+      const next=cur.includes(name)?cur.filter(n=>n!==name):[...cur,name];
+      return {...l, newHires:next}; });
+  }
+  const QUOTA_TIERS=[{key:'main',label:'Main quota'},{key:'newHire',label:`New-hire · ${localNewHires.join(' · ')}`},{key:'jc',label:'JC quota'}];
   function apply(){
     onConfig(local);
     // Persist any typed Close keys (write-only; blank = leave the existing one).
@@ -5173,6 +5152,52 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
                 <input placeholder="Campaign name..." value={newCamp.label} onChange={e=>setNewCamp(n=>({...n,label:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&addCamp()} style={{flex:1}}/>
                 <button className="btn btn-outline btn-xs" onClick={addCamp}>+ Add</button>
               </div>
+            </div>
+          </div>
+          <div className="drawer-section">
+            <div className="drawer-section-title">Sales Rep Quotas <span style={{fontSize:9,opacity:.6}}>Home KPI targets</span></div>
+            <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:10,lineHeight:1.5}}>
+              Contacted-lead targets that drive the Home “Performance KPI” board. Set them per period and campaign.
+            </div>
+            {/* period sub-toggle */}
+            <div style={{display:'inline-flex',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:9,padding:3,gap:2,marginBottom:12}}>
+              {['daily','weekly','monthly'].map(p=>(
+                <button key={p} onClick={()=>setQPeriod(p)}
+                  style={{border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:12,fontWeight:600,padding:'5px 12px',borderRadius:7,textTransform:'capitalize',
+                    background:qPeriod===p?'var(--text)':'transparent',color:qPeriod===p?'var(--card)':'var(--text-dim)'}}>{p}</button>
+              ))}
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {QUOTA_TIERS.map(t=>{
+                const qset=(localQuotas[t.key]||{})[qPeriod]||{};
+                return (
+                  <div key={t.key} style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'11px 13px'}}>
+                    <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em',color:'var(--text-dim)',marginBottom:9}}>{t.label}</div>
+                    <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                      {(local.campaigns||[]).map(c=>(
+                        <label key={c.id} style={{display:'inline-flex',alignItems:'center',gap:8,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:9,padding:'5px 7px 5px 10px'}}>
+                          <span style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:12,fontWeight:700,color:'var(--text-dim)'}}>
+                            <span style={{width:8,height:8,borderRadius:'50%',background:c.color}}/>{c.label}
+                          </span>
+                          <input type="number" min="0" value={qset[c.id]!=null?qset[c.id]:0}
+                            onChange={e=>editQuota(t.key,c.id,e.target.value)}
+                            style={{width:60,border:'1px solid var(--border)',background:'var(--card)',borderRadius:6,padding:'5px 7px',fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:600,color:'var(--text)',textAlign:'right'}}/>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em',color:'var(--text-dim)',margin:'14px 0 8px'}}>Who counts as a new hire</div>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+              {(local.salesReps||[]).map(r=>{ const on=localNewHires.includes(r);
+                return (
+                  <button key={r} onClick={()=>toggleNewHire(r)}
+                    style={{cursor:'pointer',fontFamily:'inherit',fontSize:12,fontWeight:600,padding:'5px 11px',borderRadius:99,border:'1px solid '+(on?'transparent':'var(--border)'),
+                      background:on?'var(--accent)':'transparent',color:on?'#fff':'var(--text-dim)'}}>{on?'✓ ':''}{r}</button>
+                );
+              })}
             </div>
           </div>
           <div className="drawer-section">
