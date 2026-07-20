@@ -3506,11 +3506,22 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const dayContacted=isDayView
     ? myLeads.filter(l=>isDirectContacted(l) && String(l.lastContactDate||'').slice(0,10)===quotaDay).length
     : myLeads.filter(isDirectContacted).length;
-  // ALL-TIME open potentials per campaign — the rep's real current pipeline. These
-  // sum to the "Potential" card so every number on the dashboard is consistent
-  // with the rep's actual leads (not scoped to a single day).
-  const openPotential=(campId)=>potentialLeads.filter(l=>!isContacted(l)&&(l.campaigns||[]).includes(campId)).length;
-  const openTotalAll=potentialLeads.filter(l=>!isContacted(l)).length;
+  // ── Metric strip scope ─────────────────────────────────────
+  // The strip must describe WHAT THE REP IS LOOKING AT. It used to mix scopes:
+  // Total/Potential/HT/Fresh were all-time while the table (and Contacted) were
+  // scoped to the viewing day — so JC saw "High Ticket 40" above a filtered table
+  // showing 36, because 4 of those HT leads were assigned on a different day.
+  // Now every tile follows the viewing day, and "All dates" restores the full totals.
+  const scopedLeads=isDayView?myLeads.filter(dayMatch):myLeads;
+  const sTotal=scopedLeads.filter(isWorkable).length;
+  const sPotentialLeads=scopedLeads.filter(l=>l.tags.includes('Potential'));
+  const sPotential=sPotentialLeads.length;
+  const sFresh=scopedLeads.filter(l=>isWorkable(l)&&isFresh(l)).length;
+  const sHt=scopedLeads.filter(l=>l.tags.includes('HT')).length;
+  const scopeNote=isDayView?(quotaDay===todayStr?'today':quotaDay):'all dates';
+  // Open (uncontacted) potentials per campaign, same scope as the tiles above.
+  const openPotential=(campId)=>sPotentialLeads.filter(l=>!isContacted(l)&&(l.campaigns||[]).includes(campId)).length;
+  const openTotalAll=sPotentialLeads.filter(l=>!isContacted(l)).length;
 
   const repColor=(config.repColors||{})[rep]||'#5b5bd6';
   // ── Redesigned rep header (compact dark top zone) ──
@@ -3540,15 +3551,19 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   // Horizontal metric strip (replaces the old two stat-card rows). Fixed rep
   // metrics, then one tile per campaign (open potentials), plus a lead-gen
   // "handed off" tally when relevant. All numbers reuse the counts computed above.
+  // Every tile is scoped to the viewing day (scopeNote says which), so the strip
+  // always agrees with the table underneath it. Tooltips carry the all-time figure.
   const stripMetrics=[
-    {label:'Total',chip:'#818cf8',val:'#c7d2fe',value:total,title:`${rep}'s workable leads = Potential + High Ticket (${totalAssigned} total assigned incl. pending/contacted)`},
-    {label:'Potential',chip:'#34d399',val:'#a7f3d0',value:potential},
-    {label:'Fresh',chip:'#a1a1aa',val:'#e4e4e7',value:fresh,title:'Fresh Potential/HT leads not yet on Close — the import queue'},
+    {label:'Total',chip:'#818cf8',val:'#c7d2fe',value:sTotal,title:`Workable leads (Potential + High Ticket) for ${scopeNote} — ${total} all dates, out of ${totalAssigned} ever assigned incl. pending/contacted`},
+    {label:'Potential',chip:'#34d399',val:'#a7f3d0',value:sPotential,title:`Potential leads for ${scopeNote} — ${potential} all dates`},
+    {label:'Fresh',chip:'#a1a1aa',val:'#e4e4e7',value:sFresh,title:`Fresh Potential/HT leads not yet on Close (the import queue) for ${scopeNote} — ${fresh} all dates`},
     {label:!isDayView?'Contacted (all)':(quotaDay===todayStr?'Contacted (today)':'Contacted (that day)'),chip:'#e4e4e7',val:'#ffffff',value:dayContacted,title:'Contacted count for the viewing day (or all dates)'},
-    {label:'High Ticket',chip:'#fb923c',val:'#fed7aa',value:ht},
+    {label:'High Ticket',chip:'#fb923c',val:'#fed7aa',value:sHt,title:`High Ticket leads for ${scopeNote} — ${ht} all dates`},
     ...(config.campaigns||[]).map(c=>({label:c.label,chip:c.color,val:c.color,value:openPotential(c.id),title:`${rep}'s open (uncontacted) Potential leads in ${c.label}`})),
   ];
-  if(isLeadgen||handedOffCount>0) stripMetrics.push({label:'Handed Off',chip:'#a78bfa',val:'#ddd6fe',value:handedOffCount,title:`Leads ${rep} qualified & handed to the sales team — credited to ${rep} even after reassignment`});
+  // Handed Off is a lifetime credit (it follows qualifiedBy across reassignment),
+  // so it is deliberately NOT day-scoped and doesn't carry the scope caption.
+  if(isLeadgen||handedOffCount>0) stripMetrics.push({label:'Handed Off',chip:'#a78bfa',val:'#ddd6fe',value:handedOffCount,scoped:false,title:`Leads ${rep} qualified & handed to the sales team — all time, credited to ${rep} even after reassignment`});
   const srFilename=`${rep}${srCsvCampaign?'_'+srCsvCampaign.replace(/[^\w]+/g,''):''}${isDayView?'_'+quotaDay:''}_smartreach.csv`;
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
@@ -3616,7 +3631,12 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
                 <span style={{width:8,height:8,borderRadius:3,background:m.chip,flexShrink:0}}></span>
                 <span style={{fontSize:10.5,textTransform:'uppercase',letterSpacing:'.06em',color:'#8b8b96',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.label}</span>
               </div>
-              <div style={{fontFamily:SG,fontSize:23,fontWeight:700,color:m.val,lineHeight:1}}>{m.value}</div>
+              <div style={{display:'flex',alignItems:'baseline',gap:6,minWidth:0}}>
+                <span style={{fontFamily:SG,fontSize:23,fontWeight:700,color:m.val,lineHeight:1}}>{m.value}</span>
+                {/* Say which slice this is, so a tile can never be read as an all-time
+                    total while the table below shows a single day. */}
+                {m.scoped!==false && <span style={{fontSize:10,color:'#6b6b76',whiteSpace:'nowrap'}}>{scopeNote}</span>}
+              </div>
             </div>
           ))}
         </div>
