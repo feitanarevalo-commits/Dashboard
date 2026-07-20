@@ -2426,6 +2426,39 @@ function HomeView({leads,config,currentUser,onOpenRep=null}) {
     };
   }
 
+  // ── KPI reference: Day / Week / Month, always visible ─────
+  // Fixed windows, deliberately INDEPENDENT of the period toggle, so a card
+  // answers "today / this week / this month" at a glance without switching.
+  //   Potential — counted by DATE ASSIGNED (leads they were given in the window
+  //               that are tagged Potential).
+  //   Contacted — counted by LAST CONTACT DATE (work actually done in the
+  //               window, even on older leads). Same basis as the rep
+  //               dashboard's own "Contacted (today)" tile, so the two agree.
+  //   Scraped   — leads they sourced, by DATE ADDED. Shown only for people who
+  //               actually source (leadgens, and reps who scrape their own).
+  const todayYmd=ymdLocal(new Date());
+  function winStart(days){ const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-(days-1)); return ymdLocal(d); }
+  const KPI_WINDOWS=[{label:'Day',from:winStart(1)},{label:'Week',from:winStart(7)},{label:'Month',from:winStart(30)}];
+  function inWin(dstr,from){ const d=String(dstr||'').slice(0,10); return !!d && d>=from && d<=todayYmd; }
+  function kpiRef(name){
+    const mine=leads.filter(l=>l.assignedTo===name);
+    const src=leads.filter(l=>l.scrapedBy===name);
+    const across=(arr,dateKey,pred)=>KPI_WINDOWS.map(w=>arr.filter(l=>pred(l)&&inWin(l[dateKey],w.from)).length);
+    return {
+      potential: across(mine,'dateAssigned',l=>(l.tags||[]).includes('Potential')),
+      contacted: across(mine,'lastContactDate',isDirectContacted),
+      scraped:   across(src,'addedAt',()=>true),
+    };
+  }
+  // The three rows, ready to render. "Scraped" only appears when they've sourced
+  // something in the last 30 days.
+  function kpiRefRows(name){
+    const k=kpiRef(name);
+    const rows=[{label:'Potential',vals:k.potential},{label:'Contacted',vals:k.contacted}];
+    if(k.scraped[2]>0) rows.push({label:'Scraped',vals:k.scraped});
+    return rows;
+  }
+
   // Rep cards: ranked by volume for the selected period. Reps with nothing in the
   // period are collected into a single "no activity" tile instead of empty cards.
   const rankedReps=[...repRows].sort((a,b)=>b.total-a.total);
@@ -2558,6 +2591,20 @@ function HomeView({leads,config,currentUser,onOpenRep=null}) {
                     <span>Potential <b style={{color:'var(--text)'}}>{r.potential}</b></span>
                     {r.ht>0 && <span>HT <b style={{color:'var(--warn)'}}>{r.ht}</b></span>}
                   </div>
+                  {/* Day / Week / Month reference — fixed windows, not the period toggle */}
+                  <div style={{marginTop:10,paddingTop:9,borderTop:'1px solid var(--border)'}}>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 42px 42px 48px',fontSize:9.5,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-light)',marginBottom:3}}>
+                      <span/>{KPI_WINDOWS.map(w=><span key={w.label} style={{textAlign:'right'}}>{w.label}</span>)}
+                    </div>
+                    {kpiRefRows(r.rep).map(row=>(
+                      <div key={row.label} style={{display:'grid',gridTemplateColumns:'1fr 42px 42px 48px',fontSize:12,padding:'2px 0'}}>
+                        <span style={{color:'var(--text-dim)'}}>{row.label}</span>
+                        {row.vals.map((v,i)=>(
+                          <b key={i} style={{textAlign:'right',fontVariantNumeric:'tabular-nums',color:v?'var(--text)':'var(--text-light)',fontWeight:v?700:500}}>{v}</b>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
                   {campDefs.length>0 && (
                     <div style={{marginTop:11,display:'flex',flexDirection:'column',gap:5}}>
                       {campDefs.map(c=>{
@@ -2640,8 +2687,33 @@ function HomeView({leads,config,currentUser,onOpenRep=null}) {
                 <button className="btn btn-ghost btn-sm" onClick={()=>setDetail('')} title="Close">✕</button>
               </div>
 
+              {/* KPI reference — the standing numbers, independent of the period picker */}
+              <div style={{fontSize:11,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text-light)',marginBottom:8}}>KPI reference</div>
+              <div style={{overflowX:'auto',marginBottom:20}}>
+                <table className="kpi-table">
+                  <thead><tr>
+                    <th>Metric</th>
+                    <th title="Today">Daily</th>
+                    <th title="Last 7 days including today">Weekly</th>
+                    <th title="Last 30 days including today">Monthly</th>
+                    <th>Counted by</th>
+                  </tr></thead>
+                  <tbody>
+                    {kpiRefRows(detail).map(row=>(
+                      <tr key={row.label}>
+                        <td style={{fontWeight:600}}>{row.label}</td>
+                        {row.vals.map((v,i)=><td key={i} style={{fontVariantNumeric:'tabular-nums'}}>{v}</td>)}
+                        <td style={{color:'var(--text-light)',fontSize:12}}>
+                          {row.label==='Potential'?'date assigned':row.label==='Contacted'?'last contact date':'date added'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
               {/* Sales side — leads assigned to them in this period */}
-              <div style={{fontSize:11,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text-light)',marginBottom:8}}>Assigned leads</div>
+              <div style={{fontSize:11,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text-light)',marginBottom:8}}>Assigned leads <span style={{textTransform:'none',letterSpacing:0}}>({rangeLabel})</span></div>
               {d.total===0
                 ? <div style={{fontSize:13,color:'var(--text-dim)',padding:'6px 0 4px'}}>No leads assigned in this period.</div>
                 : <React.Fragment>

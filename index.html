@@ -5336,6 +5336,65 @@ function HomeView({
     };
   }
 
+  // ── KPI reference: Day / Week / Month, always visible ─────
+  // Fixed windows, deliberately INDEPENDENT of the period toggle, so a card
+  // answers "today / this week / this month" at a glance without switching.
+  //   Potential — counted by DATE ASSIGNED (leads they were given in the window
+  //               that are tagged Potential).
+  //   Contacted — counted by LAST CONTACT DATE (work actually done in the
+  //               window, even on older leads). Same basis as the rep
+  //               dashboard's own "Contacted (today)" tile, so the two agree.
+  //   Scraped   — leads they sourced, by DATE ADDED. Shown only for people who
+  //               actually source (leadgens, and reps who scrape their own).
+  const todayYmd = ymdLocal(new Date());
+  function winStart(days) {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - (days - 1));
+    return ymdLocal(d);
+  }
+  const KPI_WINDOWS = [{
+    label: 'Day',
+    from: winStart(1)
+  }, {
+    label: 'Week',
+    from: winStart(7)
+  }, {
+    label: 'Month',
+    from: winStart(30)
+  }];
+  function inWin(dstr, from) {
+    const d = String(dstr || '').slice(0, 10);
+    return !!d && d >= from && d <= todayYmd;
+  }
+  function kpiRef(name) {
+    const mine = leads.filter(l => l.assignedTo === name);
+    const src = leads.filter(l => l.scrapedBy === name);
+    const across = (arr, dateKey, pred) => KPI_WINDOWS.map(w => arr.filter(l => pred(l) && inWin(l[dateKey], w.from)).length);
+    return {
+      potential: across(mine, 'dateAssigned', l => (l.tags || []).includes('Potential')),
+      contacted: across(mine, 'lastContactDate', isDirectContacted),
+      scraped: across(src, 'addedAt', () => true)
+    };
+  }
+  // The three rows, ready to render. "Scraped" only appears when they've sourced
+  // something in the last 30 days.
+  function kpiRefRows(name) {
+    const k = kpiRef(name);
+    const rows = [{
+      label: 'Potential',
+      vals: k.potential
+    }, {
+      label: 'Contacted',
+      vals: k.contacted
+    }];
+    if (k.scraped[2] > 0) rows.push({
+      label: 'Scraped',
+      vals: k.scraped
+    });
+    return rows;
+  }
+
   // Rep cards: ranked by volume for the selected period. Reps with nothing in the
   // period are collected into a single "no activity" tile instead of empty cards.
   const rankedReps = [...repRows].sort((a, b) => b.total - a.total);
@@ -5677,7 +5736,48 @@ function HomeView({
       style: {
         color: 'var(--warn)'
       }
-    }, r.ht))), campDefs.length > 0 && /*#__PURE__*/React.createElement("div", {
+    }, r.ht))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 10,
+        paddingTop: 9,
+        borderTop: '1px solid var(--border)'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'grid',
+        gridTemplateColumns: '1fr 42px 42px 48px',
+        fontSize: 9.5,
+        textTransform: 'uppercase',
+        letterSpacing: '.06em',
+        color: 'var(--text-light)',
+        marginBottom: 3
+      }
+    }, /*#__PURE__*/React.createElement("span", null), KPI_WINDOWS.map(w => /*#__PURE__*/React.createElement("span", {
+      key: w.label,
+      style: {
+        textAlign: 'right'
+      }
+    }, w.label))), kpiRefRows(r.rep).map(row => /*#__PURE__*/React.createElement("div", {
+      key: row.label,
+      style: {
+        display: 'grid',
+        gridTemplateColumns: '1fr 42px 42px 48px',
+        fontSize: 12,
+        padding: '2px 0'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--text-dim)'
+      }
+    }, row.label), row.vals.map((v, i) => /*#__PURE__*/React.createElement("b", {
+      key: i,
+      style: {
+        textAlign: 'right',
+        fontVariantNumeric: 'tabular-nums',
+        color: v ? 'var(--text)' : 'var(--text-light)',
+        fontWeight: v ? 700 : 500
+      }
+    }, v))))), campDefs.length > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 11,
         display: 'flex',
@@ -5907,7 +6007,49 @@ function HomeView({
         color: 'var(--text-light)',
         marginBottom: 8
       }
-    }, "Assigned leads"), d.total === 0 ? /*#__PURE__*/React.createElement("div", {
+    }, "KPI reference"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        overflowX: 'auto',
+        marginBottom: 20
+      }
+    }, /*#__PURE__*/React.createElement("table", {
+      className: "kpi-table"
+    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Metric"), /*#__PURE__*/React.createElement("th", {
+      title: "Today"
+    }, "Daily"), /*#__PURE__*/React.createElement("th", {
+      title: "Last 7 days including today"
+    }, "Weekly"), /*#__PURE__*/React.createElement("th", {
+      title: "Last 30 days including today"
+    }, "Monthly"), /*#__PURE__*/React.createElement("th", null, "Counted by"))), /*#__PURE__*/React.createElement("tbody", null, kpiRefRows(detail).map(row => /*#__PURE__*/React.createElement("tr", {
+      key: row.label
+    }, /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontWeight: 600
+      }
+    }, row.label), row.vals.map((v, i) => /*#__PURE__*/React.createElement("td", {
+      key: i,
+      style: {
+        fontVariantNumeric: 'tabular-nums'
+      }
+    }, v)), /*#__PURE__*/React.createElement("td", {
+      style: {
+        color: 'var(--text-light)',
+        fontSize: 12
+      }
+    }, row.label === 'Potential' ? 'date assigned' : row.label === 'Contacted' ? 'last contact date' : 'date added')))))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        textTransform: 'uppercase',
+        letterSpacing: '.07em',
+        color: 'var(--text-light)',
+        marginBottom: 8
+      }
+    }, "Assigned leads ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        textTransform: 'none',
+        letterSpacing: 0
+      }
+    }, "(", rangeLabel, ")")), d.total === 0 ? /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 13,
         color: 'var(--text-dim)',
