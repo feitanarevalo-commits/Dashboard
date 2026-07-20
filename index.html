@@ -14242,29 +14242,75 @@ function App() {
     // included). Only fills a missing human scraper, so it's never overwritten
     // on reassignment: JC scrapes → handed to Mikka → still reads JC.
     if (updated.assignedTo && !humanScraper(updated)) updated.scrapedBy = updated.assignedTo;
+    let stampedContact = false,
+      requalified = false;
     if (old && !old.tags.includes('Contacted') && upd.tags.includes('Contacted')) {
       updated.lastContactDate = ymdLocal(new Date());
-      addToast(`"${upd.channelName}" marked Contacted — date recorded`, 'success');
+      stampedContact = true;
     }
     // Qualifying a recycled lead (For Recycle → Potential): it's an already-worked
     // (Imported) lead, and re-engaging resets its recycle clock for the next cycle.
     if (old && old.tags.includes('For Recycle') && upd.tags.includes('Potential')) {
       updated.imported = true;
       updated.lastContactDate = ymdLocal(new Date());
-      addToast(`"${upd.channelName}" re-qualified as Potential — recycle clock reset`, 'success');
+      requalified = true;
     }
     // Record what actually changed on the lead's own timeline (who + exactly when).
     const evs = diffHistory(old, updated, currentUser && currentUser.name || '');
     if (evs.length) updated.history = pushHist(updated, evs);
     setLeads(ls => ls.map(l => l.id === updated.id ? updated : l));
-    // Only offer undo when something undo-able actually changed — otherwise the
-    // History tab fills with dead "Undo" buttons on no-op background writes.
-    const undo = old && evs.length ? {
+    queueEditLog({
+      old,
+      updated,
+      evs,
+      stampedContact,
+      requalified
+    });
+  }
+  // A bulk action (the Apply bar) calls saveL once per selected lead, all in the
+  // SAME tick. Logging each one separately meant a 12-lead tag wrote 12 history
+  // rows — and Undo on any of them reverted exactly ONE lead, which reads as
+  // "undo doesn't work". So same-tick edits are collected and flushed as ONE
+  // entry whose undo payload covers every lead in the action.
+  const editBatchRef = useRef(null);
+  function queueEditLog(item) {
+    if (editBatchRef.current) {
+      editBatchRef.current.push(item);
+      return;
+    }
+    const batch = [item];
+    editBatchRef.current = batch;
+    setTimeout(() => {
+      editBatchRef.current = null;
+      flushEditLog(batch);
+    }, 0);
+  }
+  function flushEditLog(items) {
+    if (!items.length) return;
+    // Only leads that actually changed are undoable — no-op saves get no payload.
+    const changed = items.filter(i => i.old && i.evs.length);
+    const undo = changed.length ? {
       type: 'revert',
-      before: [undoSnap(old)],
-      after: [undoSnap(updated)]
+      before: changed.map(i => undoSnap(i.old)),
+      after: changed.map(i => undoSnap(i.updated))
     } : null;
-    logH('✏️', `Lead "${updated.channelName}" updated${evs.length ? ' — ' + evs.map(histSentence).join('; ') : ''}`, undo);
+    if (items.length === 1) {
+      const i = items[0];
+      logH('✏️', `Lead "${i.updated.channelName}" updated${i.evs.length ? ' — ' + i.evs.map(histSentence).join('; ') : ''}`, undo);
+    } else {
+      // One line for the whole action: what changed (from the first changed lead,
+      // since a bulk apply sets the same thing on all) + who it hit.
+      const what = changed[0] && changed[0].evs.map(histSentence).join('; ') || '';
+      const names = items.map(i => i.updated.channelName).filter(Boolean);
+      const list = names.length <= 4 ? ` (${names.join(', ')})` : ` (${names.slice(0, 3).join(', ')} +${names.length - 3} more)`;
+      logH('✏️', `Bulk: ${items.length} leads updated${what ? ' — ' + what : ''}${list}`, undo);
+    }
+    // Coalesced toasts — one summary instead of one per lead, so a 12-lead tag
+    // doesn't stack a dozen overlapping toasts.
+    const stamped = items.filter(i => i.stampedContact),
+      requal = items.filter(i => i.requalified);
+    if (stamped.length === 1) addToast(`"${stamped[0].updated.channelName}" marked Contacted — date recorded`, 'success');else if (stamped.length > 1) addToast(`${stamped.length} leads marked Contacted — dates recorded`, 'success');
+    if (requal.length === 1) addToast(`"${requal[0].updated.channelName}" re-qualified as Potential — recycle clock reset`, 'success');else if (requal.length > 1) addToast(`${requal.length} leads re-qualified as Potential — recycle clocks reset`, 'success');
   }
   // A lead "belongs" to a rep if they scraped it or it's assigned to them.
   function ownsLead(l) {
