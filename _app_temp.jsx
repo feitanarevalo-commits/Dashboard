@@ -5141,6 +5141,10 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
                 <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>SmartReach Webhook (send prospects → SmartReach)</div>
                 <input value={local.smartreachWebhook||''} onChange={e=>setLocal(l=>({...l,smartreachWebhook:e.target.value}))} placeholder="https://hook.eu1.make.com/..." style={{width:'100%'}}/>
               </div>
+              <div>
+                <div style={{fontSize:11,color:'var(--text-dim)',marginBottom:4}}>Leave Applications Sheet (approved leaves → Google Sheet)</div>
+                <input value={local.leaveAppsWebhook||''} onChange={e=>setLocal(l=>({...l,leaveAppsWebhook:e.target.value}))} placeholder="https://script.google.com/macros/s/…/exec" style={{width:'100%'}}/>
+              </div>
             </div>
           </div>
           <div className="drawer-section">
@@ -6692,6 +6696,30 @@ function App() {
   // preflight); the body is still a JSON string the script parses. Works with
   // Make/Zapier too. Supabase is the source of truth, so we don't read the reply.
   function postLeaveSheet(payload){ const wh=(config.leavesWebhook||'').trim(); if(!wh) return; try{ fetch(wh,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)}).catch(()=>{}); }catch(e){} }
+  // Append ONE approved leave to the "LEAVE APPLICATIONS" Google Sheet, shaped to
+  // its exact columns. Fires only when a leave is approved. The receiving Apps
+  // Script (leave-applications.gs) formats dates + timestamp and appends the row.
+  function postLeaveApplication(l){
+    const wh=(config.leaveAppsWebhook||'').trim(); if(!wh || !l) return;
+    const prof=getProfile(l.name)||{};
+    // Sheet's leave-type wording differs slightly from our short labels.
+    const typeMap={Sick:'Sick leave',Vacation:'Vacation',Personal:'Personal leave',Emergency:'Emergency leave',Unpaid:'Unpaid leave',Other:'Other'};
+    const days=Number(l.days)||0;
+    const payload={
+      target:'leave-applications',
+      email:        prof.email || '',
+      name:         l.name || '',
+      type:         typeMap[l.type] || l.type || '',
+      start_date:   l.start_date || '',      // YYYY-MM-DD → the script reformats
+      end_date:     l.end_date || l.start_date || '',
+      duration:     days>1 ? (days+' days') : 'Full day',
+      reason:       l.reason || '',
+      additional_email: '',
+      approval:     l.status || 'Approved',
+      notified:     '',
+    };
+    try{ fetch(wh,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)}).catch(()=>{}); }catch(e){}
+  }
   function fileLeave(form){
     if(!SB){ addToast('Backend unavailable — cannot file leave','error'); return; }
     const row={ name:currentUser.name, type:form.type, start_date:form.start||null, end_date:form.end||null, days:form.days||null, reason:form.reason||'', status:'Pending' };
@@ -6721,6 +6749,8 @@ function App() {
       setLeaves(ls=>ls.map(l=>l.id===id?{...l,...patch}:l)); addToast(`Leave ${status.toLowerCase()}`,status==='Approved'?'success':'info');
       logH('🌴',`Leave ${status.toLowerCase()} by ${currentUser.name}`);
       postLeaveSheet({ event:'decision', ...(saved||{id,...patch}) });
+      // On APPROVAL, mirror the record into the LEAVE APPLICATIONS sheet.
+      if(status==='Approved'){ const rec=saved||leaves.find(x=>x.id===id); if(rec) postLeaveApplication({...rec,...patch}); }
     });
   }
   function applyConfig(cfg){

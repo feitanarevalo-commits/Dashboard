@@ -94,6 +94,12 @@ var DEFAULT_CONFIG = {
   // Each POST body: { event:'filed'|'decision', name, type, start_date, end_date,
   //   days, reason, status, decided_by, decided_at }. Leave blank to skip the sheet.
   leavesWebhook: 'https://script.google.com/macros/s/AKfycbxdtfllSCiV2KittPTAWQGcVRsTbNrZtM_lr2YZSHtLJhaHPNE-ulzPK-jPZX5SQn_Ktw/exec',
+  // Dedicated webhook that appends APPROVED leaves to the "LEAVE APPLICATIONS"
+  // Google Sheet, matching its columns (Timestamp, Email Address, Name, Type of
+  // leave, Start date, End date, Duration, Reason, Additional email, Approval,
+  // Notified status). Deploy the bundled Apps Script (leave-applications.gs) as a
+  // Web App and paste its /exec URL here (or in Customize → Webhook URLs).
+  leaveAppsWebhook: '',
   scrapeWebhook:    'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/yt-scrape', // YouTube scraper (Supabase Edge Function; was Make)
   smartreachWebhook:'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/smartreach-add', // SEND prospects → SmartReach (Supabase Edge Function; was Make)
   // Replies / interest feed (🔔). Each returns an array of reply objects:
