@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clips Search</title>
+  <style>
+    :root { --bg:#0f1117; --card:#1a1d29; --line:#2a2e3d; --text:#e6e8ef;
+            --muted:#9aa0b4; --accent:#4f8cff; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+           background:var(--bg); color:var(--text); }
+    .wrap { max-width:1000px; margin:0 auto; padding:24px 16px 60px; }
+    h1 { font-size:20px; margin:0 0 4px; }
+    p.sub { color:var(--muted); margin:0 0 20px; font-size:13px; }
+    .bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+    input, select, button { font-size:14px; border-radius:8px; border:1px solid var(--line);
+           background:var(--card); color:var(--text); padding:10px 12px; }
+    input { flex:1; min-width:220px; }
+    button.go { background:var(--accent); border-color:var(--accent); color:#fff;
+             cursor:pointer; font-weight:600; }
+    .status { color:var(--muted); font-size:13px; margin-bottom:10px; min-height:18px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+            padding:12px 14px; margin-bottom:10px; }
+    .card .title { font-weight:600; margin-bottom:4px; }
+    .meta { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:8px; }
+    .pill { background:#222738; border-radius:999px; padding:2px 9px; }
+    .src { background:#123; color:var(--accent); border-radius:999px; padding:2px 9px; font-weight:600; }
+    .links a { color:var(--accent); text-decoration:none; font-size:13px; margin-right:16px; }
+    .links a:hover { text-decoration:underline; }
+    .empty { color:var(--muted); text-align:center; padding:40px 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Clips Search</h1>
+    <p class="sub">Search by ID, code, title, or category — powered by Supabase, instant results.</p>
+
+    <div class="bar">
+      <input id="q" placeholder="e.g. cs01768, belly swelling, 3491..." autofocus>
+      <select id="src"><option value="">All datasets</option></select>
+      <select id="cat"><option value="">All categories</option></select>
+    </div>
+
+    <div class="status" id="status">Type to search…</div>
+    <div id="results"></div>
+  </div>
+
+  <script>
+    // ---- config -------------------------------------------------------------
+    const SUPABASE_URL = 'https://wokrdfqzwrausazzoedi.supabase.co';
+    const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indva3JkZnF6d3JhdXNhenpvZWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTE5NDAsImV4cCI6MjA5Nzk2Nzk0MH0.YE0CvsTs3XlEJ0n0mBgdKVFy5Nwpys2C0wO96F8F0ho';
+    const LIMIT = 300;
+    const HEADERS = { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY };
+    // -------------------------------------------------------------------------
+
+    const q = document.getElementById('q');
+    const srcSel = document.getElementById('src');
+    const catSel = document.getElementById('cat');
+    const status = document.getElementById('status');
+    const results = document.getElementById('results');
+    let reqId = 0;
+
+    // populate dropdowns
+    fetch(SUPABASE_URL + '/rest/v1/rpc/clip_filters', {
+      method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: '{}'
+    }).then(r => r.json()).then(f => {
+      fill(srcSel, f.datasets || []);
+      fill(catSel, f.categories || []);
+    }).catch(() => {});
+
+    q.addEventListener('input', debounce(run, 180));
+    srcSel.addEventListener('change', run);
+    catSel.addEventListener('change', run);
+
+    async function run() {
+      const term = q.value.trim();
+      const src = srcSel.value, cat = catSel.value;
+      if (!term && !cat) { status.textContent = 'Type to search…'; results.innerHTML = ''; return; }
+
+      const mine = ++reqId;
+      status.textContent = 'Searching…';
+
+      const params = new URLSearchParams();
+      params.set('select', 'id,code,title,category,library_status,ai_confidence,dropbox_url,r2_url,dataset');
+      params.set('limit', LIMIT);
+      params.set('order', 'ai_confidence.desc.nullslast');
+      if (term) params.set('search_text', 'ilike.*' + term + '*');
+      if (cat)  params.set('category', 'eq.' + cat);
+      if (src)  params.set('dataset', 'eq.' + src);
+
+      try {
+        const res = await fetch(SUPABASE_URL + '/rest/v1/clips?' + params.toString(), {
+          headers: { ...HEADERS, Prefer: 'count=exact' }
+        });
+        if (mine !== reqId) return;               // a newer keystroke won; drop this
+        const rows = await res.json();
+        const total = (res.headers.get('content-range') || '').split('/')[1];
+
+        if (!rows.length) {
+          status.textContent = '';
+          results.innerHTML = '<div class="empty">No matches found.</div>';
+          return;
+        }
+        const n = total ? parseInt(total, 10) : rows.length;
+        status.textContent = 'Found ' + n.toLocaleString() +
+          (n > rows.length ? ' — showing first ' + rows.length : '') + ' result(s).';
+        results.innerHTML = rows.map(card).join('');
+      } catch (e) {
+        if (mine !== reqId) return;
+        status.textContent = 'Error: ' + e.message;
+      }
+    }
+
+    // ---- helpers ------------------------------------------------------------
+    function fill(sel, vals) {
+      vals.forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); });
+    }
+    function debounce(fn, ms) { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; }
+    function esc(s) {
+      return (s == null ? '' : String(s)).replace(/[&<>"]/g, c =>
+        ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+    }
+    function card(r) {
+      let links = '';
+      if (r.dropbox_url) links += '<a href="' + esc(r.dropbox_url) + '" target="_blank" rel="noopener">Dropbox</a>';
+      if (r.r2_url)      links += '<a href="' + esc(r.r2_url) + '" target="_blank" rel="noopener">R2</a>';
+      const conf = (r.ai_confidence == null ? '—' : r.ai_confidence);
+      return '<div class="card">' +
+          '<div class="title">' + esc(r.title) + '</div>' +
+          '<div class="meta">' +
+            '<span class="src">' + esc(r.dataset) + '</span>' +
+            '<span class="pill">ID ' + esc(r.id) + '</span>' +
+            '<span class="pill">' + esc(r.code) + '</span>' +
+            '<span>' + esc(r.category || '—') + '</span>' +
+            '<span>' + esc(r.library_status) + '</span>' +
+            '<span>conf ' + esc(conf) + '</span>' +
+          '</div>' +
+          '<div class="links">' + (links || '<span class="meta">no links</span>') + '</div>' +
+        '</div>';
+    }
+  </script>
+</body>
+</html>
