@@ -2351,9 +2351,16 @@ function HomeView({leads,config,currentUser,onOpenRep=null}) {
         ht:cm.filter(l=>l.tags.includes('HT')).length,
       };
     });
+    // The rep's WORKABLE pipeline — Potential + HT, all-time, exactly what their
+    // own dashboard's "Total" tile shows. Contacted / Pending / For Recycle live
+    // in their own tabs and are NOT part of it, so the two screens agree.
+    const workable=leads.filter(l=>l.assignedTo===r && isWorkable(l));
     return {
       rep:r,
-      total:mine.length,
+      total:mine.length,                          // assigned in the selected period
+      workable:workable.length,                   // Potential + HT (headline)
+      workPotential:workable.filter(l=>l.tags.includes('Potential')).length,
+      workHt:workable.filter(l=>l.tags.includes('HT')).length,
       fresh:mine.filter(l=>leadOrigin(l)==='Fresh').length,
       recycled:mine.filter(l=>isRecycled(l)).length,
       potential:mine.filter(l=>l.tags.includes('Potential')).length,
@@ -2479,9 +2486,13 @@ function HomeView({leads,config,currentUser,onOpenRep=null}) {
 
   // Rep cards: ranked by volume for the selected period. Reps with nothing in the
   // period are collected into a single "no activity" tile instead of empty cards.
-  const rankedReps=[...repRows].sort((a,b)=>b.total-a.total);
-  const activeRepRows=rankedReps.filter(r=>r.total>0);
-  const idleReps=rankedReps.filter(r=>r.total===0).map(r=>r.rep);
+  // Rank by the number the card actually shows (workable pipeline), falling back
+  // to period volume. A rep counts as active if they have a live pipeline OR any
+  // activity this period — otherwise a quiet day would collapse every card into
+  // the "no activity" tile and hide real pipelines.
+  const rankedReps=[...repRows].sort((a,b)=> (b.workable-a.workable) || (b.total-a.total));
+  const activeRepRows=rankedReps.filter(r=>r.workable>0||r.total>0);
+  const idleReps=rankedReps.filter(r=>!r.workable&&!r.total).map(r=>r.rep);
   // Team totals shown in the slim header strip (respects the rep filter).
   const headerStats=[
     {v:total,            l:'assigned',      c:'#ffffff'},
@@ -2596,18 +2607,23 @@ function HomeView({leads,config,currentUser,onOpenRep=null}) {
                       <div style={{fontWeight:700,fontSize:14.5,letterSpacing:'-.01em',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.rep}</div>
                       <div style={{fontSize:11.5,color:'var(--text-dim)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{roleTitle}</div>
                     </div>
-                    <div style={{textAlign:'right',flexShrink:0}}>
-                      <div style={{fontFamily:SG,fontSize:22,fontWeight:700,lineHeight:1,letterSpacing:'-.02em',fontVariantNumeric:'tabular-nums'}}>{r.total.toLocaleString()}</div>
+                    <div style={{textAlign:'right',flexShrink:0}}
+                      title={`${r.rep}'s workable pipeline — Potential + High Ticket (${r.total.toLocaleString()} assigned in ${rangeLabel}, incl. contacted). Matches the Total on their own dashboard.`}>
+                      <div style={{fontFamily:SG,fontSize:22,fontWeight:700,lineHeight:1,letterSpacing:'-.02em',fontVariantNumeric:'tabular-nums'}}>{r.workable.toLocaleString()}</div>
                       <div style={{fontSize:9.5,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text-light)'}}>leads</div>
                     </div>
                   </div>
                   <div style={{height:6,borderRadius:99,background:'var(--border)',marginTop:12,overflow:'hidden'}} title={`Contact rate ${cRate}%`}>
                     <div style={{width:`${Math.min(100,cRate)}%`,height:'100%',background:barColor,borderRadius:99}}/>
                   </div>
+                  {/* The headline's own breakdown — Potential + HT sum to it. These are
+                      live pipeline counts (all-time), NOT period-scoped: a period-scoped
+                      Potential reads 0 for any rep who works their queue, because the tag
+                      moves to Contacted. Period work is the Day/Week/Month rows below. */}
                   <div style={{display:'flex',gap:14,marginTop:8,fontSize:12,color:'var(--text-dim)',flexWrap:'wrap'}}>
-                    <span>Contacted <b style={{color:'var(--text)'}}>{r.contacted}</b> · {cRate}%</span>
-                    <span>Potential <b style={{color:'var(--text)'}}>{r.potential}</b></span>
-                    {r.ht>0 && <span>HT <b style={{color:'var(--warn)'}}>{r.ht}</b></span>}
+                    <span title="Currently tagged Potential">Potential <b style={{color:'var(--text)'}}>{r.workPotential}</b></span>
+                    <span title="Currently tagged High Ticket">HT <b style={{color:r.workHt?'var(--warn)':'var(--text)'}}>{r.workHt}</b></span>
+                    <span title={`Contacted out of the ${r.total} assigned in ${rangeLabel}`}>Contacted <b style={{color:'var(--text)'}}>{r.contacted}</b> · {cRate}%</span>
                   </div>
                   {/* Day / Week / Month reference — fixed windows, not the period toggle */}
                   <div style={{marginTop:10,paddingTop:9,borderTop:'1px solid var(--border)'}}>
