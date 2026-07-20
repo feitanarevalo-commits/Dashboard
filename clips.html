@@ -4,141 +4,270 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Clips Search</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    :root { --bg:#0f1117; --card:#1a1d29; --line:#2a2e3d; --text:#e6e8ef;
-            --muted:#9aa0b4; --accent:#4f8cff; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
-           background:var(--bg); color:var(--text); }
-    .wrap { max-width:1000px; margin:0 auto; padding:24px 16px 60px; }
-    h1 { font-size:20px; margin:0 0 4px; }
-    p.sub { color:var(--muted); margin:0 0 20px; font-size:13px; }
-    .bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
-    input, select, button { font-size:14px; border-radius:8px; border:1px solid var(--line);
-           background:var(--card); color:var(--text); padding:10px 12px; }
-    input { flex:1; min-width:220px; }
-    button.go { background:var(--accent); border-color:var(--accent); color:#fff;
-             cursor:pointer; font-weight:600; }
-    .status { color:var(--muted); font-size:13px; margin-bottom:10px; min-height:18px; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
-            padding:12px 14px; margin-bottom:10px; }
-    .card .title { font-weight:600; margin-bottom:4px; }
-    .meta { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:8px; }
-    .pill { background:#222738; border-radius:999px; padding:2px 9px; }
-    .src { background:#123; color:var(--accent); border-radius:999px; padding:2px 9px; font-weight:600; }
-    .links a { color:var(--accent); text-decoration:none; font-size:13px; margin-right:16px; }
-    .links a:hover { text-decoration:underline; }
-    .empty { color:var(--muted); text-align:center; padding:40px 0; }
+    :root{
+      --bg:#12101c; --bg2:#171522; --card:#1f1d2b; --card-hi:#262434;
+      --line:#302e40; --line-hi:#3a3848;
+      --text:#e6e5ec; --muted:#9c99a8; --faint:#6f6c7e;
+      --accent:#5b5bd6; --accent-2:#a6a6ff; --accent-soft:rgba(91,91,214,.16);
+      --good:#3fb950; --warn:#d29922; --bad:#ef4444;
+      --shadow:0 8px 24px rgba(0,0,0,.35);
+      --r:14px;
+      --head:'Space Grotesk',system-ui,sans-serif;
+      --body:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0}
+    body{
+      background:radial-gradient(1200px 600px at 50% -200px,rgba(91,91,214,.14),transparent 70%),var(--bg);
+      color:var(--text); font-family:var(--body); line-height:1.45;
+      min-height:100vh; -webkit-font-smoothing:antialiased;
+    }
+    .wrap{max-width:1080px; margin:0 auto; padding:28px 18px 80px}
+
+    /* header */
+    .brand{display:flex; align-items:center; gap:14px; margin-bottom:22px}
+    .logo{width:44px; height:44px; border-radius:12px; flex:none;
+      background:linear-gradient(135deg,var(--accent),#8f7bff);
+      display:grid; place-items:center; box-shadow:var(--shadow);}
+    .logo svg{width:24px; height:24px; stroke:#fff}
+    .brand h1{font-family:var(--head); font-size:22px; margin:0; letter-spacing:-.01em}
+    .brand p{margin:2px 0 0; color:var(--muted); font-size:13px}
+    .brand b{color:var(--accent-2); font-weight:600}
+
+    /* search bar */
+    .search{position:sticky; top:0; z-index:5; padding:14px 0 12px;
+      background:linear-gradient(180deg,var(--bg) 70%,rgba(18,16,28,0));}
+    .searchrow{display:flex; gap:10px; flex-wrap:wrap}
+    .field{position:relative; flex:1; min-width:240px}
+    .field svg{position:absolute; left:14px; top:50%; transform:translateY(-50%);
+      width:18px; height:18px; stroke:var(--faint); pointer-events:none}
+    #q{width:100%; font:500 15px var(--body); color:var(--text);
+      background:var(--card); border:1px solid var(--line); border-radius:12px;
+      padding:13px 40px 13px 42px; outline:none; transition:border-color .15s,box-shadow .15s}
+    #q:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+    #q::placeholder{color:var(--faint)}
+    .clear{position:absolute; right:8px; top:50%; transform:translateY(-50%);
+      width:26px; height:26px; border:0; border-radius:8px; cursor:pointer; display:none;
+      background:transparent; color:var(--muted); font-size:17px}
+    .clear:hover{background:var(--line); color:var(--text)}
+    select{font:500 14px var(--body); color:var(--text); background:var(--card);
+      border:1px solid var(--line); border-radius:12px; padding:0 34px 0 14px; height:48px;
+      cursor:pointer; outline:none; appearance:none;
+      background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239c99a8' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");
+      background-repeat:no-repeat; background-position:right 12px center}
+    select:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+
+    .statusrow{display:flex; align-items:center; gap:8px; min-height:22px;
+      color:var(--muted); font-size:13px; margin:4px 2px 16px}
+    .kbd{font:500 11px var(--body); color:var(--muted); background:var(--card);
+      border:1px solid var(--line); border-bottom-width:2px; border-radius:6px; padding:1px 6px}
+
+    /* results grid */
+    .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:12px}
+    .card{background:var(--card); border:1px solid var(--line); border-radius:var(--r);
+      padding:15px 16px 14px; display:flex; flex-direction:column; gap:11px;
+      transition:transform .12s,border-color .12s,box-shadow .12s}
+    .card:hover{transform:translateY(-2px); border-color:var(--line-hi); box-shadow:var(--shadow)}
+    .card-top{display:flex; align-items:center; justify-content:space-between; gap:8px}
+    .cat{font:600 11px var(--body); text-transform:uppercase; letter-spacing:.04em;
+      padding:3px 9px; border-radius:999px;
+      color:hsl(var(--h) 70% 78%); background:hsl(var(--h) 60% 22% / .55);
+      border:1px solid hsl(var(--h) 55% 45% / .4)}
+    .conf{display:flex; align-items:center; gap:6px; font:600 12px var(--body); color:var(--muted)}
+    .dot{width:8px; height:8px; border-radius:50%}
+    .conf.high .dot{background:var(--good)} .conf.mid .dot{background:var(--warn)}
+    .conf.low .dot{background:var(--bad)} .conf.none .dot{background:var(--faint)}
+    .title{font:600 15.5px var(--head); margin:0; letter-spacing:-.01em; line-height:1.3}
+    .chips{display:flex; flex-wrap:wrap; gap:6px}
+    .chip{font:600 12px var(--body); color:var(--muted); background:var(--bg2);
+      border:1px solid var(--line); border-radius:8px; padding:3px 9px; display:inline-flex; gap:5px; align-items:center}
+    .chip.copy{cursor:pointer; color:var(--accent-2)}
+    .chip.copy:hover{border-color:var(--accent); background:var(--accent-soft)}
+    .chip.status{text-transform:capitalize}
+    .actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:2px}
+    .btn{font:600 13px var(--body); border-radius:9px; padding:8px 13px; cursor:pointer;
+      text-decoration:none; display:inline-flex; align-items:center; gap:6px;
+      border:1px solid var(--line); background:var(--bg2); color:var(--text); transition:.12s}
+    .btn:hover{border-color:var(--line-hi)}
+    .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+    .btn.primary:hover{background:#6d6de0}
+    .btn.ghost{color:var(--muted)}
+    .btn svg{width:15px; height:15px}
+    .btn.copied{color:var(--good); border-color:var(--good)}
+
+    /* states */
+    .empty{grid-column:1/-1; text-align:center; color:var(--muted); padding:56px 20px}
+    .empty svg{width:46px; height:46px; stroke:var(--faint); margin-bottom:12px}
+    .empty h3{font:600 16px var(--head); color:var(--text); margin:0 0 4px}
+    .skel{background:var(--card); border:1px solid var(--line); border-radius:var(--r); height:150px;
+      position:relative; overflow:hidden}
+    .skel::after{content:""; position:absolute; inset:0;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.05),transparent);
+      transform:translateX(-100%); animation:sh 1.1s infinite}
+    @keyframes sh{100%{transform:translateX(100%)}}
+    .toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
+      background:var(--card); border:1px solid var(--line-hi); color:var(--text);
+      padding:10px 16px; border-radius:10px; font:600 13px var(--body); box-shadow:var(--shadow);
+      opacity:0; pointer-events:none; transition:.2s}
+    .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+    @media (max-width:520px){ .grid{grid-template-columns:1fr} .brand h1{font-size:20px} }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Clips Search</h1>
-    <p class="sub">Search by ID, code, title, or category — powered by Supabase, instant results.</p>
-
-    <div class="bar">
-      <input id="q" placeholder="e.g. cs01768, belly swelling, 3491..." autofocus>
-      <select id="src"><option value="">All datasets</option></select>
-      <select id="cat"><option value="">All categories</option></select>
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v14H4z"/><path d="M10 9l5 3-5 3z" fill="#fff" stroke="none"/></svg>
+      </div>
+      <div>
+        <h1>Clips Search</h1>
+        <p><b id="totalCount">…</b> clips · search by ID, code, title or category</p>
+      </div>
     </div>
 
-    <div class="status" id="status">Type to search…</div>
-    <div id="results"></div>
+    <div class="search">
+      <div class="searchrow">
+        <div class="field">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+          <input id="q" placeholder="Search clips…  ( press /  to focus )" autocomplete="off" autofocus>
+          <button class="clear" id="clear" title="Clear (Esc)">✕</button>
+        </div>
+        <select id="src"><option value="">All datasets</option></select>
+        <select id="cat"><option value="">All categories</option></select>
+      </div>
+      <div class="statusrow" id="status">Start typing to search…</div>
+    </div>
+
+    <div class="grid" id="results"></div>
   </div>
+  <div class="toast" id="toast"></div>
 
   <script>
-    // ---- config -------------------------------------------------------------
     const SUPABASE_URL = 'https://wokrdfqzwrausazzoedi.supabase.co';
     const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indva3JkZnF6d3JhdXNhenpvZWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTE5NDAsImV4cCI6MjA5Nzk2Nzk0MH0.YE0CvsTs3XlEJ0n0mBgdKVFy5Nwpys2C0wO96F8F0ho';
     const LIMIT = 300;
     const HEADERS = { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY };
-    // -------------------------------------------------------------------------
 
     const q = document.getElementById('q');
     const srcSel = document.getElementById('src');
     const catSel = document.getElementById('cat');
     const status = document.getElementById('status');
     const results = document.getElementById('results');
+    const clearBtn = document.getElementById('clear');
+    const toast = document.getElementById('toast');
     let reqId = 0;
 
-    // populate dropdowns
-    fetch(SUPABASE_URL + '/rest/v1/rpc/clip_filters', {
-      method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: '{}'
-    }).then(r => r.json()).then(f => {
-      fill(srcSel, f.datasets || []);
-      fill(catSel, f.categories || []);
-    }).catch(() => {});
+    // total count for the header
+    fetch(SUPABASE_URL + '/rest/v1/clips?select=pk&limit=1', { headers: { ...HEADERS, Prefer: 'count=exact' } })
+      .then(r => { const t = (r.headers.get('content-range')||'').split('/')[1]; if(t) document.getElementById('totalCount').textContent = (+t).toLocaleString(); })
+      .catch(()=>{});
 
-    q.addEventListener('input', debounce(run, 180));
+    // dropdowns
+    fetch(SUPABASE_URL + '/rest/v1/rpc/clip_filters', {
+      method:'POST', headers:{ ...HEADERS, 'Content-Type':'application/json' }, body:'{}'
+    }).then(r=>r.json()).then(f=>{ fill(srcSel, f.datasets||[]); fill(catSel, f.categories||[]); }).catch(()=>{});
+
+    q.addEventListener('input', () => { clearBtn.style.display = q.value ? 'block' : 'none'; debounced(); });
     srcSel.addEventListener('change', run);
     catSel.addEventListener('change', run);
+    clearBtn.addEventListener('click', () => { q.value=''; clearBtn.style.display='none'; q.focus(); run(); });
+    document.addEventListener('keydown', e => {
+      if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus(); }
+      if (e.key === 'Escape' && document.activeElement === q) { q.value=''; clearBtn.style.display='none'; run(); }
+    });
+    const debounced = debounce(run, 160);
 
-    async function run() {
-      const term = q.value.trim();
-      const src = srcSel.value, cat = catSel.value;
-      if (!term && !cat) { status.textContent = 'Type to search…'; results.innerHTML = ''; return; }
+    async function run(){
+      const term = q.value.trim(), src = srcSel.value, cat = catSel.value;
+      if (!term && !cat && !src){ status.innerHTML = 'Start typing to search…  <span class="kbd">/</span> to focus'; results.innerHTML=''; return; }
 
       const mine = ++reqId;
+      results.innerHTML = Array.from({length:6}).map(()=> '<div class="skel"></div>').join('');
       status.textContent = 'Searching…';
 
-      const params = new URLSearchParams();
-      params.set('select', 'id,code,title,category,library_status,ai_confidence,dropbox_url,r2_url,dataset');
-      params.set('limit', LIMIT);
-      params.set('order', 'ai_confidence.desc.nullslast');
-      if (term) params.set('search_text', 'ilike.*' + term + '*');
-      if (cat)  params.set('category', 'eq.' + cat);
-      if (src)  params.set('dataset', 'eq.' + src);
+      const p = new URLSearchParams();
+      p.set('select','id,code,title,category,library_status,ai_confidence,dropbox_url,r2_url,dataset');
+      p.set('limit', LIMIT);
+      p.set('order','ai_confidence.desc.nullslast');
+      if (term) p.set('search_text','ilike.*'+term+'*');
+      if (cat)  p.set('category','eq.'+cat);
+      if (src)  p.set('dataset','eq.'+src);
 
-      try {
-        const res = await fetch(SUPABASE_URL + '/rest/v1/clips?' + params.toString(), {
-          headers: { ...HEADERS, Prefer: 'count=exact' }
-        });
-        if (mine !== reqId) return;               // a newer keystroke won; drop this
+      const t0 = performance.now();
+      try{
+        const res = await fetch(SUPABASE_URL + '/rest/v1/clips?' + p.toString(), { headers:{ ...HEADERS, Prefer:'count=exact' } });
+        if (mine !== reqId) return;
         const rows = await res.json();
-        const total = (res.headers.get('content-range') || '').split('/')[1];
+        const ms = Math.max(1, Math.round(performance.now() - t0));
+        const total = parseInt((res.headers.get('content-range')||'').split('/')[1], 10) || rows.length;
 
-        if (!rows.length) {
+        if (!rows.length){
           status.textContent = '';
-          results.innerHTML = '<div class="empty">No matches found.</div>';
+          results.innerHTML = emptyState(term || cat || src);
           return;
         }
-        const n = total ? parseInt(total, 10) : rows.length;
-        status.textContent = 'Found ' + n.toLocaleString() +
-          (n > rows.length ? ' — showing first ' + rows.length : '') + ' result(s).';
+        status.innerHTML = '<b style="color:var(--text)">'+total.toLocaleString()+'</b>&nbsp;result'+(total===1?'':'s')+
+          (total>rows.length ? ' · showing first '+rows.length : '') + ' · <span style="color:var(--good)">'+ms+' ms</span>';
         results.innerHTML = rows.map(card).join('');
-      } catch (e) {
+      }catch(e){
         if (mine !== reqId) return;
         status.textContent = 'Error: ' + e.message;
+        results.innerHTML = '';
       }
     }
 
-    // ---- helpers ------------------------------------------------------------
-    function fill(sel, vals) {
-      vals.forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); });
+    // copy via delegation
+    results.addEventListener('click', e => {
+      const el = e.target.closest('[data-copy]'); if(!el) return;
+      navigator.clipboard.writeText(el.dataset.copy).then(()=>{
+        showToast('Copied to clipboard');
+        if (el.classList.contains('btn')){ el.classList.add('copied'); const t=el.dataset.label||el.textContent; el.textContent='Copied ✓'; setTimeout(()=>{ el.classList.remove('copied'); el.textContent=t; },1200); }
+      });
+    });
+
+    // ---- render ----
+    function card(r){
+      const h = hue(r.category);
+      const lvl = confLevel(r.ai_confidence);
+      const cat = r.category ? '<span class="cat" style="--h:'+h+'">'+esc(r.category)+'</span>' : '<span class="cat" style="--h:250">Uncategorized</span>';
+      const conf = '<span class="conf '+lvl.k+'"><span class="dot"></span>'+lvl.t+'</span>';
+      let acts = '';
+      if (r.r2_url) acts += '<a class="btn primary" href="'+esc(r.r2_url)+'" target="_blank" rel="noopener">'+play()+'R2</a>';
+      if (r.dropbox_url) acts += '<a class="btn" href="'+esc(r.dropbox_url)+'" target="_blank" rel="noopener">Dropbox</a>';
+      const copyUrl = r.r2_url || r.dropbox_url;
+      if (copyUrl) acts += '<button class="btn ghost" data-copy="'+esc(copyUrl)+'" data-label="Copy link">'+link()+'Copy link</button>';
+      return '<article class="card">'+
+        '<div class="card-top">'+cat+conf+'</div>'+
+        '<h3 class="title">'+esc(r.title||'Untitled')+'</h3>'+
+        '<div class="chips">'+
+          '<span class="chip copy" data-copy="'+esc(r.code||'')+'" title="Copy code">'+esc(r.code||'—')+' ⧉</span>'+
+          '<span class="chip">ID '+esc(r.id)+'</span>'+
+          '<span class="chip status">'+esc(r.library_status||'—')+'</span>'+
+          '<span class="chip">'+esc(r.dataset)+'</span>'+
+        '</div>'+
+        (acts ? '<div class="actions">'+acts+'</div>' : '')+
+      '</article>';
     }
-    function debounce(fn, ms) { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; }
-    function esc(s) {
-      return (s == null ? '' : String(s)).replace(/[&<>"]/g, c =>
-        ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+    function emptyState(t){
+      return '<div class="empty">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>'+
+        '<h3>No matches</h3><p>Nothing found for “'+esc(t)+'”. Try a different term, code, or ID.</p></div>';
     }
-    function card(r) {
-      let links = '';
-      if (r.dropbox_url) links += '<a href="' + esc(r.dropbox_url) + '" target="_blank" rel="noopener">Dropbox</a>';
-      if (r.r2_url)      links += '<a href="' + esc(r.r2_url) + '" target="_blank" rel="noopener">R2</a>';
-      const conf = (r.ai_confidence == null ? '—' : r.ai_confidence);
-      return '<div class="card">' +
-          '<div class="title">' + esc(r.title) + '</div>' +
-          '<div class="meta">' +
-            '<span class="src">' + esc(r.dataset) + '</span>' +
-            '<span class="pill">ID ' + esc(r.id) + '</span>' +
-            '<span class="pill">' + esc(r.code) + '</span>' +
-            '<span>' + esc(r.category || '—') + '</span>' +
-            '<span>' + esc(r.library_status) + '</span>' +
-            '<span>conf ' + esc(conf) + '</span>' +
-          '</div>' +
-          '<div class="links">' + (links || '<span class="meta">no links</span>') + '</div>' +
-        '</div>';
-    }
+
+    // ---- helpers ----
+    function confLevel(v){ if(v==null||v==='') return {k:'none',t:'—'};
+      const n=+v; return { k:n>=.7?'high':n>=.4?'mid':'low', t:n.toFixed(2) }; }
+    function hue(s){ if(!s) return 250; let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))%360; return h; }
+    function fill(sel, vals){ vals.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); }); }
+    function debounce(fn,ms){ let t; return ()=>{ clearTimeout(t); t=setTimeout(fn,ms); }; }
+    function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    let toastT; function showToast(m){ toast.textContent=m; toast.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>toast.classList.remove('show'),1600); }
+    function play(){ return '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>'; }
+    function link(){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg>'; }
   </script>
 </body>
 </html>
