@@ -178,10 +178,11 @@
   <div class="modal" id="importModal" hidden>
     <div class="modal-card">
       <button class="modal-x" id="importClose">✕</button>
-      <h2>Import clips from CSV</h2>
-      <p class="mnote">Adds rows to the search library. The file's header row should include any of:
-        <b>id, code, title, category, library_status, ai_confidence, source, created_at, dropbox_url, r2_url</b> — missing columns are stored blank.</p>
-      <label>Dataset label
+      <h2>Import / update clips from CSV</h2>
+      <p class="mnote">Clips are matched by <b>code</b>: existing clips are updated and new ones added — no duplicates.
+        Only the columns in your file are changed. Header may include any of:
+        <b>code (required), id, title, category, library_status, ai_confidence, source, created_at, dropbox_url, r2_url</b>.</p>
+      <label>Dataset label <span style="font-weight:400">(optional — leave blank to keep existing)</span>
         <input type="text" id="impDataset" placeholder="e.g. batch-2026-07">
       </label>
       <label>Import passphrase
@@ -310,9 +311,9 @@
       }catch(e){ failed=true; setImp('Import failed: '+e.message, 'err'); }
       $('impRun').disabled = false;
       if(failed) return;
-      setImp('✓ Imported '+done.toLocaleString()+' rows into “'+(dataset||'imported')+'”.', 'ok');
+      setImp('✓ Done — '+done.toLocaleString()+' clip'+(done===1?'':'s')+' imported (existing updated, new added).', 'ok');
       showToast('Imported '+done.toLocaleString()+' clips');
-      loadTotal(); loadFilters();
+      loadTotal(); loadFilters(); run();
     }
 
     // parse CSV (RFC-style: quotes, commas, newlines) -> array of objects keyed by header
