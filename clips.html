@@ -328,20 +328,28 @@
 
     // ---- render ----
     // turn a Dropbox share link into a directly streamable URL
-    function playable(u){ if(!u) return ''; let s=u; if(/[?&]dl=\d/.test(s)) s=s.replace(/([?&])dl=\d/,'$1raw=1'); else if(!/[?&]raw=1/.test(s)) s+=(s.includes('?')?'&':'?')+'raw=1'; return s; }
+    function dropboxRaw(u){ if(!u) return ''; let s=u; if(/[?&]dl=\d/.test(s)) s=s.replace(/([?&])dl=\d/,'$1raw=1'); else if(!/[?&]raw=1/.test(s)) s+=(s.includes('?')?'&':'?')+'raw=1'; return s; }
+    // pick a browser-playable URL: public R2 (clips.virals.com) direct, else Dropbox raw.
+    // The private R2 S3 endpoint (cloudflarestorage.com) can't play in a browser.
+    function playSrc(r){
+      if(r.r2_url && r.r2_url.indexOf('cloudflarestorage.com') === -1) return r.r2_url;
+      if(r.dropbox_url) return dropboxRaw(r.dropbox_url);
+      return '';
+    }
     function card(r){
       const disp = (r.title && r.title.trim()) ? r.title : (r.code || 'Untitled');
-      const stream = playable(r.dropbox_url);
+      const src = playSrc(r);
       let media='';
-      if(stream){
-        media = '<div class="thumb-wrap" data-play="'+esc(stream)+'" data-title="'+esc(disp)+'" title="Click to play">'+
-          '<video class="thumb" muted playsinline preload="metadata" data-src="'+esc(stream)+'#t=0.5"></video>'+
+      if(src){
+        media = '<div class="thumb-wrap" data-play="'+esc(src)+'" data-title="'+esc(disp)+'" title="Click to play">'+
+          '<video class="thumb" muted playsinline preload="metadata" data-src="'+esc(src)+'#t=0.5"></video>'+
           '<span class="play-badge">'+play()+'</span></div>';
       }
       let acts='';
-      if(stream) acts += '<button class="btn primary" data-play="'+esc(stream)+'" data-title="'+esc(disp)+'">'+play()+'Play</button>';
-      if(r.dropbox_url) acts += '<button class="btn" data-copy="'+esc(r.dropbox_url)+'" title="Copy Dropbox link">'+copyIcon()+'Copy Dropbox link</button>';
-      if(!acts) acts = '<span class="chip">no link</span>';
+      if(src){
+        acts += '<button class="btn primary" data-play="'+esc(src)+'" data-title="'+esc(disp)+'">'+play()+'Play</button>';
+        acts += '<button class="btn" data-copy="'+esc(src)+'" title="Copy video link">'+copyIcon()+'Copy link</button>';
+      } else acts = '<span class="chip">no link</span>';
       return '<article class="card">'+ media +
         '<h3 class="title" title="'+esc(disp)+'">'+esc(disp)+'</h3>'+
         '<div class="chips"><span class="chip code copy" data-copy="'+esc(r.code||'')+'" title="'+esc(r.code||'')+' — click to copy"><span class="ctext">'+esc(r.code||'—')+'</span><span class="cicon">⧉</span></span>'+
