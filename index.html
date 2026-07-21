@@ -845,11 +845,15 @@ syncLeadsToSupabase(changed,leadVersionsRef.current).then(res=>{if(!res||!res.ok
 (res.accepted||[]).forEach(a=>{leadVersionsRef.current[String(a.id)]=a.version;});// Rejected = someone else wrote a newer version. Adopt the DB's current row
 // instead of clobbering it, refresh our version, and align the snapshot so
 // we don't immediately re-push the stale change.
-if(res.rejected&&res.rejected.length){const byId={};res.rejected.forEach(r=>{const id=String(r.id);byId[id]=r;leadVersionsRef.current[id]=r.version;if(r.data)snap[id]=JSON.stringify(r.data);});setLeads(cur=>cur.map(l=>{const r=byId[String(l.id)];return r&&r.data?r.data:l;}));addToast(`${res.rejected.length} lead(s) were updated by someone else — refreshed to the latest`,'info');}leadsSyncRef.current=snap;});}else{leadsSyncRef.current=snap;}},1000);return()=>clearTimeout(h);},[leads,leadsReady]);// Live cross-user sync: every 15s pull the shared leads table and merge, so one
+if(res.rejected&&res.rejected.length){const byId={};res.rejected.forEach(r=>{const id=String(r.id);byId[id]=r;leadVersionsRef.current[id]=r.version;if(r.data)snap[id]=JSON.stringify(r.data);});setLeads(cur=>cur.map(l=>{const r=byId[String(l.id)];return r&&r.data?r.data:l;}));addToast(`${res.rejected.length} lead(s) were updated by someone else — refreshed to the latest`,'info');}leadsSyncRef.current=snap;});}else{leadsSyncRef.current=snap;}},1000);return()=>clearTimeout(h);},[leads,leadsReady]);// Live cross-user sync: every 30s (only while the tab is visible) pull the shared leads table and merge, so one
 // rep's additions/edits (and cross-rep DUPLICATES) show up for everyone without
 // a manual reload. Local unsaved edits are preserved; leads another rep deleted
 // are dropped. Returns the SAME array reference when nothing changed (no churn).
-useEffect(()=>{if(!SB||!leadsReady)return;let stop=false,tick=0;const pullAndMerge=()=>{if(stop)return;// Every ~60s refresh the archived-keys set too, so an archive done by
+useEffect(()=>{if(!SB||!leadsReady)return;let stop=false,tick=0;const pullAndMerge=()=>{if(stop)return;// EGRESS GUARD: a backgrounded tab re-downloading the whole leads table
+// every interval was the bulk of Supabase egress. Skip the pull while the
+// tab is hidden — the on-focus handler below pulls fresh the moment the rep
+// returns, so they never work from stale data.
+if(typeof document!=='undefined'&&document.hidden)return;// Every ~2min refresh the archived-keys set too, so an archive done by
 // another admin propagates (keeps re-scrapes of it skipped everywhere).
 if(tick++%4===0){loadArchivedKeysFromSupabase().then(keys=>{if(!stop&&Array.isArray(keys))archivedKeysRef.current=new Set(keys);});}// When THIS fetch began. Anything the DB tells us reflects the world at
 // roughly this instant, so a lead edited after it is newer than the answer.
@@ -863,7 +867,7 @@ const staleForThisLead=(writeStampRef.current[id]||0)>=fetchStartedAt;if(r===und
 // versions and REJECTING reps' real tags (the "tag keeps reverting" storm).
 else{const take=dirty||staleForThisLead?l:r;out.push(take);if(take===r){leadVersionsRef.current[id]=remoteVersions[id];leadsSyncRef.current[id]=JSON.stringify(r);}}});remote.forEach(l=>{const id=String(l.id);if(!localIds.has(id)){out.push(l);leadVersionsRef.current[id]=remoteVersions[id];leadsSyncRef.current[id]=JSON.stringify(l);}});// new from other reps → track version + mark synced
 if(out.length===local.length){const lm={};local.forEach(l=>lm[String(l.id)]=JSON.stringify(l));if(out.every(l=>lm[String(l.id)]===JSON.stringify(l)))return local;// no change → no churn
-}return out;});}).catch(()=>{});};const iv=setInterval(pullAndMerge,15000);// Refresh-on-focus: a tab that was backgrounded (or the laptop asleep) holds
+}return out;});}).catch(()=>{});};const iv=setInterval(pullAndMerge,30000);// Refresh-on-focus: a tab that was backgrounded (or the laptop asleep) holds
 // stale leads; pull fresh the moment the rep returns so they edit from current
 // data. With the version guard this just means fewer conflict-refreshes.
 const onVisible=()=>{if(document.visibilityState==='visible')pullAndMerge();};document.addEventListener('visibilitychange',onVisible);window.addEventListener('focus',onVisible);return()=>{stop=true;clearInterval(iv);document.removeEventListener('visibilitychange',onVisible);window.removeEventListener('focus',onVisible);};},[leadsReady]);// New-build detection: if the deployed page changes (a new deploy), this tab is

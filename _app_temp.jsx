@@ -7116,7 +7116,7 @@ function App() {
     return ()=>clearTimeout(h);
   },[leads,leadsReady]);
 
-  // Live cross-user sync: every 15s pull the shared leads table and merge, so one
+  // Live cross-user sync: every 30s (only while the tab is visible) pull the shared leads table and merge, so one
   // rep's additions/edits (and cross-rep DUPLICATES) show up for everyone without
   // a manual reload. Local unsaved edits are preserved; leads another rep deleted
   // are dropped. Returns the SAME array reference when nothing changed (no churn).
@@ -7125,7 +7125,12 @@ function App() {
     let stop=false, tick=0;
     const pullAndMerge=()=>{
       if(stop) return;
-      // Every ~60s refresh the archived-keys set too, so an archive done by
+      // EGRESS GUARD: a backgrounded tab re-downloading the whole leads table
+      // every interval was the bulk of Supabase egress. Skip the pull while the
+      // tab is hidden — the on-focus handler below pulls fresh the moment the rep
+      // returns, so they never work from stale data.
+      if(typeof document!=='undefined' && document.hidden) return;
+      // Every ~2min refresh the archived-keys set too, so an archive done by
       // another admin propagates (keeps re-scrapes of it skipped everywhere).
       if((tick++ %4)===0){ loadArchivedKeysFromSupabase().then(keys=>{ if(!stop && Array.isArray(keys)) archivedKeysRef.current=new Set(keys); }); }
       // When THIS fetch began. Anything the DB tells us reflects the world at
@@ -7163,7 +7168,7 @@ function App() {
         });
       }).catch(()=>{});
     };
-    const iv=setInterval(pullAndMerge, 15000);
+    const iv=setInterval(pullAndMerge, 30000);
     // Refresh-on-focus: a tab that was backgrounded (or the laptop asleep) holds
     // stale leads; pull fresh the moment the rep returns so they edit from current
     // data. With the version guard this just means fewer conflict-refreshes.
