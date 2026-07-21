@@ -2389,25 +2389,33 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const periodWord=period==='daily'?(dayOffset===0?'today':'on '+dayShort):(period==='weekly'?'this week':'this month');
 
   // ── Per-rep, per-campaign figures for the period ────────────
-  // imported = leads assigned to the rep in that campaign in the window;
-  // contacted = of those, reached out to; fresh = still to work.
+  //   imported  = leads ASSIGNED to the rep in that campaign in the window (new work in);
+  //   contacted = leads the rep CONTACTED in the window, by last-contact date — the same
+  //               basis as the rep dashboard's "Contacted (today)", so the two agree. A
+  //               lead assigned days ago but contacted today counts here (the old code only
+  //               counted contacted among leads ASSIGNED in the window, so real outreach
+  //               on older leads read as 0);
+  //   fresh     = imported leads not yet contacted (today's batch still to work).
   const allReps=(config.salesReps||[]);
   const reps=(lockedRep?allReps.filter(r=>r===lockedRep):allReps).map(rep=>{
-    const mine=leads.filter(l=>l.assignedTo===rep && inWin(l));
+    const mineAll=leads.filter(l=>l.assignedTo===rep);
     const rows=campDefs.map(c=>{
-      const cm=mine.filter(l=>(l.campaigns||[]).includes(c.id));
-      const imported=cm.length;
-      const contacted=cm.filter(isContacted).length;
-      return {id:c.id,label:c.label,color:c.color,imported,contacted,fresh:imported-contacted};
+      const camp=mineAll.filter(l=>(l.campaigns||[]).includes(c.id));
+      const importedCohort=camp.filter(inWin);
+      const imported=importedCohort.length;
+      const contacted=camp.filter(l=>isDirectContacted(l) && inWinDate(l.lastContactDate)).length;
+      const fresh=importedCohort.filter(l=>!isContacted(l)).length;
+      return {id:c.id,label:c.label,color:c.color,imported,contacted,fresh};
     });
     const imported=rows.reduce((a,b)=>a+b.imported,0);
     const contacted=rows.reduce((a,b)=>a+b.contacted,0);
+    const fresh=rows.reduce((a,b)=>a+b.fresh,0);
     const tier=rep==='JC'?'jc':(newHires.includes(rep)?'newHire':'main');
     const qset=(quotas[tier]||{})[period]||{};
     const totalQuota=campDefs.reduce((a,c)=>a+(Math.max(0,Number(qset[c.id]))||0),0);
     const quotaPct=totalQuota>0?(contacted/totalQuota)*100:100;
     rows.forEach(row=>{ const q=Math.max(0,Number(qset[row.id]))||0; row.quota=q; row.quotaPct=q>0?(row.contacted/q)*100:100; });
-    return {rep,imported,contacted,fresh:imported-contacted,rows,tier,totalQuota,quotaPct};
+    return {rep,imported,contacted,fresh,rows,tier,totalQuota,quotaPct};
   });
   // Fixed team order (REP_ORDER); unlisted reps fall to the end, worst-quota first.
   const orderIdx=n=>{ const i=REP_ORDER.indexOf(n); return i<0?REP_ORDER.length+1:i; };
@@ -2434,11 +2442,12 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
 
   const teamImported=reps.reduce((a,b)=>a+b.imported,0);
   const teamContacted=reps.reduce((a,b)=>a+b.contacted,0);
+  const teamFresh=reps.reduce((a,b)=>a+b.fresh,0);   // imported & contacted are now different sets — sum the per-rep fresh
   const unassigned=leads.filter(l=>!l.assignedTo).length;
   const totals=[
     {label:'Imported (assigned)', value:teamImported, color:'var(--text)'},
     {label:'Contacted', value:teamContacted, color:'#2f8f5b'},
-    {label:'Fresh (uncontacted)', value:teamImported-teamContacted, color:'var(--text-dim)'},
+    {label:'Fresh (uncontacted)', value:teamFresh, color:'var(--text-dim)'},
     {label:'Unassigned', value:unassigned, color:'#c07a1e'},
   ];
 
