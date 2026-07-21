@@ -7649,7 +7649,7 @@ function App() {
             {darkMode ? '☀' : '🌙'}
           </button>
           {isAdmin && <button className="btn btn-outline btn-sm" onClick={()=>setShowSettings(true)}>⚙ Customize</button>}
-          <button className="btn btn-ghost btn-sm" onClick={logout} title="Sign out">⎋ Logout</button>
+          {/* Logout lives in the profile hovercard (and ⌘K search) — no duplicate button here. */}
         </div>
       </div>
 
