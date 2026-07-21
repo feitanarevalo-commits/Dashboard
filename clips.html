@@ -260,15 +260,16 @@
     $('vclose').addEventListener('click', closePlayer);
     $('vmodal').addEventListener('click', e => { if(e.target.id==='vmodal') closePlayer(); });
 
-    // lazy-load card thumbnails when they scroll into view
+    // load a thumbnail's video source (frame preview)
+    function loadThumb(v){ if(!v.dataset.src) return; v.addEventListener('error', () => v.closest('.thumb-wrap')?.classList.add('noplay'), { once:true }); v.src=v.dataset.src; v.removeAttribute('data-src'); }
+    // eager-load the first screenful; lazy-load the rest on scroll
     function observeThumbs(){
+      const thumbs=[...document.querySelectorAll('.thumb[data-src]')];
+      thumbs.slice(0,18).forEach(loadThumb);
       if(!thumbIO){ thumbIO = new IntersectionObserver(es => es.forEach(en => {
-        if(en.isIntersecting){ const v=en.target; if(v.dataset.src){ v.src=v.dataset.src; v.removeAttribute('data-src'); } thumbIO.unobserve(v); }
-      }), { rootMargin:'300px' }); }
-      document.querySelectorAll('.thumb[data-src]').forEach(v => {
-        v.addEventListener('error', () => v.closest('.thumb-wrap')?.classList.add('noplay'), { once:true });
-        thumbIO.observe(v);
-      });
+        if(en.isIntersecting){ loadThumb(en.target); thumbIO.unobserve(en.target); }
+      }), { rootMargin:'400px' }); }
+      document.querySelectorAll('.thumb[data-src]').forEach(v => thumbIO.observe(v));
     }
 
     // ---- import modal ----
