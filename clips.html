@@ -294,16 +294,16 @@
     function card(r){
       const hasTitle = r.title && r.title.trim();
       const disp = hasTitle ? r.title : (r.code || 'Untitled');
-      const playUrl = r.dropbox_url || r.r2_url;
       let acts='';
-      if(playUrl) acts += '<a class="btn primary" href="'+esc(playUrl)+'" target="_blank" rel="noopener" title="'+(r.dropbox_url?'Open in Dropbox':'Open R2 (may need access)')+'">'+play()+'Play</a>';
-      if(r.dropbox_url) acts += '<button class="btn ghost" data-copy="'+esc(r.dropbox_url)+'">'+link()+'Dropbox</button>';
-      if(r.r2_url) acts += '<button class="btn ghost" data-copy="'+esc(r.r2_url)+'">'+link()+'R2</button>';
+      if(r.dropbox_url) acts += '<a class="btn primary" href="'+esc(r.dropbox_url)+'" target="_blank" rel="noopener" title="Play in Dropbox">'+play()+'Play</a>';
+      if(r.r2_url) acts += '<button class="btn" data-copy="'+esc(r.r2_url)+'" title="Copy R2 link to clipboard">'+copyIcon()+'Copy R2 link</button>';
+      if(r.dropbox_url) acts += '<button class="btn" data-copy="'+esc(r.dropbox_url)+'" title="Copy Dropbox link to clipboard">'+copyIcon()+'Copy Dropbox link</button>';
+      if(!r.r2_url && !r.dropbox_url) acts = '<span class="chip">no link</span>';
       return '<article class="card">'+
         '<h3 class="title" title="'+esc(disp)+'">'+esc(disp)+'</h3>'+
         '<div class="chips"><span class="chip code copy" data-copy="'+esc(r.code||'')+'" title="'+esc(r.code||'')+' — click to copy"><span class="ctext">'+esc(r.code||'—')+'</span><span class="cicon">⧉</span></span>'+
           (r.dataset ? '<span class="chip">'+esc(r.dataset)+'</span>' : '')+'</div>'+
-        (acts?'<div class="actions">'+acts+'</div>':'')+
+        '<div class="actions">'+acts+'</div>'+
       '</article>';
     }
     function emptyState(t){ return '<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><h3>No matches</h3><p>Nothing found for “'+esc(t)+'”. Try a different word or code.</p></div>'; }
@@ -325,7 +325,7 @@
     }
     let toastT; function showToast(m){ toast.textContent=m; toast.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>toast.classList.remove('show'),1600); }
     function play(){ return '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>'; }
-    function link(){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg>'; }
+    function copyIcon(){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>'; }
   </script>
 </body>
 </html>
