@@ -6270,7 +6270,10 @@ function App() {
 
   useEffect(()=>{ try{localStorage.setItem('agencies',JSON.stringify(agencies));}catch(e){} },[agencies]);
 
-  function addToast(msg,type='info'){const id=++toastSeqRef.current;setToasts(t=>[...t,{id,msg,type}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);}
+  // Dedup: an identical toast already on screen isn't stacked again — a bulk
+  // action that hits the same message N times (e.g. "Only Mikka or an admin can
+  // edit this lead" for each non-owned lead) shows it once, not a wall of toasts.
+  function addToast(msg,type='info'){const id=++toastSeqRef.current;setToasts(t=> t.some(x=>x.msg===msg && x.type===type) ? t : [...t,{id,msg,type}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);}
   function saveL(upd){
     const old=leads.find(l=>l.id===upd.id);
     // Employees may only edit leads that are unassigned or assigned to themselves.
