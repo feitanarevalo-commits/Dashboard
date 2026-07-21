@@ -63,8 +63,8 @@
     .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px}
     .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:10px; min-width:0; transition:transform .12s,border-color .12s,box-shadow .12s}
     .card:hover{transform:translateY(-2px); border-color:var(--line-hi); box-shadow:var(--shadow)}
-    .thumb-wrap{position:relative; aspect-ratio:16/9; background:#0c0b13; border:1px solid var(--line); border-radius:10px; overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center}
-    .thumb{width:100%; height:100%; object-fit:cover; display:block; background:#0c0b13}
+    .thumb-wrap{position:relative; aspect-ratio:9/16; background:#0c0b13; border:1px solid var(--line); border-radius:10px; overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center}
+    .thumb{width:100%; height:100%; object-fit:contain; display:block; background:#0c0b13}
     .thumb-wrap.noplay .thumb{display:none}
     .thumb-wrap.noplay::after{content:"preview unavailable"; color:var(--faint); font-size:12px}
     .play-badge{position:absolute; width:46px; height:46px; border-radius:50%; background:rgba(0,0,0,.55); display:grid; place-items:center; pointer-events:none; transition:.12s}
@@ -341,7 +341,6 @@
       let acts='';
       if(stream) acts += '<button class="btn primary" data-play="'+esc(stream)+'" data-title="'+esc(disp)+'">'+play()+'Play</button>';
       if(r.dropbox_url) acts += '<button class="btn" data-copy="'+esc(r.dropbox_url)+'" title="Copy Dropbox link">'+copyIcon()+'Copy Dropbox link</button>';
-      if(r.r2_url) acts += '<button class="btn" data-copy="'+esc(r.r2_url)+'" title="Copy R2 link">'+copyIcon()+'Copy R2 link</button>';
       if(!acts) acts = '<span class="chip">no link</span>';
       return '<article class="card">'+ media +
         '<h3 class="title" title="'+esc(disp)+'">'+esc(disp)+'</h3>'+
