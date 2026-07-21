@@ -7333,40 +7333,45 @@ function App() {
   // a group is a duplicate when the same channel exists in 2+ lead records.
   // These are surfaced in the Duplicates tab so two reps don't unknowingly work
   // the same lead. Cross-rep conflicts (2+ distinct reps) are sorted to the top.
-  const dupGroups=(function(){
+  // PERF: these derive from the full leads set (O(n) grouping + a sort). They must
+  // NOT recompute on every render — a tab switch is a render, and re-scanning all
+  // ~3k+ leads ~15× per tab switch was the source of the "laggy tab switch" lag.
+  // Memoized on `leads` (+ user where the result is user-scoped) so they only
+  // recompute when leads actually change.
+  const meName=currentUser&&currentUser.name;
+  const dupGroups=React.useMemo(()=>{
     const byKey={};
-    vLeads.forEach(l=>{ const k=leadKey(l); if(!k) return; (byKey[k]=byKey[k]||[]).push(l); });
+    leads.forEach(l=>{ const k=leadKey(l); if(!k) return; (byKey[k]=byKey[k]||[]).push(l); });
     return Object.keys(byKey).map(k=>{
       const ls=byKey[k];
       return {key:k, leads:ls, reps:[...new Set(ls.map(l=>l.assignedTo).filter(Boolean))]};
     }).filter(g=>g.leads.length>1)
       .sort((a,b)=>(b.reps.length-a.reps.length)||(b.leads.length-a.leads.length));
-  })();
+  },[leads]);
   // Reps see duplicate groups that involve THEIR leads (so they're notified when
   // a channel they have is also worked by another rep); admins see all groups.
-  const myDupGroups = (isAdmin || !currentUser) ? dupGroups : dupGroups.filter(g=>g.leads.some(l=>l.assignedTo===currentUser.name || l.scrapedBy===currentUser.name));
+  const myDupGroups = React.useMemo(()=> (isAdmin || !currentUser) ? dupGroups : dupGroups.filter(g=>g.leads.some(l=>l.assignedTo===meName || l.scrapedBy===meName)), [dupGroups, isAdmin, meName]);
   // Flat lookup (leadKey -> records) so every lead row, in any rep/lead-gen/campaign/
   // pool tab, can show an inline "also worked elsewhere" flag. Built from the same
   // global set as dupGroups, so detection is identical everywhere.
-  const dupIndex={};
   // lastContact + threshold ride along so a row can also warn that a teammate
   // contacted this same channel recently and it isn't due for recycling yet.
-  dupGroups.forEach(g=>{ dupIndex[g.key]=g.leads.map(l=>({id:l.id, rep:l.assignedTo||'', contacted:isContacted(l)||(l.tags||[]).includes('For Recycle'), lastContact:l.lastContactDate||'', threshold:recycleThresholdDays(l)})); });
+  const dupIndex=React.useMemo(()=>{ const idx={}; dupGroups.forEach(g=>{ idx[g.key]=g.leads.map(l=>({id:l.id, rep:l.assignedTo||'', contacted:isContacted(l)||(l.tags||[]).includes('For Recycle'), lastContact:l.lastContactDate||'', threshold:recycleThresholdDays(l)})); }); return idx; },[dupGroups]);
 
   // Cross-rep lead conflicts worth actively telling someone about: the same
   // channel held by 2+ DIFFERENT teammates. A rep only hears about channels they
   // hold ("Chase is also working X"); admins see every conflict. Same-rep copies
   // are excluded — that's just a tidy-up, not a conflict.
-  const dupAlerts=(function(){
+  const dupAlerts=React.useMemo(()=>{
     if(!currentUser) return [];
     const out=[];
     dupGroups.forEach(g=>{
       const reps=[...new Set(g.leads.map(l=>l.assignedTo).filter(Boolean))];
       if(reps.length<2) return;
-      if(!isAdmin && !reps.includes(currentUser.name)) return;
-      const others=reps.filter(r=>r!==currentUser.name);
+      if(!isAdmin && !reps.includes(meName)) return;
+      const others=reps.filter(r=>r!==meName);
       if(!isAdmin && !others.length) return;
-      const own=g.leads.find(l=>l.assignedTo===currentUser.name);
+      const own=g.leads.find(l=>l.assignedTo===meName);
       out.push({
         id:'dup_'+g.key+'_'+reps.slice().sort().join('_'),
         channel:((own||g.leads[0])||{}).channelName||'(unnamed)',
@@ -7374,7 +7379,7 @@ function App() {
       });
     });
     return out;
-  })();
+  },[dupGroups, isAdmin, meName]);
 
   const recentCutoff=new Date();recentCutoff.setDate(recentCutoff.getDate()-7);
   // A lead is "Pending Qualification" if it carries that status tag, OR it's the
@@ -7387,15 +7392,18 @@ function App() {
     (l.assignedTo && (l.campaigns||[]).length===0 && !hasStatusTag(l));
   // Non-admins only see their OWN leads on scoped tabs (e.g. Pending); admins see all.
   const canSeeLead = l => isAdmin || (currentUser && l.assignedTo===currentUser.name);
-  const counts={
-    potential:vLeads.filter(l=>l.tags.includes('Potential')).length,
-    pending:vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l)).length,
-    contacted:vLeads.filter(l=>isContacted(l)).length,
-    recycle:vLeads.filter(l=>l.tags.includes('For Recycle')).length,
-    recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff).length,
-    duplicates:myDupGroups.length,
-    partner:vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l)).length,
-  };
+  const counts=React.useMemo(()=>{
+    const rc=new Date(); rc.setDate(rc.getDate()-7);   // matches the Recent-tab cutoff
+    return {
+      potential:vLeads.filter(l=>l.tags.includes('Potential')).length,
+      pending:vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l)).length,
+      contacted:vLeads.filter(l=>isContacted(l)).length,
+      recycle:vLeads.filter(l=>l.tags.includes('For Recycle')).length,
+      recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=rc).length,
+      duplicates:myDupGroups.length,
+      partner:vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l)).length,
+    };
+  },[leads, isAdmin, meName, myDupGroups]);
 
   // ── Lead Pools ── the Make scraper feeds these buckets 24/7 with unclaimed
   // candidates; any rep/lead-gen picks one, "Claims" it (→ assigned to them),
@@ -7417,7 +7425,7 @@ function App() {
   // their name and qualify it, which pulls it into the normal flow. Anything left
   // unclaimed just stays in the pool while the Make scraper keeps topping it up.
   const isPoolCandidate = l => !!l.pool && !l.assignedTo && (l.campaigns||[]).length===0;
-  const nonPoolLeads = vLeads.filter(l=>!isPoolCandidate(l));
+  const nonPoolLeads = React.useMemo(()=>vLeads.filter(l=>!isPoolCandidate(l)),[leads]);
   // MSN + VIRALS pool candidates are split evenly across the three sales reps so
   // each works a distinct, non-overlapping slice. The split is deterministic by
   // channel key (a lead always falls to the same rep, stable across reloads).
