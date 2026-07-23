@@ -6617,6 +6617,18 @@ function App() {
     // A Contacted / For-Recycle copy is NOT a block — re-adding it is a recycle.
     const activeDup = bare && leads.some(l=>leadKey(l)===bare && (l.assignedTo||'')===(lead.assignedTo||'') && !isContacted(l) && !(l.tags||[]).includes('For Recycle'));
     if(activeDup){ addToast(`"${lead.channelName}" is already in ${lead.assignedTo}'s list`,'info'); return false; }
+    // Same channel actively held by ANOTHER teammate (not yet contacted): say who
+    // added it first and confirm, so two reps don't unknowingly work the same
+    // lead. (A contacted/recycle copy is handled by the recycle flow below.)
+    const othersActive = bare ? leads.filter(l=>leadKey(l)===bare && (l.assignedTo||'')!==(lead.assignedTo||'') && !isContacted(l) && !(l.tags||[]).includes('For Recycle')) : [];
+    if(othersActive.length){
+      const first=othersActive.slice().sort((a,b)=>String(a.addedAt||a.dateAssigned||'').localeCompare(String(b.addedAt||b.dateAssigned||'')))[0];
+      const who=humanScraper(first)||first.assignedTo||'another teammate';
+      const when=String(first.addedAt||first.dateAssigned||'').slice(0,10);
+      const holder=first.assignedTo&&first.assignedTo!==who?` and is now assigned to ${first.assignedTo}`:(first.assignedTo?` and is assigned to ${first.assignedTo}`:'');
+      const ok=window.confirm(`⚠ Already added\n\n"${lead.channelName}" was already added${when?` on ${when}`:''} by ${who}${holder}.\n\nAdding it again means two reps would be working the same channel. Add anyway?`);
+      if(!ok) return false;
+    }
 
     if(bare){
       // Same channel already Contacted / For Recycle. Re-adding it RECYCLES the rep's
