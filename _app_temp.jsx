@@ -4679,6 +4679,13 @@ function DuplicatesView({groups,config,onSave,onDelete,addToast}) {
                   : <div style={{width:26,height:26,borderRadius:'50%',background:'var(--accent-light)',color:'var(--accent)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700}}>{avatarLetter(head.channelName)}</div>}
                 {head.channelName}
                 <span style={{fontSize:12,fontWeight:500,color:'var(--text-dim)'}}>{PLATFORM_ICON[head.platform]||''} {head.platform} · {head.followers||'—'} followers</span>
+                {/* WHY these records are grouped — the shared identity. Records can
+                    look unrelated (different URLs, different emails) while still
+                    being the same channel: YouTube's channel ID is the truth. */}
+                <span title="These records share this identity — they are the same channel even if their URLs or emails differ"
+                  style={{fontSize:11,fontWeight:600,color:'var(--text-light)',background:'var(--bg)',border:'1px solid var(--border)',padding:'2px 8px',borderRadius:20,fontFamily:'ui-monospace,monospace'}}>
+                  {/^uc[\w-]{20,}$/i.test(g.key)?`same channel ID · ${g.key.slice(0,12)}…`:(/^https?:/i.test(g.key)?'same URL':'same channel name')}
+                </span>
               </div>
               <div style={{marginLeft:'auto',display:'flex',gap:6,alignItems:'center'}}>
                 {conflict
