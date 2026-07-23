@@ -2405,17 +2405,22 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
       const imported=importedCohort.length;
       const contacted=camp.filter(l=>isDirectContacted(l) && inWinDate(l.lastContactDate)).length;
       const fresh=importedCohort.filter(l=>!isContacted(l)).length;
-      return {id:c.id,label:c.label,color:c.color,imported,contacted,fresh};
+      // A day's quota can be met by EITHER kind of work: contacting leads, or
+      // bringing in / qualifying the day's leads (JC and import-heavy days).
+      // Progress = the better of the two, judged per campaign.
+      const progress=Math.max(imported, contacted);
+      return {id:c.id,label:c.label,color:c.color,imported,contacted,fresh,progress};
     });
     const imported=rows.reduce((a,b)=>a+b.imported,0);
     const contacted=rows.reduce((a,b)=>a+b.contacted,0);
     const fresh=rows.reduce((a,b)=>a+b.fresh,0);
+    const progress=rows.reduce((a,b)=>a+b.progress,0);
     const tier=rep==='JC'?'jc':(newHires.includes(rep)?'newHire':'main');
     const qset=(quotas[tier]||{})[period]||{};
     const totalQuota=campDefs.reduce((a,c)=>a+(Math.max(0,Number(qset[c.id]))||0),0);
-    const quotaPct=totalQuota>0?(contacted/totalQuota)*100:100;
-    rows.forEach(row=>{ const q=Math.max(0,Number(qset[row.id]))||0; row.quota=q; row.quotaPct=q>0?(row.contacted/q)*100:100; });
-    return {rep,imported,contacted,fresh,rows,tier,totalQuota,quotaPct};
+    const quotaPct=totalQuota>0?(progress/totalQuota)*100:100;
+    rows.forEach(row=>{ const q=Math.max(0,Number(qset[row.id]))||0; row.quota=q; row.quotaPct=q>0?(row.progress/q)*100:100; });
+    return {rep,imported,contacted,fresh,progress,rows,tier,totalQuota,quotaPct};
   });
   // Fixed team order (REP_ORDER); unlisted reps fall to the end, worst-quota first.
   const orderIdx=n=>{ const i=REP_ORDER.indexOf(n); return i<0?REP_ORDER.length+1:i; };
@@ -2599,7 +2604,9 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                     <span style={{display:'inline-flex',alignItems:'center',gap:8,fontSize:13.5,fontWeight:700,color:st.fg,background:st.bg,padding:'6px 13px',borderRadius:99}}>
                       <span style={{width:8,height:8,borderRadius:'50%',background:st.fg}}/>{st.label}
                     </span>
-                    <div style={{fontSize:11.5,color:'var(--text-light)',marginTop:6,fontFamily:MONO}}>{r.contacted.toLocaleString()} / {r.totalQuota.toLocaleString()} · {Math.round(r.quotaPct)}%</div>
+                    <div style={{fontSize:11.5,color:'var(--text-light)',marginTop:6,fontFamily:MONO}}
+                      title={`Quota progress = leads in OR contacted, whichever is higher per campaign (imported ${r.imported} · contacted ${r.contacted})`}>
+                      {r.progress.toLocaleString()} / {r.totalQuota.toLocaleString()} · {Math.round(r.quotaPct)}%</div>
                   </div>
                   <div style={{textAlign:'right'}}>
                     <div style={{fontFamily:MONO,fontSize:20,fontWeight:600,lineHeight:1}}>{r.imported.toLocaleString()}</div>
