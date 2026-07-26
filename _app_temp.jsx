@@ -2725,8 +2725,11 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                 </div>
 
                 <div style={{display:'flex',flexDirection:'column',gap:7,margin:'16px 0 14px'}}>
-                  <div style={{display:'grid',gridTemplateColumns:'52px 1fr 34px 38px 34px',gap:8,fontSize:8,fontWeight:700,letterSpacing:'.09em',color:'var(--text-light)'}}>
+                  {/* CONT is the leads this rep actually contacted in that campaign
+                      for the selected day — the day's worked potentials. */}
+                  <div style={{display:'grid',gridTemplateColumns:'46px 1fr 34px 30px 34px 32px',gap:6,fontSize:8,fontWeight:700,letterSpacing:'.08em',color:'var(--text-light)'}}>
                     <span/><span/>
+                    <span style={{textAlign:'right'}}>CONT</span>
                     <span style={{textAlign:'right'}}>POT</span>
                     <span style={{textAlign:'right'}}>IMP</span>
                     <span style={{textAlign:'right'}}>FRESH</span>
@@ -2734,12 +2737,14 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                   {r.camps.map(c=>{
                     const v=c.o[repMetric];
                     return (
-                      <div key={c.id} style={{display:'grid',gridTemplateColumns:'52px 1fr 34px 38px 34px',gap:8,alignItems:'center'}}>
+                      <div key={c.id} style={{display:'grid',gridTemplateColumns:'46px 1fr 34px 30px 34px 32px',gap:6,alignItems:'center'}}
+                        title={`${c.label} · contacted ${fmt(c.o.contacted)} · tagged potential ${fmt(c.o.potentials)} · assigned ${fmt(c.o.imported)} · fresh ${fmt(c.o.fresh)}`}>
                         <span style={{fontSize:9.5,fontWeight:800,letterSpacing:'.05em',color:c.color,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.label}</span>
                         <span style={{height:6,borderRadius:999,background:'var(--bg)',overflow:'hidden',display:'block'}}>
                           <span style={{display:'block',height:'100%',borderRadius:999,background:c.color,width:Math.max(2,pct(v,r.maxCamp))+'%'}}/>
                         </span>
-                        <span style={{textAlign:'right',fontSize:11.5,fontWeight:700,fontFamily:MONO,color:c.o.potentials?'var(--text)':'var(--text-light)'}}>{fmt(c.o.potentials)}</span>
+                        <span style={{textAlign:'right',fontSize:11.5,fontWeight:700,fontFamily:MONO,color:c.o.contacted?C.good:'var(--text-light)'}}>{fmt(c.o.contacted)}</span>
+                        <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:c.o.potentials?'var(--text)':'var(--text-light)'}}>{fmt(c.o.potentials)}</span>
                         <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:C.blue}}>{fmt(c.o.imported)}</span>
                         <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:c.o.fresh?C.bad:'var(--text-light)'}}>{fmt(c.o.fresh)}</span>
                       </div>
