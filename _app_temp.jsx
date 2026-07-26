@@ -2364,21 +2364,28 @@ function KnowledgeBaseView({articles,tools:toolsProp,isAdmin,onSave,onDelete,onD
   </>;
 }
 
-// ─── HOME: PERFORMANCE KPI (quota monitoring board) ──────────────────────
-// Ranks the sales team by contacted-vs-quota for the selected period, so an
-// admin can see at a glance who is behind. Wired to real leads. Quotas are
-// editable per tier (Main / New-hire / JC) and per campaign, persisted to
-// app_config. Non-admins see only their own row and can't edit quotas.
-// A rep row expands to a per-campaign breakdown and can drill into the rep's
-// live dashboard or full KPI detail (preserving the earlier Home features).
+// ─── HOME: LEAD PULSE ────────────────────────────────────────────────────
+// Ported from the "Lead Pulse" design. One screen answering: how many leads
+// came in, how many got tagged Potential, and what happened to them — for the
+// team, per campaign, and per rep. Clicking a rep opens THEIR dashboard.
+//
+// Metric definitions (all scoped to the selected day/week/month):
+//   imported   — leads ASSIGNED to the rep in the window (the inflow)
+//   potentials — leads the rep TAGGED Potential in the window (history
+//                'qualified' events, so it survives the lead moving on)
+//   contacted  — leads the rep CONTACTED in the window (by last-contact date,
+//                same basis as their own dashboard)
+//   pending    — of the inflow, still awaiting qualification
+//   fresh      — of the inflow, not yet on Close (leadOrigin 'Fresh')
+//   to work    — currently Potential/HT and not yet contacted (live queue)
 const HOME_PERIODS=[{id:'daily',label:'Daily'},{id:'weekly',label:'Weekly'},{id:'monthly',label:'Monthly'}];
-// Fixed display order for the KPI rep list. Anyone not listed falls to the end
-// (then by furthest-behind quota). Edit this to reorder the board.
-const REP_ORDER=['Chase','Mikka','Pen','Rein','JC','Bella','Mica','Jon','Chai','Czarina'];
 const HOME_PERIOD_DAYS={daily:1,weekly:7,monthly:30};
+// Fixed team order for the rep list (the "Team" sort). Anyone not listed falls
+// to the end. Edit this to reorder the board.
+const REP_ORDER=['Chase','Mikka','Pen','Rein','JC','Bella','Mica','Jon','Chai','Czarina'];
 
-// Seed quotas: the design's targets mapped onto whatever campaigns exist, by
-// matching campaign label keywords (VIRALS / MCN / MSN). Admins edit these.
+// Seed quotas kept so the Customize → Sales Rep Quotas editor keeps working;
+// the Lead Pulse board itself doesn't display quota targets.
 function defaultQuotas(campaigns){
   const idOf=kw=>{const c=(campaigns||[]).find(x=>new RegExp(kw,'i').test(x.label||x.id));return c&&c.id;};
   const V=idOf('viral'),M=idOf('mcn'),S=idOf('msn');
@@ -2389,8 +2396,6 @@ function defaultQuotas(campaigns){
     jc:     {daily:mk(3,2,8),  weekly:mk(14,8,40),  monthly:mk(55,26,150)},
   };
 }
-// Deep-merge stored quotas over the seeded defaults so new campaigns/periods
-// always have a value and admin edits win.
 function mergeQuotas(def, stored){
   if(!stored||typeof stored!=='object') return def;
   const out={};
@@ -2405,396 +2410,346 @@ function mergeQuotas(def, stored){
 
 function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const isAdmin = !!(currentUser && currentUser.role==='admin');
-  // Non-admins only ever see THEIR OWN row and can't edit quotas.
+  // Non-admins only ever see THEIR own row.
   const lockedRep = (currentUser && currentUser.role!=='admin') ? currentUser.name : null;
   const SG="'Space Grotesk',sans-serif";
   const MONO="'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace";
 
-  const [period,setPeriod]=useState('daily');      // default to today's quota
-  const [dayOffset,setDayOffset]=useState(0);      // ≤0, days from today (daily view)
-  const [expanded,setExpanded]=useState({});
-  const [detail,setDetail]=useState('');           // rep whose full-KPI modal is open
+  const [period,setPeriod]=useState('daily');
+  const [dayOffset,setDayOffset]=useState(0);      // ≤0 days from today
+  const [repMetric,setRepMetric]=useState('potentials');   // drives the rep bars
+  const [sortMode,setSortMode]=useState('team');
 
-  const campaigns=(config.campaigns||[]);
-  const campColorMap={}; campaigns.forEach(c=>campColorMap[c.id]=c.color);
-  const campDefs=campaigns.map(c=>({id:c.id,label:c.label,color:c.color}));
-  const leadgenNames=(config.users||[]).filter(u=>u.role==='leadgen').map(u=>u.name);
-  const newHires=(config.newHires&&config.newHires.length?config.newHires:['Bella','Mica']);
-
-  // Quotas are READ here (status/sort); they're edited in Customize → Settings.
-  // Computed fresh each render (not useState) so it always reflects the loaded
-  // campaigns — seeding off first-render campaigns would lock onto stale ids.
-  const quotas=mergeQuotas(defaultQuotas(campaigns), config.quotas);
-
-  // ── Period window (by dateAssigned) ─────────────────────────
-  const today=new Date(); today.setHours(0,0,0,0);
-  const dayDate=new Date(today); dayDate.setDate(dayDate.getDate()+dayOffset);
-  const dayStr=ymdLocal(dayDate);
-  const DAYS=HOME_PERIOD_DAYS[period];
-  const fromStr=period==='daily'?dayStr:ymdLocal(new Date(today.getTime()-(DAYS-1)*86400000));
-  const toStr=period==='daily'?dayStr:ymdLocal(today);
-  function inWin(l){ const d=String(l.dateAssigned||'').slice(0,10); return !!d && d>=fromStr && d<=toStr; }
-  function inWinDate(dstr){ const d=String(dstr||'').slice(0,10); return !!d && d>=fromStr && d<=toStr; }
-  const dayShort=dayDate.toLocaleDateString('en-US',{month:'short',day:'numeric'});
-  const rangeLabel=period==='daily'?(dayOffset===0?'Today':dayShort):(period==='weekly'?'This week':'This month');
-  const periodWord=period==='daily'?(dayOffset===0?'today':'on '+dayShort):(period==='weekly'?'this week':'this month');
-
-  // ── Per-rep, per-campaign figures for the period ────────────
-  //   imported  = leads ASSIGNED to the rep in that campaign in the window (new work in);
-  //   contacted = leads the rep CONTACTED in the window, by last-contact date — the same
-  //               basis as the rep dashboard's "Contacted (today)", so the two agree. A
-  //               lead assigned days ago but contacted today counts here (the old code only
-  //               counted contacted among leads ASSIGNED in the window, so real outreach
-  //               on older leads read as 0);
-  //   fresh     = imported leads not yet contacted (today's batch still to work).
+  const campDefs=(config.campaigns||[]).map(c=>({id:c.id,label:c.label,color:c.color}));
+  const campIds=campDefs.map(c=>c.id);
   const allReps=(config.salesReps||[]);
-  const reps=(lockedRep?allReps.filter(r=>r===lockedRep):allReps).map(rep=>{
-    const mineAll=leads.filter(l=>l.assignedTo===rep);
-    const rows=campDefs.map(c=>{
-      const camp=mineAll.filter(l=>(l.campaigns||[]).includes(c.id));
-      const importedCohort=camp.filter(inWin);
-      const imported=importedCohort.length;
-      const contacted=camp.filter(l=>isDirectContacted(l) && inWinDate(l.lastContactDate)).length;
-      const fresh=importedCohort.filter(l=>!isContacted(l)).length;
-      // A day's quota can be met by EITHER kind of work: contacting leads, or
-      // bringing in / qualifying the day's leads (JC and import-heavy days).
-      // Progress = the better of the two, judged per campaign.
-      const progress=Math.max(imported, contacted);
-      return {id:c.id,label:c.label,color:c.color,imported,contacted,fresh,progress};
+  const reps=lockedRep?allReps.filter(r=>r===lockedRep):allReps;
+
+  // ── Window ────────────────────────────────────────────────
+  const today=new Date(); today.setHours(0,0,0,0);
+  const anchor=new Date(today); anchor.setDate(anchor.getDate()+dayOffset);
+  const DAYS=HOME_PERIOD_DAYS[period];
+  const win=(endDate,days)=>{
+    const to=ymdLocal(endDate);
+    const f=new Date(endDate); f.setDate(f.getDate()-(days-1));
+    return {from:ymdLocal(f), to};
+  };
+  const cur=win(anchor,DAYS);
+  const prevEnd=new Date(anchor); prevEnd.setDate(prevEnd.getDate()-DAYS);
+  const prev=win(prevEnd,DAYS);
+  const dayStr=ymdLocal(anchor);
+  const atToday=dayOffset>=0;
+
+  // ── One pass over every lead → per-rep, per-campaign buckets ──
+  const EMPTY=()=>({imported:0,potentials:0,contacted:0,pending:0,fresh:0,toWork:0});
+  function buildStats(w){
+    const inW=d=>{ const s=String(d||'').slice(0,10); return !!s && s>=w.from && s<=w.to; };
+    const byRep={}, byCamp={}, team=EMPTY();
+    const bucket=(rep,camp)=>{ const r=byRep[rep]||(byRep[rep]={_all:EMPTY()}); return camp?(r[camp]||(r[camp]=EMPTY())):r._all; };
+    campIds.forEach(c=>{ byCamp[c]=EMPTY(); });
+    leads.forEach(l=>{
+      const rep=l.assignedTo;
+      const camps=(l.campaigns||[]).filter(c=>campIds.includes(c));
+      const assignedIn=inW(l.dateAssigned);
+      const contactedIn=isDirectContacted(l) && inW(l.lastContactDate);
+      const isPend=(l.tags||[]).includes('Pending Qualification');
+      const isFreshOrigin=leadOrigin(l)==='Fresh';
+      const workable=isWorkable(l) && !isContacted(l);
+      const bump=(t,f,n)=>{ t[f]+=(n||1); };
+      const applyAll=(fn)=>{
+        if(rep){ fn(bucket(rep,null)); camps.forEach(c=>fn(bucket(rep,c))); }
+        camps.forEach(c=>fn(byCamp[c]));
+        fn(team);
+      };
+      if(assignedIn){
+        applyAll(t=>bump(t,'imported'));
+        if(isPend) applyAll(t=>bump(t,'pending'));
+        if(isFreshOrigin) applyAll(t=>bump(t,'fresh'));
+      }
+      if(contactedIn) applyAll(t=>bump(t,'contacted'));
+      if(workable){ if(rep){ bucket(rep,null).toWork++; camps.forEach(c=>bucket(rep,c).toWork++); } camps.forEach(c=>byCamp[c].toWork++); team.toWork++; }
+      // Potentials are credited to WHOEVER tagged it, from the lead's timeline.
+      (l.history||[]).forEach(e=>{
+        if(!e || e.type!=='qualified' || !e.actor || !inW(e.ts)) return;
+        const b=byRep[e.actor]||(byRep[e.actor]={_all:EMPTY()});
+        b._all.potentials++;
+        camps.forEach(c=>{ (b[c]||(b[c]=EMPTY())).potentials++; byCamp[c].potentials++; });
+        team.potentials++;
+      });
     });
-    const imported=rows.reduce((a,b)=>a+b.imported,0);
-    const contacted=rows.reduce((a,b)=>a+b.contacted,0);
-    const fresh=rows.reduce((a,b)=>a+b.fresh,0);
-    const progress=rows.reduce((a,b)=>a+b.progress,0);
-    const tier=rep==='JC'?'jc':(newHires.includes(rep)?'newHire':'main');
-    const qset=(quotas[tier]||{})[period]||{};
-    const totalQuota=campDefs.reduce((a,c)=>a+(Math.max(0,Number(qset[c.id]))||0),0);
-    const quotaPct=totalQuota>0?(progress/totalQuota)*100:100;
-    rows.forEach(row=>{ const q=Math.max(0,Number(qset[row.id]))||0; row.quota=q; row.quotaPct=q>0?(row.progress/q)*100:100; });
-    return {rep,imported,contacted,fresh,progress,rows,tier,totalQuota,quotaPct};
-  });
-  // Fixed team order (REP_ORDER); unlisted reps fall to the end, worst-quota first.
+    return {byRep,byCamp,team};
+  }
+  const S=React.useMemo(()=>buildStats(cur),[leads,cur.from,cur.to,campIds.join()]);
+  const P=React.useMemo(()=>buildStats(prev),[leads,prev.from,prev.to,campIds.join()]);
+  const get=(st,rep,camp)=>{ const r=st.byRep[rep]; if(!r) return EMPTY(); return (camp?r[camp]:r._all)||EMPTY(); };
+
+  // ── Palette (dashboard tokens + the design's accents) ──────
+  const C={ ink:'#0d0d12', good:'#2f8f5b', warn:'#c07a1e', bad:'#c0453a', blue:'#3f6a8a' };
+  // Translucent tint of a campaign colour (works on light + dark backgrounds).
+  const tint=(hex,a)=>{ const h=String(hex||'').replace('#',''); if(h.length!==6) return 'var(--bg)';
+    const n=parseInt(h,16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
+  const pct=(n,d)=>d>0?Math.round((n/d)*100):0;
+  const fmt=n=>Number(n||0).toLocaleString();
+  const deltaOf=(a,b)=>{ const d=a-b; return {v:d, label:(d>0?'+':'')+d, fg:d>0?C.good:(d<0?C.bad:'var(--text-light)')}; };
+
+  const periodTag = period==='daily'
+    ? (dayOffset===0?'TODAY':anchor.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}).toUpperCase())
+    : (period==='weekly'?'WEEK TO '+anchor.toLocaleDateString(undefined,{month:'short',day:'numeric'}).toUpperCase()
+                        :'30 DAYS TO '+anchor.toLocaleDateString(undefined,{month:'short',day:'numeric'}).toUpperCase());
+
+  // ── Team hero ─────────────────────────────────────────────
+  const T=S.team, TP=P.team;
+  const heroDelta=deltaOf(T.potentials,TP.potentials);
+  const heroSplit=[
+    {label:'CONTACTED', value:T.contacted, dot:C.good},
+    {label:'PENDING',   value:T.pending,   dot:C.warn},
+    {label:'TO WORK',   value:T.toWork,    dot:'#8b8b96'},
+  ];
+  const heroBase=Math.max(1,T.contacted+T.pending+T.toWork);
+
+  // ── Rep rows ──────────────────────────────────────────────
   const orderIdx=n=>{ const i=REP_ORDER.indexOf(n); return i<0?REP_ORDER.length+1:i; };
-  reps.sort((a,b)=> (orderIdx(a.rep)-orderIdx(b.rep)) || (a.quotaPct-b.quotaPct));
+  const metricLabel={potentials:'POTENTIALS',imported:'IMPORTED',contacted:'CONTACTED'}[repMetric];
+  let repRows=reps.map(rep=>{
+    const a=get(S,rep,null);
+    const camps=campDefs.map(c=>{ const o=get(S,rep,c.id); return {...c, o}; });
+    const maxCamp=Math.max(1,...camps.map(c=>c.o[repMetric]));
+    return {rep, a, camps, maxCamp, sortVal:a[repMetric],
+      role:(getProfile(rep).title||'').trim()||((config.users||[]).find(u=>u.name===rep&&u.role==='leadgen')?'Lead gen':'Sales rep')};
+  });
+  repRows.sort((x,y)=> sortMode==='name' ? x.rep.localeCompare(y.rep)
+                     : sortMode==='low'  ? (x.sortVal-y.sortVal)||orderIdx(x.rep)-orderIdx(y.rep)
+                     : sortMode==='top'  ? (y.sortVal-x.sortVal)||orderIdx(x.rep)-orderIdx(y.rep)
+                     : orderIdx(x.rep)-orderIdx(y.rep));
 
-  function statusOf(pct){
-    if(pct>=100) return {label:'On track', fg:'#2f8f5b', bg:'rgba(47,143,91,.15)'};
-    if(pct>=75)  return {label:'Watch',    fg:'#c07a1e', bg:'rgba(192,122,30,.16)'};
-    return {label:'Behind target', fg:'#c0453a', bg:'rgba(192,69,58,.15)'};
-  }
-  function quotaPctColor(pct,quota){
-    if(!quota) return 'var(--text-light)';
-    if(pct>=100) return '#2f8f5b'; if(pct>=75) return '#c07a1e'; return '#c0453a';
-  }
-
-  const behind=reps.filter(r=>r.quotaPct<100).length;
-  const onTrack=reps.length-behind;
-  const headline=lockedRep
-    ? (behind?`You're behind quota ${periodWord}`:`You're on track ${periodWord}`)
-    : (behind===0?'All reps on track':`${behind} ${behind===1?'rep needs':'reps need'} attention`);
-  const headlineSub=lockedRep
-    ? (behind?`Below your contacted quota ${periodWord}.`:`You met your contacted quota ${periodWord}. 🎉`)
-    : (behind===0?`Everyone met their contacted quota ${periodWord}.`:`Below their contacted quota ${periodWord} — shown at the top.`);
-
-  const teamImported=reps.reduce((a,b)=>a+b.imported,0);
-  const teamContacted=reps.reduce((a,b)=>a+b.contacted,0);
-  const teamFresh=reps.reduce((a,b)=>a+b.fresh,0);   // imported & contacted are now different sets — sum the per-rep fresh
-  const unassigned=leads.filter(l=>!l.assignedTo).length;
-  const totals=[
-    {label:'Imported (assigned)', value:teamImported, color:'var(--text)'},
-    {label:'Contacted', value:teamContacted, color:'#2f8f5b'},
-    {label:'Fresh (uncontacted)', value:teamFresh, color:'var(--text-dim)'},
-    {label:'Unassigned', value:unassigned, color:'#c07a1e'},
+  const pill=(on)=>({padding:'6px 14px',borderRadius:999,fontSize:12,fontWeight:700,cursor:'pointer',border:'none',fontFamily:'inherit',
+    background:on?'var(--card)':'transparent', color:on?'var(--text)':'var(--text-dim)', boxShadow:on?'0 1px 2px rgba(0,0,0,.08)':'none'});
+  const track={display:'flex',gap:4,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:999,padding:4};
+  const card={background:'var(--card)',border:'1px solid var(--border)',borderRadius:20,boxShadow:'0 1px 2px rgba(19,19,24,.05)'};
+  const chipsOf=o=>[
+    {label:'imported', value:o.imported,  fg:C.blue},
+    {label:'contacted',value:o.contacted, fg:C.good},
+    {label:'pending',  value:o.pending,   fg:C.warn},
+    {label:'to work',  value:o.toWork,    fg:'var(--text-dim)'},
+    {label:'fresh',    value:o.fresh,     fg:C.bad},
   ];
 
-  // ── Day picker helpers (daily only) ─────────────────────────
-  const atToday=dayOffset>=0;
-  const dayLabel=dayDate.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
-  const relWord=dayOffset===0?'Today':dayOffset===-1?'Yesterday':`${-dayOffset} days ago`;
-  const maxIso=ymdLocal(today);
-
-  // ── Full-KPI modal data (preserves the earlier per-person detail) ──
-  const todayYmd=ymdLocal(new Date());
-  const KPI_WINDOWS=[{label:'Day',days:1},{label:'Week',days:7},{label:'Month',days:30}].map(w=>({
-    label:w.label, from:ymdLocal(new Date(today.getTime()-(w.days-1)*86400000))
-  }));
-  const qualifiedByActor=React.useMemo(()=>{
-    const m={};
-    leads.forEach(l=>(l.history||[]).forEach(e=>{
-      if(!e||e.type!=='qualified') return; const a=e.actor||''; if(!a) return;
-      const d=String(e.ts||'').slice(0,10); if(!d) return;
-      const row=m[a]||(m[a]=[0,0,0]);
-      KPI_WINDOWS.forEach((w,i)=>{ if(d>=w.from&&d<=todayYmd) row[i]++; });
-    }));
-    return m;
-  },[leads,todayYmd]);
-  function perfFor(name){
-    const mine=leads.filter(l=>l.assignedTo===name && inWin(l));
-    const sourced=leads.filter(l=>l.scrapedBy===name && inWinDate(l.addedAt||l.dateAssigned));
-    const follNums=mine.map(l=>parseFollowers(l.followers)).filter(n=>n>0);
-    const camp=campDefs.map(c=>{ const cm=mine.filter(l=>(l.campaigns||[]).includes(c.id));
-      return {id:c.id,label:c.label,total:cm.length,potential:cm.filter(l=>l.tags.includes('Potential')).length,
-        contacted:cm.filter(isContacted).length,ht:cm.filter(l=>l.tags.includes('HT')).length}; });
-    return { name,mine,sourced,camp,
-      total:mine.length, fresh:mine.filter(l=>leadOrigin(l)==='Fresh').length, recycled:mine.filter(isRecycled).length,
-      potential:mine.filter(l=>l.tags.includes('Potential')).length, contacted:mine.filter(isContacted).length,
-      ht:mine.filter(l=>l.tags.includes('HT')).length, nq:mine.filter(l=>l.tags.includes('Not Qualified')).length,
-      withEmail:mine.filter(l=>(l.emails||[]).length>0).length,
-      avgFoll:follNums.length?Math.round(follNums.reduce((a,b)=>a+b,0)/follNums.length):0,
-      srTotal:sourced.length, srEmail:sourced.filter(l=>(l.emails||[]).length>0).length,
-      srAssigned:sourced.filter(l=>!!l.assignedTo).length, srContacted:sourced.filter(isContacted).length }; }
-  function kpiRefRows(name){
-    const mine=leads.filter(l=>l.assignedTo===name);
-    const src=leads.filter(l=>l.scrapedBy===name);
-    const scr=KPI_WINDOWS.map(w=>src.filter(l=>{const d=String(l.addedAt||'').slice(0,10);return d>=w.from&&d<=todayYmd;}).length);
-    const rows=[
-      {label:'Potential', vals:qualifiedByActor[name]||[0,0,0], by:'when they tagged it Potential'},
-      {label:'Contacted', vals:KPI_WINDOWS.map(w=>mine.filter(l=>isDirectContacted(l)&&String(l.lastContactDate||'').slice(0,10)>=w.from&&String(l.lastContactDate||'').slice(0,10)<=todayYmd).length), by:'last contact date'},
-    ];
-    if(scr[2]>0) rows.push({label:'Scraped', vals:scr, by:'date added'});
-    return rows;
-  }
-
-  const canOpenRep=name=>!!onOpenRep && allReps.includes(name);
-
   return (
-    <div className="home-content" style={{fontFamily:SG,color:'var(--text)',padding:'24px 28px 56px'}}>
-      <div style={{width:'100%',maxWidth:1400,margin:'0 auto'}}>
+    <div className="home-content" style={{fontFamily:SG,color:'var(--text)',padding:'22px 24px 60px'}}>
+      <div style={{width:'100%',maxWidth:1320,margin:'0 auto'}}>
 
-        {/* Title + period toggle */}
-        <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:16,flexWrap:'wrap',marginBottom:22}}>
-          <h1 style={{fontFamily:SG,fontSize:26,fontWeight:800,letterSpacing:'-.02em',margin:0}}>Performance KPI</h1>
-          <div style={{display:'inline-flex',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,padding:3,gap:2}}>
-            {HOME_PERIODS.map(p=>(
-              <button key={p.id} onClick={()=>setPeriod(p.id)}
-                style={{border:'none',cursor:'pointer',fontFamily:SG,fontSize:13,fontWeight:600,padding:'6px 16px',borderRadius:8,transition:'all .12s',
-                  background:period===p.id?'var(--text)':'transparent', color:period===p.id?'var(--card)':'var(--text-dim)'}}>{p.label}</button>
-            ))}
-          </div>
-        </div>
-
-        {/* Day picker (daily only) */}
-        <div style={{maxHeight:period==='daily'?80:0, opacity:period==='daily'?1:0, overflow:'hidden', transition:'max-height .3s cubic-bezier(.4,0,.2,1),opacity .24s ease'}}>
-          <div style={{display:'flex',alignItems:'center',gap:14,background:'var(--card)',border:'1px solid var(--border)',borderRadius:14,padding:'12px 16px',marginBottom:14}}>
-            <button onClick={()=>setDayOffset(o=>o-1)} title="Previous day"
-              style={{border:'1px solid var(--border)',background:'var(--bg)',cursor:'pointer',width:36,height:36,borderRadius:9,fontSize:17,color:'var(--text-dim)',lineHeight:1}}>‹</button>
-            <label style={{position:'relative',display:'flex',alignItems:'center',gap:12,cursor:'pointer',padding:'8px 14px',border:'1px solid var(--border)',borderRadius:10}}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{flex:'none',color:'var(--text-dim)'}}>
-                <rect x="3" y="4.5" width="18" height="17" rx="2.5"></rect><path d="M3 9.5h18M8 2.5v4M16 2.5v4"></path>
-              </svg>
-              <span style={{minWidth:170}}>
-                <span style={{display:'block',fontSize:16,fontWeight:700,letterSpacing:'-.01em'}}>{dayLabel}</span>
-                <span style={{display:'block',fontSize:12,color:'var(--text-light)'}}>{relWord}</span>
-              </span>
-              <input type="date" value={dayStr} max={maxIso}
-                onChange={e=>{ if(!e.target.value) return; const picked=new Date(e.target.value+'T00:00:00'); const off=Math.round((picked-today)/86400000); setDayOffset(Math.min(0,off)); }}
-                style={{position:'absolute',inset:0,width:'100%',height:'100%',opacity:0,cursor:'pointer'}}/>
-            </label>
-            <button onClick={()=>setDayOffset(o=>Math.min(0,o+1))} disabled={atToday} title="Next day"
-              style={{border:'1px solid var(--border)',background:'var(--bg)',cursor:atToday?'default':'pointer',width:36,height:36,borderRadius:9,fontSize:17,color:'var(--text-dim)',lineHeight:1,opacity:atToday?.35:1,pointerEvents:atToday?'none':'auto'}}>›</button>
-            <button onClick={()=>setDayOffset(0)} disabled={atToday}
-              style={{border:'1px solid var(--border)',background:'var(--bg)',cursor:atToday?'default':'pointer',marginLeft:'auto',padding:'0 16px',height:36,borderRadius:9,fontSize:13,fontWeight:600,color:'var(--text-dim)',opacity:atToday?.35:1,pointerEvents:atToday?'none':'auto'}}>Today</button>
-          </div>
-        </div>
-
-        {/* Headline */}
-        <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:18,padding:'22px 28px',marginBottom:14,display:'flex',alignItems:'center',gap:32,flexWrap:'wrap'}}>
+        {/* ── Header: title + day nav + period ── */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,flexWrap:'wrap',marginBottom:20}}>
           <div>
-            <div style={{fontFamily:SG,fontSize:30,fontWeight:800,letterSpacing:'-.02em',lineHeight:1}}>{headline}</div>
-            <div style={{fontSize:14,color:'var(--text-dim)',marginTop:6}}>{headlineSub}</div>
+            <h1 style={{fontFamily:SG,fontSize:22,fontWeight:800,letterSpacing:'-.02em',margin:0}}>Lead Pulse</h1>
+            <div style={{fontSize:11.5,color:'var(--text-dim)',marginTop:2}}>{campDefs.map(c=>c.label).join(' · ')||'No campaigns'}</div>
           </div>
-          {!lockedRep && <div style={{display:'flex',gap:26,marginLeft:'auto',flexWrap:'wrap'}}>
-            {[{label:'On track',count:onTrack,color:'#2f8f5b'},{label:'Need attention',count:behind,color:'#c0453a'}].map(c=>(
-              <div key={c.label} style={{display:'flex',alignItems:'center',gap:9}}>
-                <span style={{width:11,height:11,borderRadius:'50%',background:c.color}}/>
-                <div>
-                  <div style={{fontFamily:MONO,fontSize:22,fontWeight:600,lineHeight:1}}>{c.count}</div>
-                  <div style={{fontSize:11.5,color:'var(--text-light)',marginTop:3}}>{c.label}</div>
+          <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,background:'var(--card)',border:'1px solid var(--border)',borderRadius:999,padding:'4px 6px 4px 10px'}}>
+              <button onClick={()=>setDayOffset(o=>o-1)} title="Previous"
+                style={{width:26,height:26,borderRadius:999,border:'none',background:'transparent',cursor:'pointer',color:'var(--text-dim)',fontSize:14,lineHeight:1}}>‹</button>
+              <input type="date" value={dayStr} max={ymdLocal(today)}
+                onChange={e=>{ if(!e.target.value) return; const p=new Date(e.target.value+'T00:00:00'); setDayOffset(Math.min(0,Math.round((p-today)/86400000))); }}
+                style={{border:0,outline:0,background:'transparent',fontFamily:MONO,fontSize:12.5,fontWeight:600,color:'var(--text)',width:132,cursor:'pointer',textAlign:'center'}}/>
+              <button onClick={()=>setDayOffset(o=>Math.min(0,o+1))} disabled={atToday} title="Next"
+                style={{width:26,height:26,borderRadius:999,border:'none',background:'transparent',cursor:atToday?'default':'pointer',color:'var(--text-dim)',fontSize:14,lineHeight:1,opacity:atToday?.35:1}}>›</button>
+              <button onClick={()=>setDayOffset(0)} disabled={atToday}
+                style={{padding:'5px 12px',borderRadius:999,fontSize:11,fontWeight:700,cursor:atToday?'default':'pointer',border:'none',fontFamily:'inherit',
+                  color:atToday?'var(--text-light)':'#fff', background:atToday?'var(--bg)':C.ink, opacity:atToday?.6:1}}>Today</button>
+            </div>
+            <div style={track}>
+              {HOME_PERIODS.map(p=>(
+                <button key={p.id} onClick={()=>setPeriod(p.id)} style={pill(period===p.id)}>{p.label}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Hero + campaign cards ── */}
+        <div style={{display:'grid',gridTemplateColumns:'minmax(280px, 1.05fr) minmax(320px, 1.95fr)',gap:16,marginBottom:16}} className="lp-top">
+          {/* team hero */}
+          <div style={{background:C.ink,color:'#fff',borderRadius:22,padding:'22px 24px',display:'flex',flexDirection:'column',justifyContent:'space-between'}}>
+            <div>
+              <div style={{fontSize:10.5,fontWeight:700,letterSpacing:'.12em',color:'#8f8d9c'}}>POTENTIALS TAGGED · {periodTag}</div>
+              <div style={{display:'flex',alignItems:'flex-end',gap:12,marginTop:14}}>
+                <div style={{fontFamily:SG,fontSize:54,fontWeight:800,lineHeight:.85,letterSpacing:'-.04em',fontVariantNumeric:'tabular-nums'}}>{fmt(T.potentials)}</div>
+                <div style={{padding:'4px 10px',borderRadius:999,background:'rgba(255,255,255,.09)',marginBottom:5}}
+                  title={`vs the previous ${period==='daily'?'day':period==='weekly'?'7 days':'30 days'} (${fmt(TP.potentials)})`}>
+                  <span style={{fontSize:11.5,fontWeight:700,color:heroDelta.fg==='var(--text-light)'?'#a1a1ac':heroDelta.fg}}>{heroDelta.label} vs prev</span>
                 </div>
               </div>
-            ))}
-          </div>}
-        </div>
-
-        {/* Team totals */}
-        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:26}}>
-          {totals.map(t=>(
-            <div key={t.label} style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:14,padding:'16px 18px'}}>
-              <div style={{fontFamily:MONO,fontSize:24,fontWeight:600,letterSpacing:'-.01em',color:t.color}}>{t.value.toLocaleString()}</div>
-              <div style={{fontSize:11,fontWeight:600,letterSpacing:'.04em',textTransform:'uppercase',color:'var(--text-light)',marginTop:5}}>{t.label}</div>
             </div>
-          ))}
-        </div>
-
-        {/* Column key */}
-        <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) 150px 92px 92px 24px',gap:20,padding:'0 24px 10px',fontSize:11,fontWeight:700,letterSpacing:'.05em',textTransform:'uppercase',color:'var(--text-light)'}}>
-          <span>Rep</span><span>Status · vs quota</span>
-          <span style={{textAlign:'right'}}>Imported</span><span style={{textAlign:'right'}}>Fresh</span><span/>
-        </div>
-
-        {/* Rep list */}
-        <div style={{display:'flex',flexDirection:'column',gap:10}}>
-          {reps.length===0 && <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:16,padding:'20px 24px',color:'var(--text-dim)'}}>No sales reps configured.</div>}
-          {reps.map(r=>{
-            const st=statusOf(r.quotaPct);
-            const open=!!expanded[r.rep];
-            const isLG=leadgenNames.includes(r.rep);
-            const roleTitle=(getProfile(r.rep).title||'').trim()||(isLG?'Lead gen':'Sales rep');
-            return (
-              <div key={r.rep} className="kpi-rep-card" style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:16,overflow:'hidden'}}>
-                <div onClick={()=>setExpanded(s=>({...s,[r.rep]:!s[r.rep]}))}
-                  style={{padding:'18px 24px',display:'grid',gridTemplateColumns:'minmax(0,1fr) 150px 92px 92px 24px',gap:20,alignItems:'center',cursor:'pointer'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:13,minWidth:0}}>
-                    <RepAvatar rep={r.rep} config={config} size={44}/>
-                    <div style={{minWidth:0}}>
-                      <div style={{fontSize:18,fontWeight:700,letterSpacing:'-.01em',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.rep}</div>
-                      <div style={{fontSize:13,color:'var(--text-light)'}}>{roleTitle}</div>
+            <div style={{marginTop:22}}>
+              <div style={{display:'flex',height:11,borderRadius:999,overflow:'hidden',background:'#262631',gap:3}}>
+                <div style={{background:C.good,width:pct(T.contacted,heroBase)+'%'}}/>
+                <div style={{background:C.warn,width:pct(T.pending,heroBase)+'%'}}/>
+                <div style={{background:'#4d545e',width:pct(T.toWork,heroBase)+'%'}}/>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginTop:14}}>
+                {heroSplit.map(h=>(
+                  <div key={h.label}>
+                    <div style={{display:'flex',alignItems:'center',gap:6}}>
+                      <span style={{width:7,height:7,borderRadius:999,background:h.dot}}/>
+                      <span style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:'#8f8d9c'}}>{h.label}</span>
                     </div>
+                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4}}>{fmt(h.value)}</div>
                   </div>
-                  <div>
-                    <span style={{display:'inline-flex',alignItems:'center',gap:8,fontSize:13.5,fontWeight:700,color:st.fg,background:st.bg,padding:'6px 13px',borderRadius:99}}>
-                      <span style={{width:8,height:8,borderRadius:'50%',background:st.fg}}/>{st.label}
-                    </span>
-                    <div style={{fontSize:11.5,color:'var(--text-light)',marginTop:6,fontFamily:MONO}}
-                      title={`Quota progress = leads in OR contacted, whichever is higher per campaign (imported ${r.imported} · contacted ${r.contacted})`}>
-                      {r.progress.toLocaleString()} / {r.totalQuota.toLocaleString()} · {Math.round(r.quotaPct)}%</div>
+                ))}
+              </div>
+              <div style={{marginTop:18,paddingTop:16,borderTop:'1px solid #2e3b41'}}>
+                <div style={{display:'flex',alignItems:'center',gap:24}}>
+                  <div title="Leads assigned to the team in this window">
+                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:'#8f8d9c'}}>IMPORTED</div>
+                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:'#a9c6dc'}}>{fmt(T.imported)}</div>
                   </div>
-                  <div style={{textAlign:'right'}}>
-                    <div style={{fontFamily:MONO,fontSize:20,fontWeight:600,lineHeight:1}}>{r.imported.toLocaleString()}</div>
-                    <div style={{fontSize:10.5,color:'var(--text-light)',marginTop:4}}>{r.contacted.toLocaleString()} contacted</div>
+                  <div style={{width:1,height:30,background:'#2e3b41'}}/>
+                  <div title="Of the inflow, leads not yet on Close">
+                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:'#8f8d9c'}}>FRESH</div>
+                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:'#e8a3a0'}}>{fmt(T.fresh)}</div>
                   </div>
-                  <div style={{textAlign:'right'}}>
-                    <div style={{fontFamily:MONO,fontSize:20,fontWeight:600,lineHeight:1,color:r.fresh>0?'var(--text-dim)':'var(--text-light)'}}>{r.fresh.toLocaleString()}</div>
-                    <div style={{fontSize:10.5,color:'var(--text-light)',marginTop:4}}>uncontacted</div>
-                  </div>
-                  <span style={{textAlign:'center',fontSize:19,color:'var(--text-light)',display:'inline-block',transition:'transform .28s cubic-bezier(.4,0,.2,1)',transform:open?'rotate(90deg)':'rotate(0deg)'}}>›</span>
                 </div>
+                <div style={{fontSize:11,color:'#7d7b8a',marginTop:12}}>
+                  {pct(T.potentials,Math.max(1,T.imported))}% of imported leads tagged potential
+                </div>
+              </div>
+            </div>
+          </div>
 
-                <div style={{maxHeight:open?600:0,opacity:open?1:0,overflow:'hidden',transition:'max-height .34s cubic-bezier(.4,0,.2,1),opacity .26s ease'}}>
-                  <div style={{padding:'2px 24px 18px',background:'var(--bg)',borderTop:'1px solid var(--border)'}}>
-                    <div style={{display:'grid',gridTemplateColumns:'1.1fr repeat(5,1fr)',gap:6,fontSize:11,fontWeight:700,letterSpacing:'.05em',textTransform:'uppercase',color:'var(--text-dim)',padding:'14px 12px 9px'}}>
-                      <span>Campaign</span><span style={{textAlign:'right'}}>Imported</span><span style={{textAlign:'right'}}>Fresh</span>
-                      <span style={{textAlign:'right'}}>Contacted</span><span style={{textAlign:'right'}}>Quota</span><span style={{textAlign:'right'}}>vs Quota</span>
+          {/* campaign cards */}
+          <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.max(1,Math.min(3,campDefs.length))}, minmax(0,1fr))`,gap:16}} className="lp-camps">
+            {campDefs.map(c=>{
+              const o=S.byCamp[c.id]||EMPTY(), po=P.byCamp[c.id]||EMPTY();
+              const d=deltaOf(o.potentials,po.potentials);
+              const base=Math.max(1,o.contacted+o.pending+o.toWork);
+              return (
+                <div key={c.id} style={{...card,padding:'18px 18px 16px',display:'flex',flexDirection:'column',justifyContent:'space-between'}}>
+                  <div>
+                    <div style={{display:'inline-flex',alignItems:'center',gap:8,padding:'5px 11px 5px 8px',borderRadius:999,background:tint(c.color,.12)}}>
+                      <span style={{width:8,height:8,borderRadius:999,background:c.color}}/>
+                      <span style={{fontSize:10.5,fontWeight:800,letterSpacing:'.04em',color:c.color}}>{c.label}</span>
                     </div>
-                    <div style={{display:'flex',flexDirection:'column',gap:3}}>
-                      {r.rows.map(c=>(
-                        <div key={c.id} style={{display:'grid',gridTemplateColumns:'1.1fr repeat(5,1fr)',gap:6,alignItems:'center',padding:'11px 12px',borderRadius:10,background:'var(--card)',border:'1px solid var(--border)'}}>
-                          <span style={{display:'flex',alignItems:'center',gap:9,fontSize:13,fontWeight:700,color:'var(--text)'}}>
-                            <span style={{width:9,height:9,borderRadius:'50%',background:c.color,flex:'none'}}/>{c.label}
+                    <div style={{fontFamily:SG,fontSize:34,fontWeight:800,letterSpacing:'-.035em',lineHeight:1,marginTop:14,fontVariantNumeric:'tabular-nums'}}>{fmt(o.potentials)}</div>
+                    <div style={{marginTop:5}}>
+                      <div style={{fontSize:10.5,fontWeight:700,letterSpacing:'.07em',color:'var(--text-dim)'}}>POTENTIALS</div>
+                      <div style={{fontSize:10,fontWeight:700,fontFamily:MONO,color:d.fg,marginTop:3}}>{d.label} vs prev</div>
+                    </div>
+                  </div>
+                  <div style={{marginTop:16}}>
+                    <div style={{display:'flex',height:7,borderRadius:999,overflow:'hidden',background:'var(--bg)',gap:2}}>
+                      <div style={{background:C.good,width:pct(o.contacted,base)+'%'}}/>
+                      <div style={{background:C.warn,width:pct(o.pending,base)+'%'}}/>
+                      <div style={{background:'var(--border)',width:pct(o.toWork,base)+'%'}}/>
+                    </div>
+                    <div style={{display:'flex',flexDirection:'column',marginTop:10}}>
+                      {chipsOf(o).map(ch=>(
+                        <div key={ch.label} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'5px 0',borderTop:'1px solid var(--border)'}}>
+                          <span style={{display:'flex',alignItems:'center',gap:7}}>
+                            <span style={{width:6,height:6,borderRadius:999,background:ch.fg}}/>
+                            <span style={{fontSize:10.5,fontWeight:600,color:'var(--text-dim)'}}>{ch.label}</span>
                           </span>
-                          <span style={{fontFamily:MONO,fontSize:13.5,fontWeight:600,textAlign:'right'}}>{c.imported.toLocaleString()}</span>
-                          <span style={{fontFamily:MONO,fontSize:13.5,color:'var(--text-dim)',textAlign:'right'}}>{c.imported?c.fresh.toLocaleString():'—'}</span>
-                          <span style={{fontFamily:MONO,fontSize:13.5,color:'#2f8f5b',textAlign:'right'}}>{c.contacted.toLocaleString()}</span>
-                          <span style={{fontFamily:MONO,fontSize:13.5,color:'var(--text-light)',textAlign:'right'}}>{c.quota.toLocaleString()}</span>
-                          <span style={{fontFamily:MONO,fontSize:13.5,fontWeight:600,color:quotaPctColor(c.quotaPct,c.quota),textAlign:'right'}}>{c.quota>0?Math.round(c.quotaPct)+'%':'—'}</span>
+                          <span style={{fontSize:12.5,fontWeight:700,fontFamily:MONO,color:ch.fg}}>{fmt(ch.value)}</span>
                         </div>
                       ))}
                     </div>
-                    <div style={{display:'flex',gap:8,marginTop:12,flexWrap:'wrap'}}>
-                      <button className="btn btn-outline btn-sm" onClick={e=>{e.stopPropagation();setDetail(r.rep);}}>📊 Full KPIs</button>
-                      {canOpenRep(r.rep) && <button className="btn btn-primary btn-sm" onClick={e=>{e.stopPropagation();onOpenRep(r.rep);}}>Open {r.rep}'s dashboard →</button>}
-                    </div>
                   </div>
                 </div>
+              );
+            })}
+            {campDefs.length===0 && <div style={{...card,padding:20,color:'var(--text-dim)'}}>No campaigns configured.</div>}
+          </div>
+        </div>
+
+        {/* ── Rep controls ── */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:14,flexWrap:'wrap',margin:'26px 0 12px'}}>
+          <div>
+            <div style={{fontFamily:SG,fontSize:16,fontWeight:800,letterSpacing:'-.02em'}}>Reps · {repRows.length}</div>
+            <div style={{fontSize:11.5,color:'var(--text-dim)',marginTop:2}}>Showing {metricLabel.toLowerCase()} · click a rep to open their dashboard</div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:9,flexWrap:'wrap'}}>
+            <span style={{fontSize:9.5,fontWeight:700,letterSpacing:'.1em',color:'var(--text-light)'}}>BAR</span>
+            <div style={track}>
+              {[{id:'potentials',label:'Potentials'},{id:'imported',label:'Imported'},{id:'contacted',label:'Contacted'}].map(m=>(
+                <button key={m.id} onClick={()=>setRepMetric(m.id)} style={pill(repMetric===m.id)}>{m.label}</button>
+              ))}
+            </div>
+            <span style={{width:1,height:16,background:'var(--border)',margin:'0 3px'}}/>
+            <span style={{fontSize:9.5,fontWeight:700,letterSpacing:'.1em',color:'var(--text-light)'}}>SORT</span>
+            <div style={track}>
+              {[{id:'team',label:'Team'},{id:'top',label:'Top'},{id:'low',label:'Low'},{id:'name',label:'A–Z'}].map(s=>(
+                <button key={s.id} onClick={()=>setSortMode(s.id)} style={pill(sortMode===s.id)}>{s.label}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Rep cards — whole card opens that rep's dashboard ── */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16}}>
+          {repRows.length===0 && <div style={{...card,padding:20,color:'var(--text-dim)'}}>No sales reps configured.</div>}
+          {repRows.map(r=>{
+            const canOpen=!!onOpenRep;
+            const rc=(config.repColors||{})[r.rep]||'#5b5bd6';
+            return (
+              <div key={r.rep} className="lp-rep" onClick={canOpen?()=>onOpenRep(r.rep):undefined}
+                title={canOpen?`Open ${r.rep}'s dashboard`:undefined}
+                style={{...card,padding:'18px 20px 16px',cursor:canOpen?'pointer':'default'}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
+                  <div style={{display:'flex',alignItems:'center',gap:11,minWidth:0}}>
+                    <RepAvatar rep={r.rep} config={config} size={38}/>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:14,fontWeight:800,letterSpacing:'-.015em',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.rep}</div>
+                      <div style={{fontSize:11,color:'var(--text-dim)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.role}</div>
+                    </div>
+                  </div>
+                  <div style={{textAlign:'right',flexShrink:0}}>
+                    <div style={{fontFamily:SG,fontSize:24,fontWeight:800,letterSpacing:'-.03em',lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{fmt(r.a[repMetric])}</div>
+                    <div style={{fontSize:9,fontWeight:700,letterSpacing:'.08em',color:'var(--text-dim)',marginTop:3}}>{metricLabel}</div>
+                  </div>
+                </div>
+
+                <div style={{display:'flex',flexDirection:'column',gap:7,margin:'16px 0 14px'}}>
+                  <div style={{display:'grid',gridTemplateColumns:'52px 1fr 34px 38px 34px',gap:8,fontSize:8,fontWeight:700,letterSpacing:'.09em',color:'var(--text-light)'}}>
+                    <span/><span/>
+                    <span style={{textAlign:'right'}}>POT</span>
+                    <span style={{textAlign:'right'}}>IMP</span>
+                    <span style={{textAlign:'right'}}>FRESH</span>
+                  </div>
+                  {r.camps.map(c=>{
+                    const v=c.o[repMetric];
+                    return (
+                      <div key={c.id} style={{display:'grid',gridTemplateColumns:'52px 1fr 34px 38px 34px',gap:8,alignItems:'center'}}>
+                        <span style={{fontSize:9.5,fontWeight:800,letterSpacing:'.05em',color:c.color,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.label}</span>
+                        <span style={{height:6,borderRadius:999,background:'var(--bg)',overflow:'hidden',display:'block'}}>
+                          <span style={{display:'block',height:'100%',borderRadius:999,background:c.color,width:Math.max(2,pct(v,r.maxCamp))+'%'}}/>
+                        </span>
+                        <span style={{textAlign:'right',fontSize:11.5,fontWeight:700,fontFamily:MONO,color:c.o.potentials?'var(--text)':'var(--text-light)'}}>{fmt(c.o.potentials)}</span>
+                        <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:C.blue}}>{fmt(c.o.imported)}</span>
+                        <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:c.o.fresh?C.bad:'var(--text-light)'}}>{fmt(c.o.fresh)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:6,paddingTop:12,borderTop:'1px solid var(--border)'}}>
+                  {chipsOf(r.a).map(ch=>(
+                    <div key={ch.label} style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:6,padding:'4px 9px',borderRadius:9,background:'var(--bg)'}}>
+                      <span style={{fontSize:9.5,fontWeight:600,color:'var(--text-dim)'}}>{ch.label}</span>
+                      <span style={{fontSize:10.5,fontWeight:700,fontFamily:MONO,color:ch.fg}}>{fmt(ch.value)}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {canOpen && <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:5,marginTop:11,fontSize:11,fontWeight:600,color:'var(--text-dim)'}}>
+                  Open dashboard <span style={{fontSize:13}}>›</span>
+                </div>}
               </div>
             );
           })}
         </div>
+
+        <div style={{marginTop:20,fontSize:10.5,fontFamily:MONO,color:'var(--text-light)'}}>
+          {cur.from===cur.to?cur.from:`${cur.from} → ${cur.to}`} · imported = assigned in window · potentials = tagged Potential in window · contacted = by last-contact date
+        </div>
       </div>
-
-      {/* Full-KPI detail modal (preserved from the earlier Home) */}
-      {detail && (()=>{
-        const d=perfFor(detail); const pr=getProfile(detail);
-        const isLG=leadgenNames.includes(detail);
-        const roleTitle=(pr.title||'').trim()||(isLG?'Lead gen':'Sales rep');
-        const tiles=[{l:'Assigned',v:d.total},{l:'Fresh',v:d.fresh,c:'var(--accent)'},{l:'Recycled',v:d.recycled,c:'var(--warn)'},
-          {l:'Contacted',v:d.contacted},{l:'Potential',v:d.potential,c:'#2f8f5b'},{l:'High ticket',v:d.ht,c:'var(--warn)'},
-          {l:'Not qualified',v:d.nq},{l:'With email',v:d.withEmail}];
-        const rates=[{l:'Contact rate',v:pct(d.contacted,d.total)+'%'},{l:'Potential rate',v:pct(d.potential,d.total)+'%'},
-          {l:'Email coverage',v:pct(d.withEmail,d.total)+'%'},{l:'Avg followers',v:fmtFollowers(d.avgFoll||0)||'—'}];
-        return (
-          <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setDetail('')}>
-            <div className="modal" style={{width:760,maxWidth:'95vw'}}>
-              <div className="modal-header">
-                <div style={{display:'flex',alignItems:'center',gap:12,minWidth:0}}>
-                  <RepAvatar rep={detail} config={config} size={42}/>
-                  <div style={{minWidth:0}}><h2 style={{margin:0}}>{detail}</h2><p style={{margin:0}}>{roleTitle} · {rangeLabel}</p></div>
-                </div>
-                <button className="btn btn-ghost btn-sm" onClick={()=>setDetail('')}>✕</button>
-              </div>
-
-              <div style={{fontSize:11,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text-light)',marginBottom:8}}>KPI reference</div>
-              <div style={{overflowX:'auto',marginBottom:20}}>
-                <table className="kpi-table">
-                  <thead><tr><th>Metric</th><th>Daily</th><th>Weekly</th><th>Monthly</th><th>Counted by</th></tr></thead>
-                  <tbody>
-                    {kpiRefRows(detail).map(row=>(
-                      <tr key={row.label}><td style={{fontWeight:600}}>{row.label}</td>
-                        {row.vals.map((v,i)=><td key={i} style={{fontVariantNumeric:'tabular-nums'}}>{v}</td>)}
-                        <td style={{color:'var(--text-light)',fontSize:12}}>{row.by}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div style={{fontSize:11,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text-light)',marginBottom:8}}>Assigned leads <span style={{textTransform:'none',letterSpacing:0}}>({rangeLabel})</span></div>
-              {d.total===0
-                ? <div style={{fontSize:13,color:'var(--text-dim)',padding:'6px 0 4px'}}>No leads assigned in this period.</div>
-                : <>
-                    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:8}}>
-                      {tiles.map(t=>(
-                        <div key={t.l} style={{border:'1px solid var(--border)',borderRadius:12,padding:'10px 12px'}}>
-                          <div style={{fontFamily:SG,fontSize:19,fontWeight:700,letterSpacing:'-.02em',color:t.c||'var(--text)',fontVariantNumeric:'tabular-nums'}}>{t.v.toLocaleString()}</div>
-                          <div style={{fontSize:10.5,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-light)'}}>{t.l}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{display:'flex',gap:18,flexWrap:'wrap',marginTop:12,paddingTop:12,borderTop:'1px solid var(--border)'}}>
-                      {rates.map(r=>(<div key={r.l}><div style={{fontFamily:SG,fontSize:17,fontWeight:700,fontVariantNumeric:'tabular-nums'}}>{r.v}</div><div style={{fontSize:10.5,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-light)'}}>{r.l}</div></div>))}
-                    </div>
-                    {d.camp.some(c=>c.total>0) && (
-                      <div style={{marginTop:18,overflowX:'auto'}}>
-                        <table className="kpi-table">
-                          <thead><tr><th>Campaign</th><th>Total</th><th>Potential</th><th>Pot %</th><th>Contacted</th><th>Contact %</th><th>High Ticket</th></tr></thead>
-                          <tbody>{d.camp.map(c=>(
-                            <tr key={c.id}><td style={{whiteSpace:'nowrap'}}><span style={{color:campColorMap[c.id]||'var(--accent)',fontWeight:700}}>●</span> {c.label}</td>
-                              <td>{c.total}</td><td>{c.potential}</td><td>{pct(c.potential,c.total)}%</td><td>{c.contacted}</td><td>{pct(c.contacted,c.total)}%</td><td>{c.ht}</td></tr>
-                          ))}</tbody>
-                        </table>
-                      </div>
-                    )}
-                  </>}
-
-              {(isLG||d.srTotal>0) && (
-                <div style={{marginTop:22,paddingTop:16,borderTop:'1px solid var(--border)'}}>
-                  <div style={{fontSize:11,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text-light)',marginBottom:8}}>Leads sourced <span style={{textTransform:'none',letterSpacing:0}}>(by date added)</span></div>
-                  {d.srTotal===0
-                    ? <div style={{fontSize:13,color:'var(--text-dim)'}}>Nothing sourced in this period.</div>
-                    : <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:8}}>
-                        {[{l:'Sourced',v:d.srTotal},{l:'With email',v:d.srEmail},{l:'Assigned',v:d.srAssigned},{l:'Contacted',v:d.srContacted}].map(t=>(
-                          <div key={t.l} style={{border:'1px solid var(--border)',borderRadius:12,padding:'10px 12px'}}>
-                            <div style={{fontFamily:SG,fontSize:19,fontWeight:700,letterSpacing:'-.02em',fontVariantNumeric:'tabular-nums'}}>{t.v.toLocaleString()}</div>
-                            <div style={{fontSize:10.5,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-light)'}}>{t.l}</div>
-                          </div>
-                        ))}
-                      </div>}
-                </div>
-              )}
-
-              <div className="modal-footer">
-                <div style={{display:'flex',gap:8}}>
-                  {d.total>0 && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(d.mine,`${detail}_assigned_${period}.csv`)}>⬇ Assigned CSV</button>}
-                  {d.srTotal>0 && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(d.sourced,`${detail}_sourced_${period}.csv`)}>⬇ Sourced CSV</button>}
-                </div>
-                <div className="modal-footer-right">
-                  {canOpenRep(detail) && <button className="btn btn-outline btn-sm" onClick={()=>{const w=detail;setDetail('');onOpenRep(w);}}>Open {detail}'s dashboard →</button>}
-                  <button className="btn btn-primary btn-sm" onClick={()=>setDetail('')}>Close</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 }
