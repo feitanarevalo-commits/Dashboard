@@ -2419,6 +2419,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const [dayOffset,setDayOffset]=useState(0);      // ≤0 days from today
   const [repMetric,setRepMetric]=useState('potentials');   // drives the rep bars
   const [sortMode,setSortMode]=useState('team');
+  const [detail,setDetail]=useState('');   // rep whose performance report is open
 
   const campDefs=(config.campaigns||[]).map(c=>({id:c.id,label:c.label,color:c.color}));
   const campIds=campDefs.map(c=>c.id);
@@ -2482,6 +2483,19 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const S=React.useMemo(()=>buildStats(cur),[leads,cur.from,cur.to,campIds.join()]);
   const P=React.useMemo(()=>buildStats(prev),[leads,prev.from,prev.to,campIds.join()]);
   const get=(st,rep,camp)=>{ const r=st.byRep[rep]; if(!r) return EMPTY(); return (camp?r[camp]:r._all)||EMPTY(); };
+
+  // Potentials tagged per rep per DAY — one pass, then the report's 7-day
+  // sparkline and month heatmap both read from it (no re-scanning per day).
+  const dailyPot=React.useMemo(()=>{
+    const m={};
+    leads.forEach(l=>(l.history||[]).forEach(e=>{
+      if(!e || e.type!=='qualified' || !e.actor) return;
+      const d=String(e.ts||'').slice(0,10); if(!d) return;
+      (m[e.actor]||(m[e.actor]={}))[d]=((m[e.actor]||{})[d]||0)+1;
+    }));
+    return m;
+  },[leads]);
+  const potOn=(rep,ymd)=>((dailyPot[rep]||{})[ymd]||0);
 
   // ── Palette (dashboard tokens + the design's accents) ──────
   const C={ ink:'#0d0d12', good:'#2f8f5b', warn:'#c07a1e', bad:'#c0453a', blue:'#3f6a8a' };
@@ -2689,11 +2703,15 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
             const canOpen=!!onOpenRep;
             const rc=(config.repColors||{})[r.rep]||'#5b5bd6';
             return (
-              <div key={r.rep} className="lp-rep" onClick={canOpen?()=>onOpenRep(r.rep):undefined}
-                title={canOpen?`Open ${r.rep}'s dashboard`:undefined}
-                style={{...card,padding:'18px 20px 16px',cursor:canOpen?'pointer':'default'}}>
+              <div key={r.rep} className="lp-rep" onClick={()=>setDetail(r.rep)}
+                title={`See ${r.rep}'s performance report`}
+                style={{...card,padding:'18px 20px 16px',cursor:'pointer'}}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
-                  <div style={{display:'flex',alignItems:'center',gap:11,minWidth:0}}>
+                  {/* The PROFILE is the dashboard shortcut; the rest of the card
+                      opens the performance report. */}
+                  <div className="lp-profile" onClick={canOpen?e=>{e.stopPropagation();onOpenRep(r.rep);}:undefined}
+                    title={canOpen?`Go to ${r.rep}'s dashboard`:undefined}
+                    style={{display:'flex',alignItems:'center',gap:11,minWidth:0,cursor:canOpen?'pointer':'default',borderRadius:12,padding:'4px 8px 4px 4px',margin:'-4px 0 -4px -4px'}}>
                     <RepAvatar rep={r.rep} config={config} size={38}/>
                     <div style={{minWidth:0}}>
                       <div style={{fontSize:14,fontWeight:800,letterSpacing:'-.015em',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.rep}</div>
@@ -2738,9 +2756,10 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                   ))}
                 </div>
 
-                {canOpen && <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:5,marginTop:11,fontSize:11,fontWeight:600,color:'var(--text-dim)'}}>
-                  Open dashboard <span style={{fontSize:13}}>›</span>
-                </div>}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginTop:11,fontSize:11,fontWeight:600,color:'var(--text-dim)'}}>
+                  {canOpen ? <span style={{fontSize:10.5,color:'var(--text-light)'}}>Tap the name for their dashboard</span> : <span/>}
+                  <span style={{display:'flex',alignItems:'center',gap:5}}>View details <span style={{fontSize:13}}>›</span></span>
+                </div>
               </div>
             );
           })}
@@ -2750,6 +2769,160 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
           {cur.from===cur.to?cur.from:`${cur.from} → ${cur.to}`} · imported = assigned in window · potentials = tagged Potential in window · contacted = by last-contact date
         </div>
       </div>
+
+      {/* ── Performance report (slide-over) ── */}
+      {detail && (()=>{
+        const a=get(S,detail,null), pa=get(P,detail,null);
+        const d=deltaOf(a.potentials,pa.potentials);
+        const isLG=(config.users||[]).some(u=>u.name===detail&&u.role==='leadgen');
+        const role=(getProfile(detail).title||'').trim()||(isLG?'Lead gen':'Sales rep');
+        const tiles=[
+          {label:'IMPORTED',  value:a.imported,  fg:C.blue},
+          {label:'FRESH',     value:a.fresh,     fg:C.bad},
+          {label:'POTENTIALS',value:a.potentials,fg:'var(--text)'},
+          {label:'CONTACTED', value:a.contacted, fg:C.good},
+          {label:'PENDING',   value:a.pending,   fg:C.warn},
+          {label:'TO WORK',   value:a.toWork,    fg:'var(--text-dim)'},
+        ];
+        // last 7 days ending on the anchor day
+        const hist=[]; for(let i=6;i>=0;i--){ const dt=new Date(anchor); dt.setDate(dt.getDate()-i); const k=ymdLocal(dt);
+          hist.push({key:k, v:potOn(detail,k), lab:dt.toLocaleDateString(undefined,{weekday:'narrow'})}); }
+        const hmax=Math.max(1,...hist.map(h=>h.v));
+        const avg=Math.round(hist.reduce((n,h)=>n+h.v,0)/7);
+        // month heatmap around the anchor
+        const first=new Date(anchor.getFullYear(),anchor.getMonth(),1);
+        const daysIn=new Date(anchor.getFullYear(),anchor.getMonth()+1,0).getDate();
+        const cells=[]; for(let b=0;b<first.getDay();b++) cells.push(null);
+        let cmax=1; for(let n=1;n<=daysIn;n++){ const k=ymdLocal(new Date(anchor.getFullYear(),anchor.getMonth(),n)); cmax=Math.max(cmax,potOn(detail,k)); }
+        for(let n=1;n<=daysIn;n++){ const dt=new Date(anchor.getFullYear(),anchor.getMonth(),n); const k=ymdLocal(dt);
+          cells.push({n, key:k, v:potOn(detail,k), future:k>ymdLocal(today), sel:k===ymdLocal(anchor)}); }
+        return (
+          <div style={{position:'fixed',inset:0,zIndex:60}}>
+            <div onClick={()=>setDetail('')} style={{position:'absolute',inset:0,background:'rgba(19,19,24,.4)'}}/>
+            <div style={{position:'absolute',top:0,right:0,bottom:0,width:520,maxWidth:'96vw',background:'var(--bg)',overflowY:'auto',boxShadow:'-12px 0 40px rgba(0,0,0,.18)'}}>
+              {/* header */}
+              <div style={{background:C.ink,color:'#fff',padding:'20px 22px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,position:'sticky',top:0,zIndex:1}}>
+                <div style={{display:'flex',alignItems:'center',gap:12,minWidth:0}}>
+                  <RepAvatar rep={detail} config={config} size={42}/>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontFamily:SG,fontSize:18,fontWeight:800,letterSpacing:'-.02em'}}>{detail}</div>
+                    <div style={{fontSize:11.5,color:'#a1a1ac'}}>{role} · {periodTag}</div>
+                  </div>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  {onOpenRep && allReps.includes(detail) && (
+                    <button onClick={()=>{const w=detail;setDetail('');onOpenRep(w);}}
+                      style={{border:'1px solid rgba(255,255,255,.22)',background:'rgba(255,255,255,.1)',color:'#fff',borderRadius:9,padding:'7px 12px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit',whiteSpace:'nowrap'}}>
+                      Dashboard →</button>
+                  )}
+                  <button onClick={()=>setDetail('')} title="Close"
+                    style={{width:30,height:30,borderRadius:9,border:'1px solid rgba(255,255,255,.18)',background:'transparent',color:'#d4d4d8',fontSize:14,cursor:'pointer',lineHeight:1}}>✕</button>
+                </div>
+              </div>
+
+              <div style={{padding:'18px 22px 40px'}}>
+                {/* headline + delta */}
+                <div style={{display:'flex',alignItems:'flex-end',gap:10,marginBottom:14}}>
+                  <div style={{fontFamily:SG,fontSize:34,fontWeight:800,letterSpacing:'-.03em',lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{fmt(a.potentials)}</div>
+                  <div style={{fontSize:11.5,color:'var(--text-dim)',marginBottom:3}}>potentials tagged · <span style={{color:d.fg,fontWeight:700}}>{d.label} vs prev</span></div>
+                </div>
+
+                {/* tiles */}
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
+                  {tiles.map(t=>(
+                    <div key={t.label} style={{...card,padding:'11px 12px'}}>
+                      <div style={{fontFamily:MONO,fontSize:18,fontWeight:700,color:t.fg,fontVariantNumeric:'tabular-nums'}}>{fmt(t.value)}</div>
+                      <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.07em',color:'var(--text-light)',marginTop:3}}>{t.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* by campaign */}
+                <div style={{fontSize:10,fontWeight:800,letterSpacing:'.1em',color:'var(--text-light)',margin:'22px 0 9px'}}>BY CAMPAIGN</div>
+                <div style={{display:'flex',flexDirection:'column',gap:9}}>
+                  {campDefs.map(c=>{
+                    const o=get(S,detail,c.id); const base=Math.max(1,o.contacted+o.pending+o.toWork);
+                    return (
+                      <div key={c.id} style={{...card,padding:'13px 14px'}}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginBottom:10}}>
+                          <span style={{display:'flex',alignItems:'center',gap:7}}>
+                            <span style={{width:8,height:8,borderRadius:999,background:c.color}}/>
+                            <span style={{fontSize:11.5,fontWeight:800,letterSpacing:'.04em',color:c.color}}>{c.label}</span>
+                          </span>
+                          <span style={{fontSize:10.5,color:'var(--text-dim)'}}>{pct(o.potentials,Math.max(1,o.imported))}% of imported tagged</span>
+                        </div>
+                        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:9}}>
+                          {[{l:'IMPORTED',v:o.imported,fg:C.blue},{l:'FRESH',v:o.fresh,fg:C.bad},{l:'POTENTIALS',v:o.potentials,fg:'var(--text)'}].map(x=>(
+                            <div key={x.l}>
+                              <div style={{fontSize:9,fontWeight:700,letterSpacing:'.07em',color:'var(--text-light)'}}>{x.l}</div>
+                              <div style={{fontFamily:MONO,fontSize:14,fontWeight:700,color:x.fg,marginTop:2}}>{fmt(x.v)}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{display:'flex',height:6,borderRadius:999,overflow:'hidden',background:'var(--bg)',gap:2}}>
+                          <div style={{background:C.good,width:pct(o.contacted,base)+'%'}}/>
+                          <div style={{background:C.warn,width:pct(o.pending,base)+'%'}}/>
+                          <div style={{background:'var(--border)',width:pct(o.toWork,base)+'%'}}/>
+                        </div>
+                        <div style={{display:'flex',gap:14,marginTop:8,fontSize:10.5,color:'var(--text-dim)'}}>
+                          <span>cont <b style={{fontFamily:MONO,color:C.good}}>{fmt(o.contacted)}</b></span>
+                          <span>pend <b style={{fontFamily:MONO,color:C.warn}}>{fmt(o.pending)}</b></span>
+                          <span>to work <b style={{fontFamily:MONO,color:'var(--text)'}}>{fmt(o.toWork)}</b></span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {campDefs.length===0 && <div style={{...card,padding:14,color:'var(--text-dim)',fontSize:12}}>No campaigns configured.</div>}
+                </div>
+
+                {/* last 7 days */}
+                <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',margin:'22px 0 9px'}}>
+                  <span style={{fontSize:10,fontWeight:800,letterSpacing:'.1em',color:'var(--text-light)'}}>POTENTIALS · LAST 7 DAYS</span>
+                  <span style={{fontSize:10.5,color:'var(--text-dim)',fontFamily:MONO}}>avg {avg}/day</span>
+                </div>
+                <div style={{...card,padding:'14px 14px 10px',display:'flex',alignItems:'flex-end',justifyContent:'space-between',gap:6,height:118}}>
+                  {hist.map(h=>(
+                    <div key={h.key} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:5,height:'100%',justifyContent:'flex-end'}} title={`${h.key}: ${h.v}`}>
+                      <span style={{fontSize:10,fontFamily:MONO,color:'var(--text-dim)'}}>{h.v}</span>
+                      <span style={{width:'100%',maxWidth:26,borderRadius:6,background:h.key===ymdLocal(anchor)?C.ink:'var(--border)',
+                        height:Math.max(4,Math.round((h.v/hmax)*62))+'px',display:'block'}}/>
+                      <span style={{fontSize:9.5,color:'var(--text-light)'}}>{h.lab}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* month heatmap */}
+                <div style={{fontSize:10,fontWeight:800,letterSpacing:'.1em',color:'var(--text-light)',margin:'22px 0 9px'}}>
+                  {anchor.toLocaleDateString(undefined,{month:'long',year:'numeric'}).toUpperCase()}
+                </div>
+                <div style={{...card,padding:'12px 14px'}}>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:4,marginBottom:5}}>
+                    {['S','M','T','W','T','F','S'].map((w,i)=>(
+                      <div key={i} style={{textAlign:'center',fontSize:9,fontWeight:700,color:'var(--text-light)'}}>{w}</div>
+                    ))}
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:4}}>
+                    {cells.map((c,i)=> c===null
+                      ? <div key={'b'+i}/>
+                      : <div key={c.key} onClick={c.future?undefined:()=>{ const off=Math.round((new Date(c.key+'T00:00:00')-today)/86400000); setDayOffset(Math.min(0,off)); }}
+                          title={c.future?'':`${c.key} · ${c.v} potential(s)`}
+                          style={{aspectRatio:'1',borderRadius:8,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:1,
+                            cursor:c.future?'default':'pointer',
+                            border:`1px solid ${c.sel?C.ink:'var(--border)'}`,
+                            background:c.sel?C.ink:(c.future?'transparent':(c.v>0?tint(C.good,Math.min(.42,.1+(c.v/cmax)*.4)):'var(--bg)')),
+                            color:c.sel?'#fff':(c.future?'var(--text-light)':'var(--text)'),opacity:c.future?.45:1}}>
+                          <span style={{fontSize:10,fontWeight:700}}>{c.n}</span>
+                          <span style={{fontSize:8.5,fontFamily:MONO,opacity:.75}}>{c.future?'·':c.v}</span>
+                        </div>
+                    )}
+                  </div>
+                  <div style={{fontSize:10,color:'var(--text-light)',marginTop:9}}>Tap a day to load it into the board.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

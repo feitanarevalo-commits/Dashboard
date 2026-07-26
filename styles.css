@@ -1050,3 +1050,6 @@ html[data-dark] .lp-rep:hover { box-shadow: 0 8px 26px rgba(0,0,0,.45) !importan
 /* Stack the hero above the campaign cards once the two columns get cramped. */
 @media (max-width: 1100px) { .lp-top { grid-template-columns: 1fr !important; } }
 @media (max-width: 760px)  { .lp-camps { grid-template-columns: 1fr !important; } }
+/* The rep name/avatar is the dashboard shortcut — highlight it on hover so it
+   reads as separate from the card (which opens the performance report). */
+.lp-profile:hover { background: var(--bg); }
