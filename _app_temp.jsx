@@ -124,9 +124,15 @@ function isFresh(lead){ return leadOrigin(lead)==='Fresh'; }
 function leadSourcing(lead){
   if(!lead) return 'unknown';
   const tags=lead.tags||[];
-  if(lead.imported===true || lead.inClose || lead.fromClose || tags.includes('Existing Leads')) return 'preexisting';
+  // PUSH EVIDENCE WINS. Close import only ever sends FRESH leads
+  // (`isWorkable(l) && isFresh(l)`), so proof that we uploaded this lead is
+  // proof it was fresh at that moment. Flags set AFTERWARDS must not override
+  // it: the Close dedup check re-finds our own upload and sets inClose, and the
+  // recycle flow sets imported:true — both would otherwise recategorise a lead
+  // the rep genuinely sourced as "pre-existing".
+  if(lead.importedToClose===true || (lead.history||[]).some(e=>e && e.type==='close')) return 'sourced';
   if(lead.imported===false) return 'sourced';
-  if((lead.history||[]).some(e=>e && e.type==='close')) return 'sourced';
+  if(lead.imported===true || lead.inClose || lead.fromClose || tags.includes('Existing Leads')) return 'preexisting';
   if(lead.closeLeadId) return 'unknown';
   return 'sourced';
 }
