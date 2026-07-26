@@ -109,6 +109,28 @@ function leadOrigin(lead){
 }
 // Convenience: a Fresh lead is one not yet on Close.
 function isFresh(lead){ return leadOrigin(lead)==='Fresh'; }
+// Was this lead FRESH WHEN WE FOUND IT — i.e. did the rep actually source it?
+// leadOrigin() cannot answer that: pushing a lead to Close gives it a
+// closeLeadId, which flips it to 'Imported'. So a rep's own fresh find reads
+// "Imported" the moment they do their job, and diligent reps look like they
+// sourced nothing. This reads the lead's own record instead:
+//   'preexisting' — the Close dedup check flagged it, it was loaded from Close,
+//                   or the rep manually marked it Imported
+//   'sourced'     — we pushed it to Close ourselves (a 'close' event on its
+//                   timeline), it's marked explicitly Fresh, or it was never
+//                   on Close at all
+//   'unknown'     — carries a Close id but no push record; predates history
+//                   tracking, so there is genuinely no evidence either way
+function leadSourcing(lead){
+  if(!lead) return 'unknown';
+  const tags=lead.tags||[];
+  if(lead.imported===true || lead.inClose || lead.fromClose || tags.includes('Existing Leads')) return 'preexisting';
+  if(lead.imported===false) return 'sourced';
+  if((lead.history||[]).some(e=>e && e.type==='close')) return 'sourced';
+  if(lead.closeLeadId) return 'unknown';
+  return 'sourced';
+}
+function isSourcedFresh(lead){ return leadSourcing(lead)==='sourced'; }
 // "Scraped By" is a PEOPLE record — which teammate (rep or lead-gen) sourced the
 // lead, so credit survives reassignment (e.g. JC scrapes → assigned to Mikka →
 // still reads JC). The Make automation isn't a person, so pool leads have no
@@ -2460,7 +2482,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const atToday=dayOffset>=0;
 
   // ── One pass over every lead → per-rep, per-campaign buckets ──
-  const EMPTY=()=>({imported:0,potentials:0,contacted:0,pending:0,fresh:0,toWork:0});
+  const EMPTY=()=>({imported:0,potentials:0,contacted:0,pending:0,fresh:0,toWork:0,sourced:0});
   function buildStats(w){
     const inW=d=>{ const s=String(d||'').slice(0,10); return !!s && s>=w.from && s<=w.to; };
     const byRep={}, byCamp={}, team=EMPTY();
@@ -2480,10 +2502,12 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
         camps.forEach(c=>fn(byCamp[c]));
         fn(team);
       };
+      const sourcedFresh=isSourcedFresh(l);
       if(assignedIn){
         applyAll(t=>bump(t,'imported'));
         if(isPend) applyAll(t=>bump(t,'pending'));
         if(isFreshOrigin) applyAll(t=>bump(t,'fresh'));
+        if(sourcedFresh) applyAll(t=>bump(t,'sourced'));
       }
       if(contactedIn) applyAll(t=>bump(t,'contacted'));
       if(workable){ if(rep){ bucket(rep,null).toWork++; camps.forEach(c=>bucket(rep,c).toWork++); } camps.forEach(c=>byCamp[c].toWork++); team.toWork++; }
@@ -2516,7 +2540,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const potOn=(rep,ymd)=>((dailyPot[rep]||{})[ymd]||0);
 
   // ── Palette (dashboard tokens + the design's accents) ──────
-  const C={ ink:'#0d0d12', good:'#2f8f5b', warn:'#c07a1e', bad:'#c0453a', blue:'#3f6a8a' };
+  const C={ ink:'#0d0d12', good:'#2f8f5b', warn:'#c07a1e', bad:'#c0453a', blue:'#3f6a8a', violet:'#6b5f8c' };
   // Translucent tint of a campaign colour (works on light + dark backgrounds).
   const tint=(hex,a)=>{ const h=String(hex||'').replace('#',''); if(h.length!==6) return 'var(--bg)';
     const n=parseInt(h,16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
@@ -2559,11 +2583,12 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const track={display:'flex',gap:4,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:999,padding:4};
   const card={background:'var(--card)',border:'1px solid var(--border)',borderRadius:20,boxShadow:'0 1px 2px rgba(19,19,24,.05)'};
   const chipsOf=o=>[
-    {label:'imported', value:o.imported,  fg:C.blue},
-    {label:'contacted',value:o.contacted, fg:C.good},
-    {label:'pending',  value:o.pending,   fg:C.warn},
-    {label:'to work',  value:o.toWork,    fg:'var(--text-dim)'},
-    {label:'fresh',    value:o.fresh,     fg:C.bad},
+    {label:'imported', value:o.imported,  fg:C.blue,  tip:'Leads assigned in this window'},
+    {label:'contacted',value:o.contacted, fg:C.good,  tip:'Leads contacted in this window (by last-contact date)'},
+    {label:'pending',  value:o.pending,   fg:C.warn,  tip:'Of the inflow, still awaiting qualification'},
+    {label:'to work',  value:o.toWork,    fg:'var(--text-dim)', tip:'Currently Potential/HT and not yet contacted'},
+    {label:'sourced',  value:o.sourced,   fg:C.violet,tip:'Leads the rep SOURCED fresh — judged at discovery, so it stays counted after the lead is pushed to Close'},
+    {label:'fresh',    value:o.fresh,     fg:C.bad,   tip:'Not yet on Close — the still-to-push queue (empties as leads are pushed)'},
   ];
 
   return (
@@ -2629,13 +2654,20 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                 ))}
               </div>
               <div style={{marginTop:18,paddingTop:16,borderTop:'1px solid #2e3b41'}}>
-                <div style={{display:'flex',alignItems:'center',gap:24}}>
+                {/* three stats + dividers can get tight in the hero column — allow
+                    them to wrap rather than push the page sideways */}
+                <div style={{display:'flex',alignItems:'center',gap:18,rowGap:12,flexWrap:'wrap'}}>
                   <div title="Leads assigned to the team in this window">
                     <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:'#8f8d9c'}}>IMPORTED</div>
                     <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:'#a9c6dc'}}>{fmt(T.imported)}</div>
                   </div>
                   <div style={{width:1,height:30,background:'#2e3b41'}}/>
-                  <div title="Of the inflow, leads not yet on Close">
+                  <div title="Leads the team SOURCED fresh — judged at discovery, so pushing them to Close doesn't erase the credit">
+                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:'#8f8d9c'}}>SOURCED</div>
+                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:'#c3b4e0'}}>{fmt(T.sourced)}</div>
+                  </div>
+                  <div style={{width:1,height:30,background:'#2e3b41'}}/>
+                  <div title="Not yet on Close — the still-to-push queue">
                     <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:'#8f8d9c'}}>FRESH</div>
                     <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:'#e8a3a0'}}>{fmt(T.fresh)}</div>
                   </div>
@@ -2674,7 +2706,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                     </div>
                     <div style={{display:'flex',flexDirection:'column',marginTop:10}}>
                       {chipsOf(o).map(ch=>(
-                        <div key={ch.label} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'5px 0',borderTop:'1px solid var(--border)'}}>
+                        <div key={ch.label} title={ch.tip||''} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'5px 0',borderTop:'1px solid var(--border)'}}>
                           <span style={{display:'flex',alignItems:'center',gap:7}}>
                             <span style={{width:6,height:6,borderRadius:999,background:ch.fg}}/>
                             <span style={{fontSize:10.5,fontWeight:600,color:'var(--text-dim)'}}>{ch.label}</span>
@@ -2772,7 +2804,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
 
                 <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:6,paddingTop:12,borderTop:'1px solid var(--border)'}}>
                   {chipsOf(r.a).map(ch=>(
-                    <div key={ch.label} style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:6,padding:'4px 9px',borderRadius:9,background:'var(--bg)'}}>
+                    <div key={ch.label} title={ch.tip||''} style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:6,padding:'4px 9px',borderRadius:9,background:'var(--bg)'}}>
                       <span style={{fontSize:9.5,fontWeight:600,color:'var(--text-dim)'}}>{ch.label}</span>
                       <span style={{fontSize:10.5,fontWeight:700,fontFamily:MONO,color:ch.fg}}>{fmt(ch.value)}</span>
                     </div>
@@ -2800,12 +2832,12 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
         const isLG=(config.users||[]).some(u=>u.name===detail&&u.role==='leadgen');
         const role=(getProfile(detail).title||'').trim()||(isLG?'Lead gen':'Sales rep');
         const tiles=[
-          {label:'IMPORTED',  value:a.imported,  fg:C.blue},
-          {label:'FRESH',     value:a.fresh,     fg:C.bad},
-          {label:'POTENTIALS',value:a.potentials,fg:'var(--text)'},
-          {label:'CONTACTED', value:a.contacted, fg:C.good},
-          {label:'PENDING',   value:a.pending,   fg:C.warn},
-          {label:'TO WORK',   value:a.toWork,    fg:'var(--text-dim)'},
+          {label:'IMPORTED',  value:a.imported,  fg:C.blue,   tip:'Leads assigned in this window'},
+          {label:'SOURCED',   value:a.sourced,   fg:C.violet, tip:'Sourced fresh by this rep — judged at discovery, so pushing to Close keeps the credit'},
+          {label:'FRESH',     value:a.fresh,     fg:C.bad,    tip:'Not yet on Close — still to push'},
+          {label:'POTENTIALS',value:a.potentials,fg:'var(--text)', tip:'Tagged Potential in this window'},
+          {label:'CONTACTED', value:a.contacted, fg:C.good,   tip:'Contacted in this window (by last-contact date)'},
+          {label:'TO WORK',   value:a.toWork,    fg:'var(--text-dim)', tip:'Currently Potential/HT and not yet contacted'},
         ];
         // last 7 days ending on the anchor day
         const hist=[]; for(let i=6;i>=0;i--){ const dt=new Date(anchor); dt.setDate(dt.getDate()-i); const k=ymdLocal(dt);
@@ -2853,7 +2885,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                 {/* tiles */}
                 <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
                   {tiles.map(t=>(
-                    <div key={t.label} style={{...card,padding:'11px 12px'}}>
+                    <div key={t.label} title={t.tip||''} style={{...card,padding:'11px 12px'}}>
                       <div style={{fontFamily:MONO,fontSize:18,fontWeight:700,color:t.fg,fontVariantNumeric:'tabular-nums'}}>{fmt(t.value)}</div>
                       <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.07em',color:'var(--text-light)',marginTop:3}}>{t.label}</div>
                     </div>
@@ -2875,7 +2907,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                           <span style={{fontSize:10.5,color:'var(--text-dim)'}}>{pct(o.potentials,Math.max(1,o.imported))}% of imported tagged</span>
                         </div>
                         <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:9}}>
-                          {[{l:'IMPORTED',v:o.imported,fg:C.blue},{l:'FRESH',v:o.fresh,fg:C.bad},{l:'POTENTIALS',v:o.potentials,fg:'var(--text)'}].map(x=>(
+                          {[{l:'IMPORTED',v:o.imported,fg:C.blue},{l:'SOURCED',v:o.sourced,fg:C.violet},{l:'POTENTIALS',v:o.potentials,fg:'var(--text)'}].map(x=>(
                             <div key={x.l}>
                               <div style={{fontSize:9,fontWeight:700,letterSpacing:'.07em',color:'var(--text-light)'}}>{x.l}</div>
                               <div style={{fontFamily:MONO,fontSize:14,fontWeight:700,color:x.fg,marginTop:2}}>{fmt(x.v)}</div>
