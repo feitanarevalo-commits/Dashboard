@@ -4451,7 +4451,7 @@ const FOLLOWER_BRACKETS=[
   { v:'1M',   label:'1M+',           min:1000000, max:Infinity },
 ];
 
-function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,addToast,config,currentUser}) {
+function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onResults,addToast,config,currentUser}) {
   const [platform,setPlatform]=useState('All');
   const [minF,setMinF]=useState('10K');
   // Remember the chosen language across reloads so it "sticks".
@@ -4628,7 +4628,7 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResults,
   const queue=leads.filter(l=>!hasAnyStatusTag(l,config) && leadOrigin(l)!=='Imported' && (seeAll || l.scrapedBy===myName));
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
-      <LeadsTable leads={queue} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
+      <LeadsTable leads={queue} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onArchive={onArchive} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin toolbarStart={runBtn} toolbarAfterSearch={scraperFilters} hideRepFilter={!seeAll}
         searchValue={keyword} onSearchChange={setKeyword} searchFilters={false} searchPlaceholder="Search query (sent to scraper)…"
         config={config} feats={feats} campColorMap={campColorMap} filename="scraper_queue" printTitle="Scraper Queue"/>
@@ -7519,7 +7519,7 @@ function App() {
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
     if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} tools={config.kbTools||(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[])} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle} onDeleteTool={deleteKbTool} dark={darkMode}/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
-    if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
+    if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={nonPoolLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
     if(tab==='lead-mgmt') return <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} onAutoAssignJC={(isAdmin||(currentUser&&currentUser.name==='JC'))?autoAssignJC:null} onVerifyUrls={isAdmin?(()=>verifyUrls(nonPoolLeads)):null} addToast={addToast} config={config}/>;
