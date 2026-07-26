@@ -1884,9 +1884,19 @@ function LeavesView({leaves,currentUser,isAdmin,onFile,onDecide,onDelete}) {
 // Recorded automatically on sign-in/out; only admins see this log.
 function AttendanceView({sessions,config}) {
   const [rep,setRep]=useState('');
+  // Attendance is a DAILY record: default to today so the view answers "who is
+  // on today", not "every session ever". '' = All dates (the full history).
+  const todayStr=ymdLocal(new Date());
+  const [day,setDay]=useState(todayStr);
   const reps=config.salesReps||[];
-  const rows=sessions.filter(s=>!rep||s.name===rep);
+  const sessionDay=s=>{ const t=s.login_at; if(!t) return ''; const d=new Date(t); return isNaN(d)?'':ymdLocal(d); };
+  const rows=sessions.filter(s=>(!rep||s.name===rep) && (!day||sessionDay(s)===day));
   const names=[...new Set([...reps,...sessions.map(s=>s.name)])];
+  const atToday=!day||day>=todayStr;
+  const shiftDay=n=>setDay(d=>{ const base=d||todayStr; const t=new Date(base+'T00:00:00'); t.setDate(t.getDate()+n);
+    const next=ymdLocal(t); return next>todayStr?todayStr:next; });
+  const dayLabel=day? new Date(day+'T00:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}) : 'All dates';
+  const relWord=!day?'full history':(day===todayStr?'Today':(()=>{ const n=Math.round((new Date(todayStr+'T00:00:00')-new Date(day+'T00:00:00'))/86400000); return n===1?'Yesterday':n+' days ago'; })());
   const fmt=ts=>{ if(!ts) return '—'; try{ return new Date(ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch(e){ return ts; } };
   const isActive=s=> !s.logout_at && (Date.now()-new Date(s.last_seen).getTime())<5*60*1000;
   const dur=s=>{ const end=s.logout_at||s.last_seen; if(!s.login_at||!end) return '—'; return fmtDuration((new Date(end)-new Date(s.login_at))/1000); };
@@ -1894,18 +1904,43 @@ function AttendanceView({sessions,config}) {
   return (
     <div className="home-content">
       <div className="card">
-        <div className="card-header" style={{display:'flex',gap:10,alignItems:'center'}}>
-          <div className="card-title">⏱ Login Sessions <span style={{fontWeight:400,color:'var(--text-dim)',fontSize:12}}>· {rows.length} session{rows.length!==1?'s':''}</span></div>
-          <select value={rep} onChange={e=>setRep(e.target.value)} style={{marginLeft:'auto',padding:'6px 10px',border:`1px solid ${rep?'var(--accent)':'var(--border)'}`,borderRadius:8,fontSize:13,background:'var(--bg)',color:'var(--text)'}}>
-            <option value="">All people</option>
-            {names.map(r=><option key={r} value={r}>{r}</option>)}
-          </select>
+        <div className="card-header" style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+          <div className="card-title">⏱ Login Sessions <span style={{fontWeight:400,color:'var(--text-dim)',fontSize:12}}>· {rows.length} session{rows.length!==1?'s':''} · {relWord}</span></div>
+          {/* Day picker — prev / calendar / next / Today, plus All dates for the
+              full record. Next + Today grey out once you're on today. */}
+          <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+            <button onClick={()=>shiftDay(-1)} title="Previous day"
+              style={{border:'1px solid var(--border)',background:'var(--bg)',cursor:'pointer',width:30,height:30,borderRadius:8,fontSize:15,color:'var(--text-dim)',lineHeight:1}}>‹</button>
+            <label style={{position:'relative',display:'inline-flex',alignItems:'center',gap:8,cursor:'pointer',padding:'5px 10px',border:`1px solid ${day?'var(--accent)':'var(--border)'}`,borderRadius:8,background:'var(--bg)'}}
+              title="Pick a date to see that day's sessions">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{flex:'none',color:'var(--text-dim)'}}>
+                <rect x="3" y="4.5" width="18" height="17" rx="2.5"></rect><path d="M3 9.5h18M8 2.5v4M16 2.5v4"></path>
+              </svg>
+              <span style={{fontSize:13,fontWeight:600,whiteSpace:'nowrap'}}>{dayLabel}</span>
+              <input type="date" value={day} max={todayStr}
+                onChange={e=>{ if(e.target.value) setDay(e.target.value>todayStr?todayStr:e.target.value); }}
+                style={{position:'absolute',inset:0,width:'100%',height:'100%',opacity:0,cursor:'pointer'}}/>
+            </label>
+            <button onClick={()=>shiftDay(1)} disabled={atToday} title="Next day"
+              style={{border:'1px solid var(--border)',background:'var(--bg)',cursor:atToday?'default':'pointer',width:30,height:30,borderRadius:8,fontSize:15,color:'var(--text-dim)',lineHeight:1,opacity:atToday?.35:1,pointerEvents:atToday?'none':'auto'}}>›</button>
+            <button onClick={()=>setDay(todayStr)} disabled={day===todayStr} title="Jump to today"
+              style={{border:'1px solid var(--border)',background:'var(--bg)',cursor:day===todayStr?'default':'pointer',padding:'0 11px',height:30,borderRadius:8,fontSize:12.5,fontWeight:600,color:'var(--text-dim)',opacity:day===todayStr?.35:1,pointerEvents:day===todayStr?'none':'auto'}}>Today</button>
+            <button onClick={()=>setDay(day?'':todayStr)} title={day?'Show every recorded session':'Back to a single day'}
+              style={{border:`1px solid ${day?'var(--border)':'var(--accent)'}`,background:day?'var(--bg)':'var(--accent)',cursor:'pointer',padding:'0 11px',height:30,borderRadius:8,fontSize:12.5,fontWeight:600,color:day?'var(--text-dim)':'#fff'}}>All dates</button>
+            <select value={rep} onChange={e=>setRep(e.target.value)} style={{padding:'6px 10px',border:`1px solid ${rep?'var(--accent)':'var(--border)'}`,borderRadius:8,fontSize:13,background:'var(--bg)',color:'var(--text)'}}>
+              <option value="">All people</option>
+              {names.map(r=><option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
         </div>
         <div className="card-body" style={{padding:0,overflowX:'auto'}}>
           <table className="kpi-table">
             <thead><tr><th>Name</th><th>Login</th><th>Logout</th><th>Duration</th><th>Status</th></tr></thead>
             <tbody>
-              {rows.length===0 && <tr><td colSpan={5} style={{padding:16,color:'var(--text-dim)'}}>No login sessions recorded yet.</td></tr>}
+              {rows.length===0 && <tr><td colSpan={5} style={{padding:16,color:'var(--text-dim)'}}>
+                {day ? <>No sessions on <b>{dayLabel}</b>{rep?` for ${rep}`:''} — use ‹ or the calendar to check another day, or “All dates” for the full record.</>
+                     : (rep?`No login sessions recorded for ${rep}.`:'No login sessions recorded yet.')}
+              </td></tr>}
               {rows.map(s=>{ const st=stat(s); return (
                 <tr key={s.id}>
                   <td style={{fontWeight:600}}>{s.name}</td>
