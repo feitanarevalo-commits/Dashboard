@@ -176,6 +176,16 @@ function diffHistory(old, upd, actor){
   if(oc!==nc) evs.push({type:'campaign', from:oc, to:nc});
   if((old.lastContactDate||'')!==(upd.lastContactDate||'')) evs.push({type:'contact', from:old.lastContactDate||'', to:upd.lastContactDate||'', manual:!!upd.contactDateManual});
   if((old.note||'')!==(upd.note||'')) evs.push({type:'note', to:(upd.note?'added':'cleared')});
+  // Contact-detail + identity edits also belong on the timeline — a replaced URL
+  // or a changed email is exactly the kind of change someone later asks about.
+  // (Followers is deliberately NOT diffed: enrichment refreshes it and would
+  // flood the timeline with noise.)
+  if((old.url||'')!==(upd.url||'')) evs.push({type:'url', from:old.url||'', to:upd.url||''});
+  const oe=(old.emails||[]).join(', '), ne=(upd.emails||[]).join(', ');
+  if(oe!==ne) evs.push({type:'emails', from:oe, to:ne});
+  if((old.channelName||'')!==(upd.channelName||'')) evs.push({type:'renamed', from:old.channelName||'', to:upd.channelName||''});
+  if(leadOrigin(old)!==leadOrigin(upd)) evs.push({type:'origin', to:leadOrigin(upd)});
+  if(!!old.urlBroken!==!!upd.urlBroken) evs.push({type:'link', to:upd.urlBroken?'broken':'working'});
   // closeLeadId is deliberately NOT diffed: the Contacted tab resolves it in the
   // background, which would log an automated backfill as if a rep did it. The
   // real "sent to Close" action logs its own event.
@@ -193,13 +203,19 @@ function histSentence(e){
     case 'campaign':  return e.to ? `${who} set campaign to ${e.to}` : `${who} cleared the campaign`;
     case 'close':     return `${who} sent it to Close.io`;
     case 'contact':   return e.manual ? `${who} corrected the last-contacted date` : `${who} logged a contact`;
-    case 'recycle':   return `${who} recycled it — clock reset`;
+    case 'recycle':   return e.via ? `Auto-recycled — ${e.via}` : `${who} recycled it — clock reset`;
     case 'archive':   return e.to==='restored' ? `${who} restored it from the archive` : `${who} archived it`;
     case 'import':    return `${who} imported it`;
+    case 'note':      return e.to==='cleared' ? `${who} cleared the note` : `${who} updated the note`;
+    case 'url':       return e.from ? `${who} replaced the channel URL` : `${who} added the channel URL`;
+    case 'emails':    return e.to ? `${who} updated the email(s) → ${e.to}` : `${who} removed the email(s)`;
+    case 'renamed':   return `${who} renamed it${e.from?` (was "${e.from}")`:''}`;
+    case 'origin':    return `${who} marked it ${e.to}${e.via?` · ${e.via}`:''}`;
+    case 'link':      return e.to==='broken' ? `Flagged as a bad link${e.via?` · ${e.via}`:''}` : `Link verified working${e.via?` · ${e.via}`:''}`;
     default:          return `${who} updated the lead`;
   }
 }
-const HIST_ICON={scraped:'◎',qualified:'🏷',assigned:'→',tag:'🏷',campaign:'◆',close:'☁',contact:'✉',recycle:'↻',archive:'🗄',import:'⬆'};
+const HIST_ICON={scraped:'◎',qualified:'🏷',assigned:'→',tag:'🏷',campaign:'◆',close:'☁',contact:'✉',recycle:'↻',archive:'🗄',import:'⬆',note:'📝',url:'🔗',emails:'✉',renamed:'✎',origin:'⇄',link:'🔗'};
 function isRecycled(lead){
   return (lead.tags||[]).includes('For Recycle') || lead.recycled === true;
 }
@@ -6614,7 +6630,8 @@ function App() {
         // Mark them as already-in-Close via a FLAG (not a tag) — this shows as a
         // badge under the channel name and sets origin=Imported, while the lead
         // keeps its real status tag (e.g. Potential).
-        setLeads(existing=>existing.map(l=> (matchedKeys.has(leadKey(l)) && !l.inClose) ? {...l,inClose:true} : l));
+        setLeads(existing=>existing.map(l=> (matchedKeys.has(leadKey(l)) && !l.inClose)
+          ? {...l,inClose:true,history:pushHist(l,[histEvent('System','origin',{to:'Imported',via:'already in Close'})])} : l));
         logH('☁',`Close dedup: ${matchedKeys.size} ${sourceLabel} lead(s) already in Close — marked Imported`);
         addToast(`⚠ ${matchedKeys.size} ${sourceLabel} lead(s) already in Close — marked Imported (shown under the channel name)`,'info');
       })
@@ -6829,8 +6846,16 @@ function App() {
       // Keep any scraper the sheet already declares; otherwise credit whoever ran
       // the import, so every lead carries a source record instead of a blank.
       const who=l.scrapedBy||importerName||'';
+      // A sheet can carry a status (e.g. Potential) — the lead is then BORN
+      // tagged, so no later edit ever fires a diff. Record that arriving status
+      // too, otherwise the timeline shows only "scraped" and "Qualified by"
+      // reads "No record" on a lead that is plainly tagged Potential.
+      const evs=[histEvent(who,'scraped',{via:'sheet import'})];
+      const arrivingTags=(l.tags||[]).filter(Boolean);
+      if(arrivingTags.includes('Potential')) evs.push(histEvent(who,'qualified',{to:'Potential',via:'sheet import'}));
+      else if(arrivingTags.length) evs.push(histEvent(who,'tag',{to:arrivingTags.join(', '),via:'sheet import'}));
       fresh.push({...l,source:'import',scrapedBy:who||null,
-        history:pushHist(l,[histEvent(who,'scraped',{via:'sheet import'})])});
+        history:pushHist(l,evs)});
     });
     const skipped=newLeads.length-fresh.length-skippedArch;
     setLeads(existing=>[...existing,...fresh]);
@@ -6882,9 +6907,13 @@ function App() {
           if(!j || j.ok===false) return;   // lookup itself failed — leave the lead as-is
           const subs=String(j.subs||'').trim(), cid=String(j.channelId||'').trim(), nm=String(j.name||'').trim();
           const dead = j.notFound || (!cid && !subs && !nm);
+          // Only record when the bad-link verdict actually FLIPS, so a repeat
+          // sweep doesn't stack an identical entry on every lead each time.
+          const actor=(currentUser&&currentUser.name)||'System';
           if(dead){
             broken++;
-            setLeads(ls=>ls.map(x=>x.id===l.id?{...x, urlBroken:true}:x));
+            setLeads(ls=>ls.map(x=>x.id===l.id?{...x, urlBroken:true,
+              history: x.urlBroken ? x.history : pushHist(x,[histEvent(actor,'link',{to:'broken',via:'URL verify'})])}:x));
           } else {
             good++;
             setLeads(ls=>ls.map(x=>x.id===l.id?{...x,
@@ -6892,6 +6921,7 @@ function App() {
               channelId: x.channelId||cid,
               channelName: (nm && (!x.channelName || /^Row \d+$/.test(x.channelName)))?nm:x.channelName,
               urlBroken: false,
+              history: x.urlBroken ? pushHist(x,[histEvent(actor,'link',{to:'working',via:'URL verify'})]) : x.history,
             }:x));
           }
         }catch(e){}
@@ -7349,7 +7379,8 @@ function App() {
           if(diff>=threshold){
             recycled.push(l.channelName);
             // Move to For Recycle and mark Imported (it's already been worked / is in Close).
-            return{...l,tags:[...l.tags.filter(t=>t!=='Contacted'),'For Recycle'],imported:true};
+            return{...l,tags:[...l.tags.filter(t=>t!=='Contacted'),'For Recycle'],imported:true,
+              history:pushHist(l,[histEvent('System','recycle',{via:`${threshold}-day recycle period reached`})])};
           }
           return l;
         });
