@@ -428,6 +428,24 @@ function ymdLocal(d){
   const x=new Date(d); if(isNaN(x)) return '';
   return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
 }
+// Coerce ANY date a sheet/CRM might hand us into 'YYYY-MM-DD'. Every date filter
+// in the app compares these as plain strings, so a sheet value like "7/14/26"
+// silently never matches a window and the lead vanishes from Home/KPIs. Handles
+// ISO, M/D/YY, M/D/YYYY and D-Mon-YYYY; returns '' when it can't be trusted.
+function toYmd(v){
+  const s=String(v==null?'':v).trim();
+  if(!s) return '';
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const m=/^(\d{1,2})[/](\d{1,2})[/](\d{2}|\d{4})$/.exec(s);
+  if(m){
+    let y=Number(m[3]); if(y<100) y+=2000;            // "26" → 2026
+    const mo=Number(m[1]), da=Number(m[2]);           // sheets are US M/D/Y
+    if(mo>=1&&mo<=12&&da>=1&&da<=31) return `${y}-${String(mo).padStart(2,'0')}-${String(da).padStart(2,'0')}`;
+    return '';
+  }
+  const d=new Date(s);
+  return isNaN(d)?'':ymdLocal(d);
+}
 // Parse any date value to a LOCAL calendar day (midnight local time). A bare
 // "YYYY-MM-DD" is treated as a local day — NOT UTC — which avoids the western-
 // timezone off-by-one that made the recycle countdown drift and mis-count.
@@ -7175,8 +7193,11 @@ function App() {
       followers: x.followers || getCf('followers') || meta.followers || '', emails,
       thumbnail: x.thumbnail || '', channelId: x.channelId || '',
       tags, campaigns,
-      assignedTo: x.assignedTo || getCf('rep') || meta.rep || null, dateAssigned: x.dateAssigned || getCf('assigned') || meta.assigned || null,
-      lastContactDate: x.lastContactDate || null, contactDateManual: x.contactDateManual || false,
+      // Dates are normalised to YYYY-MM-DD here — a sheet's "7/14/26" would
+      // otherwise never match any date window and the lead would drop out of
+      // Home, the KPIs and the rep dashboard's day view.
+      assignedTo: x.assignedTo || getCf('rep') || meta.rep || null, dateAssigned: toYmd(x.dateAssigned || getCf('assigned') || meta.assigned || '') || null,
+      lastContactDate: toYmd(x.lastContactDate||'') || null, contactDateManual: x.contactDateManual || false,
       scrapedBy: x.scrapedBy || null,   // permanent record of who originally sourced it — must survive normalization
       history: Array.isArray(x.history) ? x.history : [],   // append-only per-lead timeline — must survive normalization too
       qualifiedBy: x.qualifiedBy || null, handedOffAt: x.handedOffAt || null, inClose: x.inClose || false, urlBroken: x.urlBroken || false, channels: Array.isArray(x.channels)?x.channels:[],
