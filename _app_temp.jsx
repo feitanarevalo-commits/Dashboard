@@ -137,6 +137,37 @@ function leadSourcing(lead){
   return 'sourced';
 }
 function isSourcedFresh(lead){ return leadSourcing(lead)==='sourced'; }
+// Fields a rep can actually edit. Used to rescue a rejected save: we re-apply
+// ONLY what they changed on top of the server's newer row.
+const LEAD_EDIT_FIELDS=['tags','campaigns','emails','assignedTo','dateAssigned','lastContactDate',
+  'contactDateManual','note','url','channelName','niche','followers','platform','imported','urlBroken','links','channels','agency','pool'];
+// Merge a rejected local edit onto the server's newer row.
+//   base   = what we believed the server held BEFORE our edit
+//   local  = the rep's copy (base + their change)
+//   server = the row the DB actually has now
+// Anything the rep changed relative to `base` wins; everything else takes the
+// server's value, so a teammate's concurrent change is preserved too. Without
+// this the rep's edit was simply discarded and their tag "reverted".
+function mergeLeadEdit(server, local, base){
+  if(!server) return local;
+  if(!local) return server;
+  const out={...server};
+  let changed=false;
+  const same=(a,b)=>JSON.stringify(a===undefined?null:a)===JSON.stringify(b===undefined?null:b);
+  LEAD_EDIT_FIELDS.forEach(f=>{
+    if(!same(local[f], (base||{})[f])){ out[f]=local[f]; changed=true; }   // the rep touched this field
+  });
+  // History is append-only on both sides — union it, oldest first.
+  const seen=new Set(), hist=[];
+  [...(server.history||[]), ...(local.history||[])].forEach(e=>{
+    if(!e) return;
+    const k=[e.ts,e.type,e.actor,e.to,e.from].join('|');
+    if(seen.has(k)) return; seen.add(k); hist.push(e);
+  });
+  hist.sort((a,b)=>String(a.ts||'').localeCompare(String(b.ts||'')));
+  out.history=hist;
+  return changed || hist.length!==((server.history||[]).length) ? out : server;
+}
 // "Scraped By" is a PEOPLE record — which teammate (rep or lead-gen) sourced the
 // lead, so credit survives reassignment (e.g. JC scrapes → assigned to Mikka →
 // still reads JC). The Make automation isn't a person, so pool leads have no
@@ -7396,14 +7427,43 @@ function App() {
           if(!res || !res.ok) return;   // network/RPC error → keep snapshot old, retry next tick
           // Accepted writes: advance our known version so the next edit isn't rejected.
           (res.accepted||[]).forEach(a=>{ leadVersionsRef.current[String(a.id)]=a.version; });
-          // Rejected = someone else wrote a newer version. Adopt the DB's current row
-          // instead of clobbering it, refresh our version, and align the snapshot so
-          // we don't immediately re-push the stale change.
+          // Rejected = the row moved on while we were writing. DON'T throw the rep's
+          // edit away — that is what made tags "revert": a background no-op write
+          // bumps the version, our save is rejected, and the rep's tagging is
+          // replaced by the older server row. Instead re-apply just the fields THEY
+          // changed on top of the server's newer row and push once more.
           if(res.rejected && res.rejected.length){
-            const byId={};
-            res.rejected.forEach(r=>{ const id=String(r.id); byId[id]=r; leadVersionsRef.current[id]=r.version; if(r.data) snap[id]=JSON.stringify(r.data); });
-            setLeads(cur=>cur.map(l=>{ const r=byId[String(l.id)]; return (r&&r.data)?r.data:l; }));
-            addToast(`${res.rejected.length} lead(s) were updated by someone else — refreshed to the latest`,'info');
+            const byId={}, merged={};
+            res.rejected.forEach(r=>{
+              const id=String(r.id); byId[id]=r;
+              leadVersionsRef.current[id]=r.version;          // write against the fresh version
+              if(r.data) snap[id]=JSON.stringify(r.data);      // provisional; corrected below if we merge
+            });
+            setLeads(cur=>cur.map(l=>{
+              const id=String(l.id), r=byId[id];
+              if(!r || !r.data) return l;
+              let base=null; try{ base=JSON.parse(prev[id]||'null'); }catch(e){}
+              const m=mergeLeadEdit(r.data, l, base);
+              if(m!==r.data){ merged[id]=m; return m; }        // our edit survived — keep + re-push
+              return r.data;                                   // we changed nothing → take theirs
+            }));
+            const retry=Object.values(merged);
+            if(retry.length){
+              // Leave these OUT of the synced snapshot so they stay dirty until the
+              // retry confirms; the poll therefore can't overwrite them meanwhile.
+              retry.forEach(m=>{ delete snap[String(m.id)]; writeStampRef.current[String(m.id)]=Date.now(); });
+              syncLeadsToSupabase(retry, leadVersionsRef.current).then(r2=>{
+                if(!r2 || !r2.ok) return;
+                (r2.accepted||[]).forEach(a=>{ leadVersionsRef.current[String(a.id)]=a.version; });
+                // Give up after ONE retry so we can never loop; say so honestly.
+                if(r2.rejected && r2.rejected.length){
+                  addToast(`${r2.rejected.length} edit(s) couldn't be saved — someone else is editing them. Please re-check those leads.`,'error');
+                  reportError('syncRetryRejected', new Error(r2.rejected.length+' lead(s) still rejected after merge'));
+                }
+              });
+            }
+            const adopted=res.rejected.length-retry.length;
+            if(adopted>0) addToast(`${adopted} lead(s) were updated by someone else — refreshed to the latest`,'info');
           }
           leadsSyncRef.current=snap;
         });
