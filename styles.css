@@ -1053,3 +1053,15 @@ html[data-dark] .lp-rep:hover { box-shadow: 0 8px 26px rgba(0,0,0,.45) !importan
 /* The rep name/avatar is the dashboard shortcut — highlight it on hover so it
    reads as separate from the card (which opens the performance report). */
 .lp-profile:hover { background: var(--bg); }
+
+/* ── Duplicate-leads banner ──
+   Persistent, non-dismissable warning shown to a rep whose lead is duplicated.
+   Its own class rather than inline styles so it can flip for dark mode — the
+   light-mode brown would be unreadable on the dark --warn-light panel. */
+.dup-banner { background: var(--warn-light); color: #8a4b00; border-bottom: 1px solid rgba(255,139,0,.35); }
+.dup-banner b { font-weight: 800; }
+.dup-banner-btn { background: #B45309; color: #fff; }
+.dup-banner-btn:hover { background: #9a4707; }
+html[data-dark] .dup-banner { color: #F0C674; border-bottom-color: rgba(210,153,34,.35); }
+html[data-dark] .dup-banner-btn { background: #D29922; color: #1c1a26; }
+html[data-dark] .dup-banner-btn:hover { background: #e0a92e; }
