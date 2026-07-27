@@ -1065,3 +1065,16 @@ html[data-dark] .lp-rep:hover { box-shadow: 0 8px 26px rgba(0,0,0,.45) !importan
 html[data-dark] .dup-banner { color: #F0C674; border-bottom-color: rgba(210,153,34,.35); }
 html[data-dark] .dup-banner-btn { background: #D29922; color: #1c1a26; }
 html[data-dark] .dup-banner-btn:hover { background: #e0a92e; }
+
+/* ── QA review badge ──
+   Mirrors .origin-badge/.origin-toggle. Awaiting is the default state for every
+   lead; only an admin gets .qa-toggle (and therefore the cursor/hover), so a rep
+   sees a plain, visibly-inert badge rather than a button that does nothing. */
+.qa-badge { font-size:10px; font-weight:700; padding:3px 9px; border-radius:20px; white-space:nowrap;
+  border:1px solid transparent; font-family:inherit; line-height:1.4;
+  background:var(--warn-light); color:var(--warn); }
+.qa-badge.done { background:var(--success-light); color:var(--success); }
+.qa-badge:disabled { cursor:default; opacity:.85; }
+.qa-toggle { cursor:pointer; }
+.qa-toggle:hover { filter:brightness(.96); border-color:currentColor; }
+.qa-toggle:active { transform:scale(.94); }
