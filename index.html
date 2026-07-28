@@ -1157,7 +1157,13 @@ function importToSmartReach(rep,repLeads,campaignId,campaignLabel){const wh=(con
 // creates/updates the prospects, and assigns them to the campaign. It returns
 // {ok, created, assigned, errors}. SmartReach dedupes by email so re-sends
 // don't duplicate.
-const payload={rep,campaign_id:String(campaignId),leads:emailable.map(l=>toSmartReachItem(l,campaignId))};addToast(`Sending ${emailable.length} prospect(s) to SmartReach → ${dest}…`,'info');fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(resp=>{if(resp&&resp.ok===false)throw new Error(resp.error||'SmartReach error');const n=resp&&typeof resp.assigned==='number'&&resp.assigned?resp.assigned:emailable.length;addToast(`✓ ${n} prospect(s) added to SmartReach → ${dest}`,'success');logH('✉',`SmartReach: ${n} → ${dest} (${rep})`);// Stamp each lead so the send is countable per rep per DAY. Until now a
+const payload={rep,campaign_id:String(campaignId),leads:emailable.map(l=>toSmartReachItem(l,campaignId))};addToast(`Sending ${emailable.length} prospect(s) to SmartReach → ${dest}…`,'info');fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(resp=>{if(resp&&resp.ok===false){// Surface the REAL reason. The edge fn returns {error} for hard fails and
+// {errors:[{step,status,body}]} for per-chunk SmartReach errors — the old
+// code threw a bare 'SmartReach error' and discarded the latter, so the log
+// never said why. Now the detail lands in the toast AND error_logs.
+const detail=resp.error||(Array.isArray(resp.errors)&&resp.errors.length?'SmartReach: '+JSON.stringify(resp.errors).slice(0,400):'SmartReach error');throw new Error(detail);}const n=resp&&typeof resp.assigned==='number'&&resp.assigned?resp.assigned:emailable.length;// Warn (don't fail) when leads were dropped for a bad/missing email — one bad
+// address no longer sinks the whole push, but the rep should know it was skipped.
+const skipped=resp&&Array.isArray(resp.skipped)?resp.skipped:[];if(skipped.length){const names=skipped.slice(0,3).map(s=>s.name||s.email||'?').join(', ');addToast(`⚠ ${skipped.length} lead(s) skipped — no valid email: ${names}${skipped.length>3?'…':''}`,'info');}addToast(`✓ ${n} prospect(s) added to SmartReach → ${dest}`,'success');logH('✉',`SmartReach: ${n} → ${dest} (${rep})`);// Stamp each lead so the send is countable per rep per DAY. Until now a
 // send left only one activity-log line with a total, so "how many did
 // they push on the 24th" was unanswerable and the Home report couldn't
 // cross-check the contacted number against it.
