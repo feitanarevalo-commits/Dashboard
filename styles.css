@@ -1078,3 +1078,22 @@ html[data-dark] .dup-banner-btn:hover { background: #e0a92e; }
 .qa-toggle { cursor:pointer; }
 .qa-toggle:hover { filter:brightness(.96); border-color:currentColor; }
 .qa-toggle:active { transform:scale(.94); }
+
+/* ── Global search: richer lead result ──
+   A hit now answers "where is this lead and what do I need to know" before you
+   open it, so the row is taller and wraps instead of truncating to one line. */
+.cmdk-lead { align-items: flex-start; }
+.cmdk-lead-where { display:flex; flex-wrap:wrap; align-items:center; gap:6px;
+  font-size:11px; color:var(--text-dim); margin-top:3px; }
+.cmdk-loc { font-size:10px; font-weight:700; padding:2px 7px; border-radius:20px;
+  background:var(--accent-light); color:var(--accent); white-space:nowrap; }
+.cmdk-loc-arch { background:var(--warn-light); color:var(--warn); }
+.cmdk-loc-dup  { background:var(--danger-light); color:var(--danger); }
+.cmdk-lead-note { font-size:10.5px; color:var(--text-light); margin-top:5px;
+  font-style:italic; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cmdk-lead-actions { display:flex; flex-direction:column; align-items:flex-end;
+  gap:6px; flex-shrink:0; margin-left:8px; }
+.cmdk-goto { background:transparent; border:1px solid var(--border); color:var(--text-dim);
+  border-radius:8px; padding:4px 9px; font-size:10px; font-weight:700; cursor:pointer;
+  font-family:inherit; white-space:nowrap; }
+.cmdk-goto:hover { border-color:var(--accent); color:var(--accent); background:var(--accent-light); }
