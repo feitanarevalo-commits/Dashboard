@@ -163,6 +163,7 @@ h1, h2, h3, h4, h5, h6, .display { font-family: 'Space Grotesk', 'Plus Jakarta S
 .nav-item .nav-badge.red { background: rgba(222,53,11,.12); color: var(--danger); }
 .nav-item .nav-badge.orange { background: rgba(255,139,0,.12); color: var(--warn); }
 .nav-item .nav-badge.blue { background: rgba(19,102,214,.12); color: var(--accent); }
+.nav-item .nav-badge.amber { background: rgba(161,98,7,.12); color: #A16207; }
 .nav-divider { height: 1px; background: var(--sidebar-border); margin: 6px 0; }
 .sidebar-footer { margin-top: auto; border-top: 1px solid var(--sidebar-border); }
 .nav-item.settings { opacity: .75; }
@@ -224,6 +225,7 @@ h1, h2, h3, h4, h5, h6, .display { font-family: 'Space Grotesk', 'Plus Jakarta S
 .tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .03em; }
 .tag-potential { background: var(--success-light); color: var(--success); }
 .tag-nq { background: var(--danger-light); color: var(--danger); }
+.tag-awaiting { background: #FEF9C3; color: #A16207; }
 .tag-contacted { background: var(--accent-light); color: var(--accent); }
 .tag-existing { background: var(--purple-light); color: var(--purple); }
 .tag-recycle { background: var(--warn-light); color: var(--warn); }
