@@ -1097,3 +1097,16 @@ html[data-dark] .dup-banner-btn:hover { background: #e0a92e; }
   border-radius:8px; padding:4px 9px; font-size:10px; font-weight:700; cursor:pointer;
   font-family:inherit; white-space:nowrap; }
 .cmdk-goto:hover { border-color:var(--accent); color:var(--accent); background:var(--accent-light); }
+
+/* ── Direct links: channel + Close ── */
+.cmdk-links { display:flex; gap:5px; flex-wrap:wrap; justify-content:flex-end; }
+.cmdk-goto-close:hover { border-color:#2f6bf0; color:#2f6bf0; background:rgba(47,107,240,.1); }
+.cmdk-goto-off { opacity:.55; cursor:help; }
+.lead-links { display:flex; gap:7px; flex-wrap:wrap; margin-top:8px; }
+.lead-link { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:700;
+  padding:4px 10px; border-radius:20px; border:1px solid var(--border); color:var(--text-dim);
+  text-decoration:none; background:var(--card); white-space:nowrap; }
+.lead-link:hover { border-color:var(--accent); color:var(--accent); background:var(--accent-light); }
+.lead-link-close:hover { border-color:#2f6bf0; color:#2f6bf0; background:rgba(47,107,240,.1); }
+.lead-link-off { opacity:.55; cursor:help; }
+.lead-link-off:hover { border-color:var(--border); color:var(--text-dim); background:var(--card); }
