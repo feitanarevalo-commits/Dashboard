@@ -17,6 +17,7 @@ var STATUSES = ['Potential', 'Contacted', 'For Recycle', 'Partner'];
 var STATUS_CLS = {
   'Potential':      'tag-potential',
   'Not Qualified':  'tag-nq',
+  'NQ':             'tag-nq',
   'Contacted':      'tag-contacted',
   'Existing Leads': 'tag-existing',
   'For Recycle':    'tag-recycle',
@@ -28,7 +29,7 @@ var STATUS_CLS = {
 // Add a tag here to make it auto-route leads out of Scraper.
 // 'Partner' = already a signed partner: the lead is won, so it stops counting as
 // workable pipeline and lives in the Already Partner tab.
-var STATUS_TAGS = ['Potential', 'Contacted', 'For Recycle', 'HT', 'Partner'];
+var STATUS_TAGS = ['Potential', 'Contacted', 'For Recycle', 'HT', 'Partner', 'NQ'];
 
 // ── TAG COLOURS ────────────────────────────────────────────
 // Controls the colour of tag badges everywhere in the app.
