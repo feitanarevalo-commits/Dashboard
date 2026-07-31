@@ -197,7 +197,9 @@ var DEFAULT_CONFIG = {
     { name: 'Jon',     role: 'admin',    password: 'Enfinity26' },
     { name: 'Jake',    role: 'admin',    password: 'Enfinity26' },
     { name: 'Czarina', role: 'admin',    password: 'Enfinity26' },
-    { name: 'Pen',     role: 'employee', password: 'Enfinity26' },
+    // Pen's login removed 2026-07-30 (account deactivated). Her 1,575 leads,
+    // history and KPI attribution stay intact — she remains in salesReps so her
+    // work is still visible/attributed. Backup: public._pen_account_bak_20260730.
     { name: 'Chase',   role: 'employee', password: 'Enfinity26' },
     { name: 'Mikka',   role: 'employee', password: 'Enfinity26' },
     { name: 'JC',      role: 'leadgen',  password: 'Enfinity26' }, // High Ticket pool owner (live app_config has JC as leadgen)
