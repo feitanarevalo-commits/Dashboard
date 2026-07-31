@@ -170,7 +170,7 @@ var DEFAULT_CONFIG = {
   ],
 
   // ── Sales Reps ── names and appearance
-  salesReps:  ['Pen', 'Rein', 'Chase', 'Mikka', 'Chai', 'Jon', 'Czarina', 'JC'],
+  salesReps:  ['Rein', 'Chase', 'Mikka', 'Chai', 'Jon', 'Czarina', 'JC'],
   repColors:  { Pen: '#6366F1', Rein: '#10B981', Chase: '#F59E0B', Mikka: '#EC4899', Chai: '#0EA5E9', Jon: '#8B5CF6', Czarina: '#14B8A6' },
   repEmojis:  { Pen: '', Rein: '', Chase: '', Mikka: '', Chai: '', Jon: '', Czarina: '' },
   repPhotos:  {},
