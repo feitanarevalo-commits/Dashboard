@@ -125,7 +125,7 @@ var DEFAULT_CONFIG = {
   // key baked into the Make scraper scenario. To make a key: console.cloud.google.com
   // → new project → enable "YouTube Data API v3" → Credentials → API key.
   repApiKeys: {
-    Robert:'', Chai:'', Rein:'', Jon:'', Jake:'', Czarina:'',
+    Bert:'', Chai:'', Rein:'', Jon:'', Jake:'', Czarina:'',
     Pen:'', Chase:'', Mikka:'',
   },
 
@@ -170,7 +170,7 @@ var DEFAULT_CONFIG = {
   ],
 
   // ── Sales Reps ── names and appearance
-  salesReps:  ['Robert', 'Rein', 'Chase', 'Mikka', 'Chai', 'Jon', 'Czarina', 'JC'],
+  salesReps:  ['Bert', 'Rein', 'Chase', 'Mikka', 'Chai', 'Jon', 'Czarina', 'JC'],
   repColors:  { Pen: '#6366F1', Rein: '#10B981', Chase: '#F59E0B', Mikka: '#EC4899', Chai: '#0EA5E9', Jon: '#8B5CF6', Czarina: '#14B8A6' },
   repEmojis:  { Pen: '', Rein: '', Chase: '', Mikka: '', Chai: '', Jon: '', Czarina: '' },
   repPhotos:  {},
@@ -189,9 +189,9 @@ var DEFAULT_CONFIG = {
   // ⚠ SECURITY NOTE: passwords are stored client-side. This gates casual
   //   access for an internal team, but anyone who views the page source can
   //   read them. It is NOT bank-grade security. Change the defaults below.
-  //   Admins are: Robert, Chai, Rein, Jon, Jake, Czarina.
+  //   Admins are: Bert, Chai, Rein, Jon, Jake, Czarina.
   users: [
-    { name: 'Robert',  role: 'admin',    password: 'Enfinity26' },
+    { name: 'Bert',    role: 'admin',    password: 'Enfinity26' },
     { name: 'Chai',    role: 'admin',    password: 'Enfinity26' },
     { name: 'Rein',    role: 'admin',    password: 'Enfinity26' },
     { name: 'Jon',     role: 'admin',    password: 'Enfinity26' },
