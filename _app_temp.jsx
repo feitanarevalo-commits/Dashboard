@@ -5726,6 +5726,7 @@ function AiScraperView({addToast}){
   const [gLoaded,setGLoaded]=useState('');          // last-saved value, for dirty check
   const [savingG,setSavingG]=useState(false);
   const [showG,setShowG]=useState(false);
+  const [vision,setVision]=useState(true);   // let the AI look at video thumbnails
   useEffect(()=>{
     if(!SB){ setRows([]); return; }
     let stop=false; setRows(null);
@@ -5755,12 +5756,17 @@ function AiScraperView({addToast}){
     const cfg=(typeof DEFAULT_CONFIG!=='undefined')?DEFAULT_CONFIG:{};
     if(!cfg.supabaseUrl||!cfg.supabaseKey){ addToast&&addToast('Supabase not configured','error'); return; }
     setRunning(true);
-    fetch(cfg.supabaseUrl+'/functions/v1/qualify-leads',{method:'POST',headers:{apikey:cfg.supabaseKey,Authorization:'Bearer '+cfg.supabaseKey,'Content-Type':'application/json'},body:JSON.stringify({limit:5})})
+    fetch(cfg.supabaseUrl+'/functions/v1/qualify-leads',{method:'POST',headers:{apikey:cfg.supabaseKey,Authorization:'Bearer '+cfg.supabaseKey,'Content-Type':'application/json'},body:JSON.stringify({limit:5,vision})})
       .then(r=>r.json()).then(j=>{
         setRunning(false);
         if(j&&j.ok){ addToast&&addToast(`AI qualified ${j.qualified} lead${j.qualified!==1?'s':''}`+(j.errors?` · ${j.errors} error${j.errors!==1?'s':''}`:''), j.qualified?'success':'info'); setTick(t=>t+1); }
         else { addToast&&addToast((j&&j.error)||'AI run failed','error'); }
       }).catch(e=>{ setRunning(false); addToast&&addToast('AI run failed: '+e.message,'error'); });
+  }
+  function clearAll(){
+    if(!SB || !window.confirm('Clear ALL AI results from this tab? This only removes the AI suggestions — your leads are untouched.')) return;
+    SB.from('ai_qualifications').delete().neq('lead_id','__never__')
+      .then(({error})=>{ if(error){ addToast&&addToast('Clear failed','error'); return; } setRows([]); addToast&&addToast('AI results cleared','success'); }, ()=>{ addToast&&addToast('Clear failed','error'); });
   }
 
   function review(id,verdict){
@@ -5796,9 +5802,13 @@ function AiScraperView({addToast}){
       </div>
       <div className="toolbar no-print">
         <span className="count-label">{rows==null?'Loading…':`${rows.length} qualified`}{agreePct!=null?` · ${agreePct}% agreement (${agreed}/${reviewed.length})`:''}</span>
-        <div style={{marginLeft:'auto',display:'flex',gap:8}}>
+        <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
+          <label title="Let the AI look at each channel's recent video thumbnails to verify content type & quality (slightly slower/costlier)" style={{display:'flex',alignItems:'center',gap:6,fontSize:12.5,color:'var(--text-dim)',cursor:'pointer',userSelect:'none'}}>
+            <input type="checkbox" checked={vision} onChange={e=>setVision(e.target.checked)} style={{cursor:'pointer'}}/>👁 Look at videos
+          </label>
           <button className="btn btn-outline btn-sm" onClick={()=>setTick(t=>t+1)}>↻ Refresh</button>
-          <button className="btn btn-sm" disabled={running} style={{background:'var(--accent)',color:'#fff',borderColor:'var(--accent)'}} onClick={runBatch}>{running?'⏳ Running… (~30s)':'▶ Run AI on 5 leads'}</button>
+          <button className="btn btn-outline btn-sm" disabled={!(rows&&rows.length)} onClick={clearAll} style={{color:'#C0453A',borderColor:'#e6bcb7'}}>🗑 Clear</button>
+          <button className="btn btn-sm" disabled={running} style={{background:'var(--accent)',color:'#fff',borderColor:'var(--accent)'}} onClick={runBatch}>{running?'⏳ Running…':'▶ Run AI on 5 leads'}</button>
         </div>
       </div>
       <div className="table-container">
