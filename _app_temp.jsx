@@ -5722,13 +5722,34 @@ function AiScraperView({addToast}){
   const [rows,setRows]=useState(null);   // null = loading
   const [tick,setTick]=useState(0);
   const [running,setRunning]=useState(false);
+  const [guidelines,setGuidelines]=useState('');   // admin custom guidelines (ai_settings)
+  const [gLoaded,setGLoaded]=useState('');          // last-saved value, for dirty check
+  const [savingG,setSavingG]=useState(false);
+  const [showG,setShowG]=useState(false);
   useEffect(()=>{
     if(!SB){ setRows([]); return; }
     let stop=false; setRows(null);
     SB.from('ai_qualifications').select('*').order('created_at',{ascending:false}).limit(200)
       .then(({data,error})=>{ if(!stop) setRows(error?[]:(data||[])); }, ()=>{ if(!stop) setRows([]); });
+    SB.from('ai_settings').select('custom_guidelines').eq('id',1).maybeSingle()
+      .then(({data})=>{ if(!stop){ const g=(data&&data.custom_guidelines)||''; setGuidelines(g); setGLoaded(g); } }, ()=>{});
     return ()=>{ stop=true; };
   },[tick]);
+
+  function saveGuidelines(){
+    if(!SB) return;
+    setSavingG(true);
+    SB.from('ai_settings').upsert({id:1,custom_guidelines:guidelines,updated_at:new Date().toISOString()},{onConflict:'id'})
+      .then(({error})=>{ setSavingG(false); if(error){ addToast&&addToast('Save failed','error'); } else { setGLoaded(guidelines); addToast&&addToast('Custom guidelines saved — the AI applies them on the next run','success'); } }, ()=>{ setSavingG(false); addToast&&addToast('Save failed','error'); });
+  }
+  function saveNote(id,current){
+    if(!SB) return;
+    const note=window.prompt('Comment on this lead — the AI learns from your notes and applies them as guidelines on future runs:', current||'');
+    if(note===null) return; // cancelled
+    const val=note.trim();
+    SB.from('ai_qualifications').update({reviewer_note:val||null}).eq('id',id)
+      .then(({error})=>{ if(error){ addToast&&addToast('Save failed','error'); return; } setRows(rs=>(rs||[]).map(r=>r.id===id?{...r,reviewer_note:val||null}:r)); addToast&&addToast(val?'Comment saved':'Comment cleared','success'); }, ()=>{ addToast&&addToast('Save failed','error'); });
+  }
 
   function runBatch(){
     const cfg=(typeof DEFAULT_CONFIG!=='undefined')?DEFAULT_CONFIG:{};
@@ -5760,8 +5781,18 @@ function AiScraperView({addToast}){
         <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
           <span style={{fontSize:16,fontWeight:700}}>🤖 AI Scraper</span>
           <span style={{fontSize:10,fontWeight:800,letterSpacing:.5,color:'#B26A00',background:'#FEF4E5',padding:'3px 8px',borderRadius:20}}>BETA</span>
-          <span style={{fontSize:12.5,color:'var(--text-dim)'}}>Claude qualifies unassigned leads against your pool rules. Suggestions only — nothing is tagged, moved, or archived automatically.</span>
+          <span style={{fontSize:12.5,color:'var(--text-dim)'}}>Claude qualifies unassigned leads against your Knowledge Base rules. Suggestions only — nothing is tagged, moved, or archived automatically.</span>
+          <button onClick={()=>setShowG(s=>!s)} className="btn btn-outline btn-sm" style={{marginLeft:'auto',fontSize:12}}>{showG?'▾':'▸'} 🧭 Custom Guidelines{guidelines.trim()&&!showG?' •':''}</button>
         </div>
+        {showG && <div style={{marginTop:12}}>
+          <div style={{fontSize:12,color:'var(--text-dim)',marginBottom:6}}>House rules the AI applies <b>on top of</b> your Knowledge Base, every run. Example: <i>“Reject channels averaging under 5 minutes. Pakistan is OK for MSN. Prefer 20k+ views/video.”</i> Your per-lead comments below are also fed to the AI as it learns.</div>
+          <textarea value={guidelines} onChange={e=>setGuidelines(e.target.value)} placeholder="Type standing guidelines for the AI here…" rows={4}
+            style={{width:'100%',boxSizing:'border-box',fontFamily:'inherit',fontSize:13,padding:'10px 12px',borderRadius:10,border:'1px solid var(--card-border)',background:'var(--bg)',color:'var(--text)',resize:'vertical'}}/>
+          <div style={{display:'flex',gap:8,alignItems:'center',marginTop:8}}>
+            <button className="btn btn-sm" disabled={savingG||guidelines===gLoaded} style={{background:'var(--accent)',color:'#fff',borderColor:'var(--accent)'}} onClick={saveGuidelines}>{savingG?'Saving…':'💾 Save guidelines'}</button>
+            {guidelines!==gLoaded && <span style={{fontSize:11,color:'#B26A00'}}>Unsaved changes</span>}
+          </div>
+        </div>}
       </div>
       <div className="toolbar no-print">
         <span className="count-label">{rows==null?'Loading…':`${rows.length} qualified`}{agreePct!=null?` · ${agreePct}% agreement (${agreed}/${reviewed.length})`:''}</span>
@@ -5798,7 +5829,10 @@ function AiScraperView({addToast}){
                     <td><span style={{fontSize:11,fontWeight:700,background:c.bg,color:c.fg,padding:'3px 8px',borderRadius:20,whiteSpace:'nowrap'}}>{r.verdict}</span></td>
                     <td style={{fontSize:12}}>{r.suggested_pool&&r.suggested_pool!=='none'?r.suggested_pool:<span style={{color:'var(--text-light)'}}>—</span>}</td>
                     <td style={{fontSize:12,fontWeight:600}}>{r.confidence!=null?r.confidence+'%':'—'}</td>
-                    <td style={{fontSize:12,color:'var(--text-dim)',maxWidth:300}}>{r.reason}</td>
+                    <td style={{fontSize:12,color:'var(--text-dim)',maxWidth:300}}>
+                      {r.reason}
+                      {r.reviewer_note && <div style={{marginTop:6,fontSize:11.5,color:'var(--accent)',background:'var(--accent-light)',borderRadius:8,padding:'5px 8px',lineHeight:1.4}}>📝 <b>Your note:</b> {r.reviewer_note}</div>}
+                    </td>
                     <td>
                       {r.reviewed
                         ? <span style={{fontSize:11,fontWeight:700,color:r.review_verdict==='agree'?'#1E7B45':'#C0453A'}}>{r.review_verdict==='agree'?'✓ Agreed':'✗ Disagreed'}<button onClick={()=>review(r.id,r.review_verdict==='agree'?'disagree':'agree')} title="Flip your call" style={{marginLeft:6,fontSize:11,border:'none',background:'none',cursor:'pointer',color:'var(--text-light)'}}>↺</button></span>
@@ -5806,6 +5840,7 @@ function AiScraperView({addToast}){
                             <button onClick={()=>review(r.id,'agree')} className="btn btn-sm" style={{background:'#1E7B45',color:'#fff',borderColor:'#1E7B45',padding:'4px 9px',fontSize:11}}>Agree</button>
                             <button onClick={()=>review(r.id,'disagree')} className="btn btn-sm btn-outline" style={{padding:'4px 9px',fontSize:11}}>Disagree</button>
                           </div>}
+                      <button onClick={()=>saveNote(r.id,r.reviewer_note)} title="Comment — the AI learns from your notes" className="btn btn-sm btn-outline" style={{marginTop:6,padding:'3px 8px',fontSize:11,display:'block'}}>💬 {r.reviewer_note?'Edit note':'Comment'}</button>
                     </td>
                   </tr>
                 ); })}
