@@ -30,6 +30,17 @@ function isInClose(lead){ return !!(lead && (lead.inClose || lead.fromClose || l
 // or High Ticket (HT). Pending Qualification, Contacted and For Recycle are NOT
 // counted even though they're assigned to the rep — they live in their own tabs.
 function isWorkable(lead){ return !!(lead && ((lead.tags||[]).includes('Potential') || (lead.tags||[]).includes('HT'))); }
+// Has this lead EVER been qualified as Potential/HT — not just right now?
+// The Home KPIs count fresh/imported off this, so a raw bulk sheet import (which
+// arrives untagged) doesn't read as a mountain of fresh leads nobody has worked.
+// It reads the lead's own timeline first, so a lead that was qualified, then
+// contacted, recycled and picked up by someone else still counts as qualified
+// work. The tag check is the fallback for leads that predate history events.
+function isQualifiedLead(lead){
+  if(!lead) return false;
+  if(isWorkable(lead)) return true;
+  return (lead.history||[]).some(e=>e && e.type==='qualified');
+}
 // The taggable statuses shown on every lead picker. Driven by the admin-editable
 // config.statusTags (so "+ Add tag" in Customize actually adds a usable tag),
 // with HT always available. Falls back to the built-in STATUSES.
@@ -39,10 +50,56 @@ function statusOptions(config){
 }
 // Status tags that have their OWN dedicated tab. A lead carrying one has "landed"
 // there and should leave the general Scraper / Lead Management lists.
-const STATUS_TAB_TAGS = ['Pending Qualification','Contacted','For Recycle','Partner'];
+// 'NQ' (Not Qualified) is its own dedicated tab — a lead a rep reviewed and
+// rejected. Listing it here keeps NQ leads OUT of the general Scraper / Lead
+// Management working lists (they've "landed" in the NQ tab), and out of Pending.
+// 'Awaiting Potential' parks a lead a rep judged Potential-worthy but doesn't
+// want to promote today (Close/SmartReach push off the Potential tag, and the
+// daily count credits the day it's tagged Potential). It has its own tab; the
+// rep re-tags it Potential the next day. Kept out of Pending and the general
+// working lists, and NOT counted as workable until promoted.
+const STATUS_TAB_TAGS = ['Pending Qualification','NQ','Awaiting Potential','Contacted','For Recycle','Partner'];
 // Already a signed partner — the lead is won. It leaves the rep's queue and the
 // campaign tabs (it isn't workable pipeline any more) and lives in its own tab.
 function isPartnerLead(lead){ return (lead&&(lead.tags||[]).includes('Partner'))||false; }
+// Deep link to the lead's page in Close. Only leads with a RESOLVED Close id get
+// one — a lead that's on Close but whose id hasn't been backfilled yet has no
+// addressable page, and a link to Close's home screen is worse than no link.
+function closeLeadUrl(lead){
+  const id=lead&&lead.closeLeadId;
+  return id ? `https://app.close.com/lead/${id}/` : null;
+}
+// The channel's own page. Falls back to building one from the channel id so a
+// lead imported without a URL is still openable.
+function channelUrl(lead){
+  if(!lead) return null;
+  const u=String(lead.url||'').trim();
+  if(u) return /^https?:\/\//i.test(u) ? u : 'https://'+u;
+  const cid=String(lead.channelId||'').trim();
+  return cid ? `https://www.youtube.com/channel/${cid}` : null;
+}
+// Where does this lead actually live in the dashboard? Search results say
+// "Contacted Leads" rather than just naming the lead, so you know which tab to
+// open to work it. Mirrors the tab predicates in App.renderMain, in the order a
+// lead is routed: a dedicated status tab wins, then a pool, then its campaign.
+// Returns {tab, label} — tab is the nav id so the result can jump straight there.
+function leadLocation(lead, config){
+  if(!lead) return {tab:'lead-mgmt', label:'Lead Management'};
+  if(lead.archived) return {tab:'archive', label:'Archive'};
+  const tags=lead.tags||[];
+  if(tags.includes('For Recycle')) return {tab:'recycle',  label:'For Recycle'};
+  if(isPartnerLead(lead))          return {tab:'partner',  label:'Already Partner'};
+  if(isContacted(lead))            return {tab:'contacted',label:'Contacted Leads'};
+  if(tags.includes('Pending Qualification')) return {tab:'pending', label:'Pending Qualification'};
+  if(lead.pool && !lead.assignedTo && (lead.campaigns||[]).length===0){
+    const p={highticket:'High Ticket Pool',msn:'MSN Pool',virals:'VIRALS Pool'}[lead.pool];
+    if(p) return {tab:'pool-'+lead.pool, label:p};
+  }
+  const camp=(config&&config.campaigns||[]).find(c=>(lead.campaigns||[]).includes(c.id));
+  if(camp) return {tab:camp.id.toLowerCase(), label:camp.label+' Campaign'};
+  if(!lead.assignedTo) return {tab:'lead-mgmt', label:'Unassigned · Lead Management'};
+  return {tab:'lead-mgmt', label:'Lead Management'};
+}
 function hasTabStatusTag(lead){ return isContacted(lead) || STATUS_TAB_TAGS.some(t=>(lead.tags||[]).includes(t)); }
 // Any status tag — built-in OR admin-added (config.statusTags). Used to drop a
 // lead from the FRESH Scraper queue the moment it's triaged with any status.
@@ -137,10 +194,37 @@ function leadSourcing(lead){
   return 'sourced';
 }
 function isSourcedFresh(lead){ return leadSourcing(lead)==='sourced'; }
+// Canonical JSON — keys sorted at every level, so two objects with identical
+// CONTENT always produce the same string.
+//
+// This is what stops mass no-op writes. Postgres jsonb does not preserve key
+// order (it sorts by key length then bytewise), so a lead that round-trips
+// through the database comes back ordered differently from the object the app
+// sent. Plain JSON.stringify is order-sensitive, so any code path that rebuilds
+// lead objects made EVERY lead look "changed" and the client pushed hundreds of
+// byte-identical rows — bumping their versions, which in turn got other reps'
+// in-flight edits rejected and made their tags appear to revert.
+function stableStringify(v){
+  if(v===null||typeof v!=='object') return JSON.stringify(v===undefined?null:v);
+  if(Array.isArray(v)) return '['+v.map(stableStringify).join(',')+']';
+  return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+stableStringify(v[k])).join(',')+'}';
+}
 // Fields a rep can actually edit. Used to rescue a rejected save: we re-apply
 // ONLY what they changed on top of the server's newer row.
-const LEAD_EDIT_FIELDS=['tags','campaigns','emails','assignedTo','dateAssigned','lastContactDate',
-  'contactDateManual','note','url','channelName','niche','followers','platform','imported','urlBroken','links','channels','agency','pool'];
+//
+// OWNERSHIP IS NOT IN THIS LIST, deliberately. `assignedTo`/`dateAssigned` used
+// to be, and that is what sent JC's leads back to JC after Robert reassigned
+// them to Rein: JC's tab held a base from before he claimed the lead, so the
+// merge read "JC changed the owner" and re-asserted JC on top of Robert's newer
+// row — then pushed it. The 11 leads that kept flipping were at version 48-50
+// while the 29 that stuck were at 2-9.
+//
+// A reassignment is an authoritative act. Whoever reached the server last owns
+// the lead, and a rejected save must never quietly overturn that. A real
+// reassignment still works — it's a fresh write with its own history event, not
+// a merge.
+const LEAD_EDIT_FIELDS=['tags','campaigns','emails','lastContactDate',
+  'contactDateManual','note','url','channelName','niche','followers','platform','imported','urlBroken','links','channels','agency','pool','qaStatus','qaBy','qaAt','smartReachAt','smartReachCampaign'];
 // Merge a rejected local edit onto the server's newer row.
 //   base   = what we believed the server held BEFORE our edit
 //   local  = the rep's copy (base + their change)
@@ -203,14 +287,18 @@ function fmtHistTime(ts){
   return `${date} · ${time}`;
 }
 function histEvent(actor,type,extra){ return {ts:new Date().toISOString(), actor:actor||'', type, ...(extra||{})}; }
-// Append events, trimming to the cap. The accountability record (scraped /
-// qualified) is NEVER trimmed — only context events age out.
+// The ownership + accountability chain. These events are NEVER trimmed, so a
+// lead that has been scraped, qualified, contacted, recycled and picked up by
+// someone else still shows every hand-off and who did what — which is also what
+// the Home KPIs read from, so the numbers stay explainable after a recycle.
+const HIST_KEY_TYPES=['scraped','qualified','assigned','recycle'];
+// Append events, trimming to the cap. Only context events age out.
 function pushHist(lead, evs){
   const add=(Array.isArray(evs)?evs:[evs]).filter(Boolean);
   if(!add.length) return (lead&&lead.history)||[];
   const h=[...((lead&&lead.history)||[]), ...add];
   if(h.length<=HISTORY_CAP) return h;
-  const isKey=e=>e.type==='scraped'||e.type==='qualified';
+  const isKey=e=>HIST_KEY_TYPES.includes(e.type);
   const keys=h.filter(isKey);
   const rest=h.filter(e=>!isKey(e));
   const keep=rest.slice(Math.max(0, rest.length-Math.max(0,HISTORY_CAP-keys.length)));
@@ -244,6 +332,10 @@ function diffHistory(old, upd, actor){
   if(oe!==ne) evs.push({type:'emails', from:oe, to:ne});
   if((old.channelName||'')!==(upd.channelName||'')) evs.push({type:'renamed', from:old.channelName||'', to:upd.channelName||''});
   if(leadOrigin(old)!==leadOrigin(upd)) evs.push({type:'origin', to:leadOrigin(upd)});
+  // NOTE: qaStatus is deliberately NOT diffed. The lead timeline is visible to
+  // reps, and QA is our own review marker — it must leave no trace on their side.
+  // Who marked it and when is kept on the lead as qaBy/qaAt and surfaced only in
+  // the admin-only badge tooltip.
   if(!!old.urlBroken!==!!upd.urlBroken) evs.push({type:'link', to:upd.urlBroken?'broken':'working'});
   // closeLeadId is deliberately NOT diffed: the Contacted tab resolves it in the
   // background, which would log an automated backfill as if a rep did it. The
@@ -263,6 +355,8 @@ function histSentence(e){
     case 'close':     return `${who} sent it to Close.io`;
     case 'contact':   return e.manual ? `${who} corrected the last-contacted date` : `${who} logged a contact`;
     case 'recycle':   return e.via ? `Auto-recycled — ${e.via}` : `${who} recycled it — clock reset`;
+    case 'merge':     return e.via ? `Merged — ${e.via}` : `${who} merged a duplicate record into this lead`;
+    case 'smartreach':return `${who} sent it to SmartReach${e.to?` → ${e.to}`:''}`;
     case 'archive':   return e.to==='restored' ? `${who} restored it from the archive` : `${who} archived it`;
     case 'import':    return `${who} imported it`;
     case 'note':      return e.to==='cleared' ? `${who} cleared the note` : `${who} updated the note`;
@@ -274,10 +368,26 @@ function histSentence(e){
     default:          return `${who} updated the lead`;
   }
 }
-const HIST_ICON={scraped:'◎',qualified:'🏷',assigned:'→',tag:'🏷',campaign:'◆',close:'☁',contact:'✉',recycle:'↻',archive:'🗄',import:'⬆',note:'📝',url:'🔗',emails:'✉',renamed:'✎',origin:'⇄',link:'🔗'};
+const HIST_ICON={scraped:'◎',qualified:'🏷',assigned:'→',tag:'🏷',campaign:'◆',close:'☁',contact:'✉',recycle:'↻',archive:'🗄',import:'⬆',note:'📝',url:'🔗',emails:'✉',renamed:'✎',origin:'⇄',link:'🔗',merge:'⧉',smartreach:'✉'};
 function isRecycled(lead){
   return (lead.tags||[]).includes('For Recycle') || lead.recycled === true;
 }
+// ─── QA REVIEW ───────────────────────────────────────────
+// Some reps' leads get checked by an admin before they count as done. Every lead
+// starts Awaiting (an unset field reads as Awaiting, so nothing needs
+// backfilling) and only an admin can move it to Done QA — the rep sees the state
+// but can't mark their own work reviewed.
+// Which reps are in the QA loop is config-driven (`config.qaReps`) so adding or
+// removing someone doesn't need a code change; it defaults to Bella and Mica.
+const QA_DEFAULT_REPS=['Bella','Mica'];
+function qaReps(config){
+  const r=config&&config.qaReps;
+  return Array.isArray(r)?r:QA_DEFAULT_REPS;
+}
+function isQaRep(name,config){ return !!name && qaReps(config).includes(name); }
+// A lead is only in the QA loop if it belongs to one of those reps.
+function leadNeedsQA(lead,config){ return !!lead && isQaRep(lead.assignedTo,config); }
+function leadQA(lead){ return (lead && lead.qaStatus==='Done QA') ? 'Done QA' : 'Awaiting'; }
 // Recycle window (days) for a contacted lead — mirrors the Contacted tab:
 // MSN = 90 days, VVV = 30 days, otherwise a 30-day default.
 function recycleThresholdDays(lead){
@@ -428,6 +538,10 @@ function parseCloseDescription(desc){
 // rep / lead-gen / campaign / pool tab) can flag "this channel is also being worked
 // elsewhere" without prop-drilling through every wrapper.
 const DupContext = React.createContext(null);
+// Is the signed-in user an admin? Context rather than a prop because the QA
+// toggle lives deep inside LeadsTable, which is rendered from a dozen places
+// (and via RepDashboard, which doesn't take an isAdmin prop at all).
+const AdminContext = React.createContext({isAdmin:false,name:''});
 
 // ─── PERMISSIONS ──────────────────────────────────────────
 function userRole(name, config){
@@ -693,6 +807,8 @@ function Toast({toasts}) {
 const TAG_COLORS={
   'Potential':{bg:'#E3FCF2',color:'#00875A'},
   'Not Qualified':{bg:'#FFEBE6',color:'#DE350B'},
+  'NQ':{bg:'#FFEBE6',color:'#DE350B'},
+  'Awaiting Potential':{bg:'#FEF9C3',color:'#A16207'},
   'Contacted':{bg:'#EBF2FF',color:'#1366D6'},
   'For Recycle':{bg:'#FFF4E5',color:'#FF8B00'},
   'Existing Leads':{bg:'#EAE6FF',color:'#6554C0'},
@@ -773,6 +889,15 @@ function LeadModal({lead,onClose,onSave,onDelete,config}) {
           <div>
             <h2>Edit Lead</h2>
             <p style={{color:'var(--text-dim)',fontSize:13,marginTop:3}}>{lead.channelName}</p>
+            {/* Straight out to the channel and to Close — the two places you go
+                to actually check a lead, one click from where you already are. */}
+            <div className="lead-links">
+              {channelUrl(lead) && <a className="lead-link" href={channelUrl(lead)} target="_blank" rel="noreferrer" title={channelUrl(lead)}>
+                {PLATFORM_ICON[lead.platform]||'▶'} Open channel ↗</a>}
+              {closeLeadUrl(lead)
+                ? <a className="lead-link lead-link-close" href={closeLeadUrl(lead)} target="_blank" rel="noreferrer" title="Open this lead in Close.io">☁ Open in Close ↗</a>
+                : isInClose(lead) && <span className="lead-link lead-link-off" title="On Close, but its Close id hasn't been resolved yet — open the Contacted tab and the dashboard backfills it.">☁ on Close</span>}
+            </div>
           </div>
           <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:16,padding:'4px 8px'}}>✕</button>
         </div>
@@ -1000,7 +1125,16 @@ function ContextMenu({x,y,lead,sel,allLeads,config,campColorMap,onEdit,onDelete,
 // these a rep could have three filters on (one of them scrolled off-screen on a
 // wide table), see an empty table, and have no way to tell which one did it.
 const FILTER_LABELS={tags:'Status', assignedTo:'Assigned to', campaign:'Campaign',
-  platform:'Platform', origin:'Origin', emails:'Email'};
+  platform:'Platform', origin:'Origin', emails:'Email', qa:'QA', followers:'Followers'};
+// Follower-count ranges for the Followers column filter. parseFollowers handles
+// mixed storage ("6090", "18.2K", "1.2M"). Shared by the header options + passesFilters.
+const FOLLOWER_BUCKETS=[
+  {label:'< 1K',       test:n=>n<1000},
+  {label:'1K – 10K',   test:n=>n>=1000 && n<10000},
+  {label:'10K – 100K', test:n=>n>=10000 && n<100000},
+  {label:'100K – 1M',  test:n=>n>=100000 && n<1000000},
+  {label:'1M+',        test:n=>n>=1000000},
+];
 
 // ─── INLINE PICKER ───────────────────────────────────────
 function InlinePicker({type,selected,options,campColorMap,onChange,single=false}) {
@@ -1035,7 +1169,7 @@ function InlinePicker({type,selected,options,campColorMap,onChange,single=false}
       </div>
       {open&&(
         <div style={{position:'fixed',zIndex:500,background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius)',boxShadow:'var(--shadow-lg)',minWidth:170,padding:'6px 0',marginTop:4}}
-          ref={el=>{if(el){const r=ref.current.getBoundingClientRect();el.style.top=(r.bottom+4)+'px';el.style.left=r.left+'px';}}}>
+          ref={el=>{if(el&&ref.current){const r=ref.current.getBoundingClientRect();el.style.top=(r.bottom+4)+'px';el.style.left=r.left+'px';}}}>
           {options.map(opt=>{
             const val=opt.id||opt;
             const active=selected.includes(val);
@@ -1058,7 +1192,7 @@ function InlinePicker({type,selected,options,campColorMap,onChange,single=false}
 }
 
 // ─── COL HEADER (with filter dropdown) ───────────────────
-function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, colFilter, setColFilter, openFilterCol, setOpenFilterCol}) {
+function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, colFilter, setColFilter, openFilterCol, setOpenFilterCol, config}) {
   // Build options from the rows that survive the OTHER filters, so a dropdown
   // never offers a value that returns nothing. Falls back to the full list for
   // tables that don't pass leadsForCol (e.g. the Contacted tab).
@@ -1112,6 +1246,10 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, co
     if(col==='origin'){
       return ['Fresh','Imported'].filter(o=>optionLeads.some(l=>leadOrigin(l)===o));
     }
+    if(col==='qa'){
+      const inLoop=optionLeads.filter(l=>leadNeedsQA(l,config));
+      return ['Awaiting','Done QA'].filter(o=>inLoop.some(l=>leadQA(l)===o));
+    }
     // Emailable vs not — "No email" is the one people actually want, to find the
     // rows that can't be sent to SmartReach/Close yet.
     if(col==='emails'){
@@ -1125,6 +1263,10 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, co
       const all=new Set();
       optionLeads.forEach(l=>{ const d=toLocalDay(l.dateAssigned); if(d) all.add(ymdLocal(d)); });
       return [...all].sort().reverse();
+    }
+    // Follower ranges — only offer a bucket that actually has rows.
+    if(col==='followers'){
+      return FOLLOWER_BUCKETS.filter(b=>optionLeads.some(l=>b.test(parseFollowers(l.followers)))).map(b=>b.label);
     }
     return [];
   }
@@ -1159,7 +1301,7 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, co
       {isOpen&&(
         <div style={{position:'fixed',zIndex:600,background:'var(--card)',border:'1px solid var(--border)',borderRadius:'var(--radius)',boxShadow:'var(--shadow-lg)',minWidth:180,padding:'4px 0'}}
           ref={el=>{
-            if(el){
+            if(el&&ref.current){
               const thRect=ref.current.getBoundingClientRect();
               el.style.top=(thRect.bottom+2)+'px';
               el.style.left=thRect.left+'px';
@@ -1379,7 +1521,9 @@ function LeadHistoryModal({lead,onClose}){
   );
 }
 
-function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,hideRepFilter=false,onClaim=null,onDateFilterChange=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
+function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchAlsoLeads=[],searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,hideRepFilter=false,onClaim=null,claimLabel='⚡ Claim to me',claimTitle='Assign the selected leads to you and move them into your queue',onDateFilterChange=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
+  const adminCtx = React.useContext(AdminContext)||{};
+  const qaAdmin = !!adminCtx.isAdmin;
   const [sel,setSel] = useState([]);
   const dupIndex = React.useContext(DupContext) || {};
   const [searchState,setSearchState] = useState('');
@@ -1448,7 +1592,14 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
       else if(!(l.campaigns||[]).includes(cf.campaign)) return false;
     }
     if(skipCol!=='platform' && cf.platform){ if(l.platform!==cf.platform) return false; }
+    if(skipCol!=='followers' && cf.followers){ const b=FOLLOWER_BUCKETS.find(x=>x.label===cf.followers); if(b && !b.test(parseFollowers(l.followers))) return false; }
     if(skipCol!=='origin' && cf.origin){ if(leadOrigin(l)!==cf.origin) return false; }
+    // QA is only meaningful for leads in the review loop; a filter on it hides
+    // everyone else's leads rather than lumping them in with "Awaiting".
+    if(skipCol!=='qa' && cf.qa){
+      if(!leadNeedsQA(l,config)) return false;
+      if(leadQA(l)!==cf.qa) return false;
+    }
     if(skipCol!=='emails' && cf.emails){
       const n=(l.emails||[]).filter(Boolean).length;
       if(cf.emails==='No email' ? n>0 : n===0) return false;
@@ -1463,9 +1614,15 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
   }
   // Rows still reachable if you ignore ONE column's filter — feeds that column's
   // dropdown so it only offers values that actually return something.
-  const leadsForCol = col => leads.filter(l=>passesFilters(l, colFilter, col));
+  // When a search term is active, widen the searchable set with searchAlsoLeads
+  // (e.g. a pool tab's already-CLAIMED leads) so a search finds them even though
+  // the default browse view only lists the base set (the unclaimed queue).
+  const baseLeads = (searchFilters && String(search||'').trim() && searchAlsoLeads.length)
+    ? (()=>{ const seen=new Set(leads.map(l=>String(l.id))); return leads.concat(searchAlsoLeads.filter(l=>!seen.has(String(l.id)))); })()
+    : leads;
+  const leadsForCol = col => baseLeads.filter(l=>passesFilters(l, colFilter, col));
 
-  const filtered = leads.filter(l=>passesFilters(l, colFilter)).sort((a,b)=>{
+  const filtered = baseLeads.filter(l=>passesFilters(l, colFilter)).sort((a,b)=>{
     if(!sortCol) return 0;
     const dir=sortDir==='asc'?1:-1;
     if(sortCol==='channelName') return dir*String(a.channelName||'').localeCompare(String(b.channelName||''));
@@ -1485,6 +1642,11 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
       if(!ea!==!eb) return dir*((ea?1:0)-(eb?1:0));
       return dir*ea.localeCompare(eb);
     }
+    // Awaiting first ascending — the ones still needing a look come to the top.
+    if(sortCol==='qa'){
+      const qv=l=>leadNeedsQA(l,config) ? (leadQA(l)==='Done QA'?1:0) : 2;
+      return dir*(qv(a)-qv(b));
+    }
     return 0;
   });
 
@@ -1498,6 +1660,10 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
   useEffect(()=>setPage(1),[search,sortCol,sortDir,colFilter,leads.length]);
   const totalPages=Math.max(1,Math.ceil(filtered.length/PAGE_SIZE));
   const paginated=filtered.slice((page-1)*PAGE_SIZE,page*PAGE_SIZE);
+  // ADMIN-ONLY, and only where it's relevant — a table holding at least one lead
+  // belonging to a rep in the QA loop. Reps never see the column at all: it is
+  // our own review marker, not something they act on or should be measured by.
+  const showQA=React.useMemo(()=>qaAdmin && (leads||[]).some(l=>leadNeedsQA(l,config)),[qaAdmin,leads,config]);
 
   const allSel=filtered.length>0&&filtered.every(l=>sel.includes(l.id));
   // Selected leads that actually have an email (the SmartReach-sendable subset).
@@ -1591,7 +1757,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
 
   // leadsForCol (not the raw list) so each dropdown offers only values that still
   // return rows given the other active filters.
-  const colHeaderProps = {sortCol,sortDir,onSort:handleSort,leads,leadsForCol,colFilter,setColFilter,openFilterCol,setOpenFilterCol};
+  const colHeaderProps = {sortCol,sortDir,onSort:handleSort,leads,leadsForCol,colFilter,setColFilter,openFilterCol,setOpenFilterCol,config};
 
   return (
     <div className={embedded?'lt-embedded':''} style={embedded?{display:'flex',flexDirection:'column'}:{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
@@ -1640,7 +1806,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
           <span style={{fontWeight:700,color:'var(--accent)',fontSize:13,whiteSpace:'nowrap'}}>✓ {sel.length} selected</span>
           <div className="toolbar-sep"/>
           {onClaim&&<>
-            <button className="btn btn-primary btn-sm" onClick={()=>{onClaim(sel);setSel([]);}} title="Assign the selected leads to you and move them into your queue">⚡ Claim to me</button>
+            <button className="btn btn-primary btn-sm" onClick={()=>{onClaim(sel);setSel([]);}} title={claimTitle}>{claimLabel}</button>
             <div className="toolbar-sep"/>
           </>}
           {feats.bulkAssign&&<>
@@ -1744,6 +1910,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                 {showCampaign && cols.campaign && <ColHeader col="campaign" label="Campaign" {...colHeaderProps}/>}
                 {showAssigned && cols.assignedTo && <ColHeader col="assignedTo" label="Assigned To" {...colHeaderProps}/>}
                 {showAssigned && cols.dateAssigned && <ColHeader col="dateAssigned" label="Date Assigned" {...colHeaderProps}/>}
+                {showQA && <ColHeader col="qa" label="QA" {...colHeaderProps}/>}
                 <th style={{width:80}} className="no-print">Actions</th>
               </tr>
             </thead>
@@ -1849,6 +2016,26 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                   )}
                   {showAssigned && cols.dateAssigned && (
                     <td style={{fontSize:11,color:'var(--text-dim)'}}>{lead.dateAssigned||'—'}</td>
+                  )}
+                  {showQA && (
+                    <td className="no-print">
+                      {leadNeedsQA(lead,config) ? (()=>{
+                        const done=leadQA(lead)==='Done QA';
+                        // Awaiting is stored as null to match normalizeLead: writing
+                        // the string would leave stored and normalized values
+                        // differing, which is a no-op write on every single load.
+                        return (
+                          <button type="button" className={`qa-badge qa-toggle${done?' done':''}`}
+                            title={(done && lead.qaBy ? `Marked Done QA by ${lead.qaBy}${lead.qaAt?' on '+String(lead.qaAt).slice(0,10):''}. ` : '')
+                              + `Click to mark as ${done?'Awaiting':'Done QA'}. Admin-only review marker — reps never see it and it changes nothing about the lead.`}
+                            onClick={()=>patchLead(lead.id, done
+                              ? {qaStatus:null, qaBy:null, qaAt:null}
+                              : {qaStatus:'Done QA', qaBy:adminCtx.name||'', qaAt:new Date().toISOString()})}>
+                            {done?'✓ Done QA':'◔ Awaiting'}
+                          </button>
+                        );
+                      })() : <span style={{color:'var(--text-light)',fontSize:11}}>—</span>}
+                    </td>
                   )}
                   <td className="no-print">
                     <div style={{display:'flex',gap:5}}>
@@ -2459,7 +2646,7 @@ const HOME_PERIODS=[{id:'daily',label:'Daily'},{id:'weekly',label:'Weekly'},{id:
 const HOME_PERIOD_DAYS={daily:1,weekly:7,monthly:30};
 // Fixed team order for the rep list (the "Team" sort). Anyone not listed falls
 // to the end. Edit this to reorder the board.
-const REP_ORDER=['Chase','Mikka','Pen','Rein','JC','Bella','Mica','Jon','Chai','Czarina'];
+const REP_ORDER=['Bert','Chase','Mikka','Rein','JC','Bella'];
 
 // Seed quotas kept so the Customize → Sales Rep Quotas editor keeps working;
 // the Lead Pulse board itself doesn't display quota targets.
@@ -2494,9 +2681,12 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
 
   const [period,setPeriod]=useState('daily');
   const [dayOffset,setDayOffset]=useState(0);      // ≤0 days from today
-  const [repMetric,setRepMetric]=useState('potentials');   // drives the rep bars
+  const [repMetric,setRepMetric]=useState('potentialNow');   // drives the rep bars
   const [sortMode,setSortMode]=useState('team');
   const [detail,setDetail]=useState('');   // rep whose performance report is open
+  const [heatSeries,setHeatSeries]=useState('contacted');   // sparkline + heatmap series
+  const [heatMonthOffset,setHeatMonthOffset]=useState(0);   // month heatmap: 0=current, -1=prev…
+  React.useEffect(()=>{ setHeatMonthOffset(0); },[detail]); // reset to current month each time a rep report opens
 
   const campDefs=(config.campaigns||[]).map(c=>({id:c.id,label:c.label,color:c.color}));
   const campIds=campDefs.map(c=>c.id);
@@ -2519,7 +2709,11 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const atToday=dayOffset>=0;
 
   // ── One pass over every lead → per-rep, per-campaign buckets ──
-  const EMPTY=()=>({imported:0,potentials:0,contacted:0,pending:0,fresh:0,toWork:0,sourced:0});
+  // `assigned` = everything that landed on the rep in the window (the raw intake,
+  // including untouched bulk-sheet imports). `imported`/`fresh`/`sourced` count
+  // QUALIFIED leads only — a rep who imports 2,000 raw rows from a sheet hasn't
+  // sourced 2,000 fresh leads, and the board used to read as if they had.
+  const EMPTY=()=>({assigned:0,imported:0,potentials:0,potentialNow:0,contacted:0,pending:0,fresh:0,toWork:0,sourced:0});
   function buildStats(w){
     const inW=d=>{ const s=String(d||'').slice(0,10); return !!s && s>=w.from && s<=w.to; };
     const byRep={}, byCamp={}, team=EMPTY();
@@ -2540,14 +2734,27 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
         fn(team);
       };
       const sourcedFresh=isSourcedFresh(l);
+      const qualified=isQualifiedLead(l);
       if(assignedIn){
-        applyAll(t=>bump(t,'imported'));
+        applyAll(t=>bump(t,'assigned'));
         if(isPend) applyAll(t=>bump(t,'pending'));
-        if(isFreshOrigin) applyAll(t=>bump(t,'fresh'));
-        if(sourcedFresh) applyAll(t=>bump(t,'sourced'));
+        // Origin split of the rep's QUALIFIED leads: imported vs fresh.
+        if(qualified){
+          if(isFreshOrigin) applyAll(t=>bump(t,'fresh')); else applyAll(t=>bump(t,'imported'));
+          if(sourcedFresh) applyAll(t=>bump(t,'sourced'));
+        }
       }
       if(contactedIn) applyAll(t=>bump(t,'contacted'));
       if(workable){ if(rep){ bucket(rep,null).toWork++; camps.forEach(c=>bucket(rep,c).toWork++); } camps.forEach(c=>byCamp[c].toWork++); team.toWork++; }
+      // What the rep is HOLDING right now — leads carrying the Potential tag today,
+      // independent of the date window. This is the number they see in their own
+      // Potential tab, so it's what "how many potentials do I have" has to mean on
+      // the board. `potentials` below is a different question — how many they TAGGED
+      // inside the window — and the two legitimately differ.
+      if((l.tags||[]).includes('Potential')){
+        if(rep){ bucket(rep,null).potentialNow++; camps.forEach(c=>bucket(rep,c).potentialNow++); }
+        camps.forEach(c=>byCamp[c].potentialNow++); team.potentialNow++;
+      }
       // Potentials are credited to WHOEVER tagged it, from the lead's timeline.
       (l.history||[]).forEach(e=>{
         if(!e || e.type!=='qualified' || !e.actor || !inW(e.ts)) return;
@@ -2565,19 +2772,44 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
 
   // Potentials tagged per rep per DAY — one pass, then the report's 7-day
   // sparkline and month heatmap both read from it (no re-scanning per day).
-  const dailyPot=React.useMemo(()=>{
-    const m={};
-    leads.forEach(l=>(l.history||[]).forEach(e=>{
-      if(!e || e.type!=='qualified' || !e.actor) return;
-      const d=String(e.ts||'').slice(0,10); if(!d) return;
-      (m[e.actor]||(m[e.actor]={}))[d]=((m[e.actor]||{})[d]||0)+1;
-    }));
-    return m;
+  // Three per-rep-per-day series in one pass, so the sparkline and the month
+  // heatmap can answer more than "how many did they tag":
+  //   pot       — Potential tagged that day, credited from the lead's timeline
+  //   contacted — leads whose last-contact date IS that day
+  //   sr        — leads pushed to SmartReach that day (stamped by importToSmartReach)
+  const dailySeries=React.useMemo(()=>{
+    const pot={}, contacted={}, sr={};
+    const bump=(m,rep,d)=>{ if(!rep||!d) return; (m[rep]||(m[rep]={}))[d]=((m[rep]||{})[d]||0)+1; };
+    leads.forEach(l=>{
+      (l.history||[]).forEach(e=>{
+        if(e && e.type==='qualified' && e.actor) bump(pot, e.actor, String(e.ts||'').slice(0,10));
+      });
+      const lc=String(l.lastContactDate||'').slice(0,10);
+      if(lc && l.assignedTo) bump(contacted, l.assignedTo, lc);
+      const sa=String(l.smartReachAt||'').slice(0,10);
+      if(sa && l.assignedTo) bump(sr, l.assignedTo, sa);
+    });
+    return {pot,contacted,sr};
   },[leads]);
+  const dailyPot=dailySeries.pot;
   const potOn=(rep,ymd)=>((dailyPot[rep]||{})[ymd]||0);
+  const HEAT_SERIES=[
+    {id:'pot',       label:'Potentials', tip:'Leads this rep tagged Potential on that day, from the lead timeline'},
+    {id:'contacted', label:'Contacted',  tip:'Leads whose last-contact date is that day — how many they actually worked'},
+    {id:'sr',        label:'SmartReach', tip:'Leads pushed to SmartReach that day. Only counts sends made through the dashboard.'},
+  ];
 
-  // ── Palette (dashboard tokens + the design's accents) ──────
-  const C={ ink:'#0d0d12', good:'#2f8f5b', warn:'#c07a1e', bad:'#c0453a', blue:'#3f6a8a', violet:'#6b5f8c' };
+  // ── Palette ────────────────────────────────────────────────
+  // C = for LIGHT surfaces (cards, campaign rows, chips). These are the real
+  // dashboard tokens, so they follow dark mode instead of sitting at a fixed
+  // muted hex the way the ported design's palette did.
+  const C={ ink:'var(--hero-bg)', good:'var(--success)', warn:'var(--warn)', bad:'var(--danger)', blue:'var(--accent)', violet:'var(--purple)' };
+  // H = the same roles ON THE DARK HERO. The hero stays dark in light mode too,
+  // so it can't use the tokens directly — these are the dashboard's dark-mode
+  // values, which is exactly what the tokens resolve to on a dark surface.
+  const H={ good:'#3FB950', warn:'#D29922', bad:'#F85149', blue:'#a6a6ff', violet:'#A371F7',
+            label:'rgba(255,255,255,.55)', faint:'rgba(255,255,255,.45)', neutral:'rgba(255,255,255,.62)',
+            line:'rgba(255,255,255,.12)', track:'rgba(255,255,255,.10)', chip:'rgba(255,255,255,.09)' };
   // Translucent tint of a campaign colour (works on light + dark backgrounds).
   const tint=(hex,a)=>{ const h=String(hex||'').replace('#',''); if(h.length!==6) return 'var(--bg)';
     const n=parseInt(h,16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
@@ -2593,16 +2825,24 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   // ── Team hero ─────────────────────────────────────────────
   const T=S.team, TP=P.team;
   const heroDelta=deltaOf(T.potentials,TP.potentials);
+  // The hero is dark even in light mode, so the delta can't use the light tokens.
+  const heroDeltaFg = heroDelta.v>0 ? H.good : heroDelta.v<0 ? H.bad : H.label;
   const heroSplit=[
-    {label:'CONTACTED', value:T.contacted, dot:C.good},
-    {label:'PENDING',   value:T.pending,   dot:C.warn},
-    {label:'TO WORK',   value:T.toWork,    dot:'#8b8b96'},
+    {label:'CONTACTED', value:T.contacted, dot:H.good},
+    {label:'PENDING',   value:T.pending,   dot:H.warn},
+    {label:'TO WORK',   value:T.toWork,    dot:H.neutral},
   ];
   const heroBase=Math.max(1,T.contacted+T.pending+T.toWork);
 
   // ── Rep rows ──────────────────────────────────────────────
   const orderIdx=n=>{ const i=REP_ORDER.indexOf(n); return i<0?REP_ORDER.length+1:i; };
-  const metricLabel={potentials:'POTENTIALS',imported:'IMPORTED',contacted:'CONTACTED'}[repMetric];
+  const metricLabel={potentialNow:'POTENTIALS',assigned:'ASSIGNED',contacted:'CONTACTED'}[repMetric];
+  const metricTip={
+    potentialNow:'Leads this rep is holding as Potential right now — the same number they see in their own Potential tab. Not limited to the selected window.',
+    assigned:'Everything that landed on this rep inside the selected window.',
+    contacted:'Leads this rep contacted inside the selected window (by last-contact date).',
+  }[repMetric];
+  const periodWord = period==='daily' ? (dayOffset===0?'today':'that day') : period==='weekly' ? 'this week' : 'this month';
   let repRows=reps.map(rep=>{
     const a=get(S,rep,null);
     const camps=campDefs.map(c=>{ const o=get(S,rep,c.id); return {...c, o}; });
@@ -2620,12 +2860,13 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const track={display:'flex',gap:4,background:'var(--bg)',border:'1px solid var(--border)',borderRadius:999,padding:4};
   const card={background:'var(--card)',border:'1px solid var(--border)',borderRadius:20,boxShadow:'0 1px 2px rgba(19,19,24,.05)'};
   const chipsOf=o=>[
-    {label:'imported', value:o.imported,  fg:C.blue,  tip:'Leads assigned in this window'},
+    {label:'assigned', value:o.assigned,  fg:'var(--text-dim)', tip:'Everything that landed on the rep in this window, qualified or not — the raw intake, including untouched bulk-sheet imports'},
+    {label:'imported', value:o.imported,  fg:C.blue,  tip:'POTENTIAL leads that came from an existing/imported list rather than being sourced'},
     {label:'contacted',value:o.contacted, fg:C.good,  tip:'Leads contacted in this window (by last-contact date)'},
     {label:'pending',  value:o.pending,   fg:C.warn,  tip:'Of the inflow, still awaiting qualification'},
     {label:'to work',  value:o.toWork,    fg:'var(--text-dim)', tip:'Currently Potential/HT and not yet contacted'},
-    {label:'sourced',  value:o.sourced,   fg:C.violet,tip:'Leads the rep SOURCED fresh — judged at discovery, so it stays counted after the lead is pushed to Close'},
-    {label:'fresh',    value:o.fresh,     fg:C.bad,   tip:'Not yet on Close — the still-to-push queue (empties as leads are pushed)'},
+    {label:'sourced',  value:o.sourced,   fg:C.violet,tip:'POTENTIAL leads the rep SOURCED fresh — judged at discovery, so it stays counted after the lead is pushed to Close'},
+    {label:'fresh',    value:o.fresh,     fg:C.bad,   tip:'POTENTIAL leads not yet on Close — the still-to-push queue (empties as leads are pushed)'},
   ];
 
   return (
@@ -2635,7 +2876,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
         {/* ── Header: title + day nav + period ── */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,flexWrap:'wrap',marginBottom:20}}>
           <div>
-            <h1 style={{fontFamily:SG,fontSize:22,fontWeight:800,letterSpacing:'-.02em',margin:0}}>Lead Pulse</h1>
+            <h1 style={{fontFamily:SG,fontSize:22,fontWeight:800,letterSpacing:'-.02em',margin:0}}>KPI</h1>
             <div style={{fontSize:11.5,color:'var(--text-dim)',marginTop:2}}>{campDefs.map(c=>c.label).join(' · ')||'No campaigns'}</div>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
@@ -2662,55 +2903,61 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
         {/* ── Hero + campaign cards ── */}
         <div style={{display:'grid',gridTemplateColumns:'minmax(280px, 1.05fr) minmax(320px, 1.95fr)',gap:16,marginBottom:16}} className="lp-top">
           {/* team hero */}
-          <div style={{background:C.ink,color:'#fff',borderRadius:22,padding:'22px 24px',display:'flex',flexDirection:'column',justifyContent:'space-between'}}>
+          <div style={{background:'var(--hero-bg)',color:'#fff',borderRadius:22,padding:'22px 24px',display:'flex',flexDirection:'column',justifyContent:'space-between',border:'1px solid rgba(255,255,255,.06)'}}>
             <div>
-              <div style={{fontSize:10.5,fontWeight:700,letterSpacing:'.12em',color:'#8f8d9c'}}>POTENTIALS TAGGED · {periodTag}</div>
+              <div style={{fontSize:10.5,fontWeight:700,letterSpacing:'.12em',color:H.label}}>POTENTIALS TAGGED · {periodTag}</div>
               <div style={{display:'flex',alignItems:'flex-end',gap:12,marginTop:14}}>
                 <div style={{fontFamily:SG,fontSize:54,fontWeight:800,lineHeight:.85,letterSpacing:'-.04em',fontVariantNumeric:'tabular-nums'}}>{fmt(T.potentials)}</div>
-                <div style={{padding:'4px 10px',borderRadius:999,background:'rgba(255,255,255,.09)',marginBottom:5}}
+                <div style={{padding:'4px 10px',borderRadius:999,background:H.chip,marginBottom:5}}
                   title={`vs the previous ${period==='daily'?'day':period==='weekly'?'7 days':'30 days'} (${fmt(TP.potentials)})`}>
-                  <span style={{fontSize:11.5,fontWeight:700,color:heroDelta.fg==='var(--text-light)'?'#a1a1ac':heroDelta.fg}}>{heroDelta.label} vs prev</span>
+                  <span style={{fontSize:11.5,fontWeight:700,color:heroDeltaFg}}>{heroDelta.label} vs prev</span>
                 </div>
               </div>
             </div>
             <div style={{marginTop:22}}>
-              <div style={{display:'flex',height:11,borderRadius:999,overflow:'hidden',background:'#262631',gap:3}}>
-                <div style={{background:C.good,width:pct(T.contacted,heroBase)+'%'}}/>
-                <div style={{background:C.warn,width:pct(T.pending,heroBase)+'%'}}/>
-                <div style={{background:'#4d545e',width:pct(T.toWork,heroBase)+'%'}}/>
+              <div style={{display:'flex',height:11,borderRadius:999,overflow:'hidden',background:H.track,gap:3}}>
+                <div style={{background:H.good,width:pct(T.contacted,heroBase)+'%'}}/>
+                <div style={{background:H.warn,width:pct(T.pending,heroBase)+'%'}}/>
+                <div style={{background:H.neutral,width:pct(T.toWork,heroBase)+'%'}}/>
               </div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginTop:14}}>
                 {heroSplit.map(h=>(
                   <div key={h.label}>
                     <div style={{display:'flex',alignItems:'center',gap:6}}>
                       <span style={{width:7,height:7,borderRadius:999,background:h.dot}}/>
-                      <span style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:'#8f8d9c'}}>{h.label}</span>
+                      <span style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:H.label}}>{h.label}</span>
                     </div>
                     <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4}}>{fmt(h.value)}</div>
                   </div>
                 ))}
               </div>
-              <div style={{marginTop:18,paddingTop:16,borderTop:'1px solid #2e3b41'}}>
-                {/* three stats + dividers can get tight in the hero column — allow
+              <div style={{marginTop:18,paddingTop:16,borderTop:'1px solid '+H.line}}>
+                {/* four stats + dividers can get tight in the hero column — allow
                     them to wrap rather than push the page sideways */}
                 <div style={{display:'flex',alignItems:'center',gap:18,rowGap:12,flexWrap:'wrap'}}>
-                  <div title="Leads assigned to the team in this window">
-                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:'#8f8d9c'}}>IMPORTED</div>
-                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:'#a9c6dc'}}>{fmt(T.imported)}</div>
+                  <div title="Everything that landed on the team in this window, qualified or not — the raw intake, including untouched bulk-sheet imports">
+                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:H.label}}>ASSIGNED</div>
+                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:H.neutral}}>{fmt(T.assigned)}</div>
                   </div>
-                  <div style={{width:1,height:30,background:'#2e3b41'}}/>
-                  <div title="Leads the team SOURCED fresh — judged at discovery, so pushing them to Close doesn't erase the credit">
-                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:'#8f8d9c'}}>SOURCED</div>
-                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:'#c3b4e0'}}>{fmt(T.sourced)}</div>
+                  <div style={{width:1,height:30,background:H.line}}/>
+                  <div title="POTENTIAL leads that came from an existing/imported list rather than being sourced">
+                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:H.label}}>IMPORTED</div>
+                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:H.blue}}>{fmt(T.imported)}</div>
                   </div>
-                  <div style={{width:1,height:30,background:'#2e3b41'}}/>
-                  <div title="Not yet on Close — the still-to-push queue">
-                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:'#8f8d9c'}}>FRESH</div>
-                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:'#e8a3a0'}}>{fmt(T.fresh)}</div>
+                  <div style={{width:1,height:30,background:H.line}}/>
+                  <div title="POTENTIAL leads the team SOURCED fresh — judged at discovery, so pushing them to Close doesn't erase the credit">
+                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:H.label}}>SOURCED</div>
+                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:H.violet}}>{fmt(T.sourced)}</div>
+                  </div>
+                  <div style={{width:1,height:30,background:H.line}}/>
+                  <div title="POTENTIAL leads not yet on Close — the still-to-push queue">
+                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:H.label}}>FRESH</div>
+                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:H.bad}}>{fmt(T.fresh)}</div>
                   </div>
                 </div>
-                <div style={{fontSize:11,color:'#7d7b8a',marginTop:12}}>
-                  {pct(T.potentials,Math.max(1,T.imported))}% of imported leads tagged potential
+                <div style={{fontSize:11,color:H.faint,marginTop:12}}
+                  title="Tagged and assigned are different populations — the team can tag more than it was given by working through a backlog — so this is a plain comparison, not a conversion rate.">
+                  {fmt(T.potentials)} tagged from {fmt(T.assigned)} assigned {periodWord} · holding {fmt(T.potentialNow)} Potential now
                 </div>
               </div>
             </div>
@@ -2731,7 +2978,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                     </div>
                     <div style={{fontFamily:SG,fontSize:34,fontWeight:800,letterSpacing:'-.035em',lineHeight:1,marginTop:14,fontVariantNumeric:'tabular-nums'}}>{fmt(o.potentials)}</div>
                     <div style={{marginTop:5}}>
-                      <div style={{fontSize:10.5,fontWeight:700,letterSpacing:'.07em',color:'var(--text-dim)'}}>POTENTIALS</div>
+                      <div style={{fontSize:10.5,fontWeight:700,letterSpacing:'.07em',color:'var(--text-dim)'}} title={`Tagged Potential in ${c.label} inside this window. The team is holding ${fmt(o.potentialNow)} Potential lead(s) in this campaign right now.`}>POTENTIALS TAGGED</div>
                       <div style={{fontSize:10,fontWeight:700,fontFamily:MONO,color:d.fg,marginTop:3}}>{d.label} vs prev</div>
                     </div>
                   </div>
@@ -2764,12 +3011,16 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:14,flexWrap:'wrap',margin:'26px 0 12px'}}>
           <div>
             <div style={{fontFamily:SG,fontSize:16,fontWeight:800,letterSpacing:'-.02em'}}>Reps · {repRows.length}</div>
-            <div style={{fontSize:11.5,color:'var(--text-dim)',marginTop:2}}>Showing {metricLabel.toLowerCase()} · click a rep to open their dashboard</div>
+            <div style={{fontSize:11.5,color:'var(--text-dim)',marginTop:2}}>
+              {repMetric==='potentialNow'
+                ? `Potential leads each rep is holding right now · +N ${periodWord} is what they tagged in the window`
+                : `Showing ${metricLabel.toLowerCase()} in this window`} · click a rep to open their dashboard
+            </div>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:9,flexWrap:'wrap'}}>
             <span style={{fontSize:9.5,fontWeight:700,letterSpacing:'.1em',color:'var(--text-light)'}}>BAR</span>
             <div style={track}>
-              {[{id:'potentials',label:'Potentials'},{id:'imported',label:'Imported'},{id:'contacted',label:'Contacted'}].map(m=>(
+              {[{id:'potentialNow',label:'Potentials'},{id:'assigned',label:'Assigned'},{id:'contacted',label:'Contacted'}].map(m=>(
                 <button key={m.id} onClick={()=>setRepMetric(m.id)} style={pill(repMetric===m.id)}>{m.label}</button>
               ))}
             </div>
@@ -2806,8 +3057,15 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                     </div>
                   </div>
                   <div style={{textAlign:'right',flexShrink:0}}>
-                    <div style={{fontFamily:SG,fontSize:24,fontWeight:800,letterSpacing:'-.03em',lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{fmt(r.a[repMetric])}</div>
+                    <div style={{fontFamily:SG,fontSize:24,fontWeight:800,letterSpacing:'-.03em',lineHeight:1,fontVariantNumeric:'tabular-nums'}}
+                      title={metricTip}>{fmt(r.a[repMetric])}</div>
                     <div style={{fontSize:9,fontWeight:700,letterSpacing:'.08em',color:'var(--text-dim)',marginTop:3}}>{metricLabel}</div>
+                    {repMetric==='potentialNow' && (
+                      <div style={{fontSize:9.5,color:'var(--text-light)',marginTop:3,whiteSpace:'nowrap'}}
+                        title={`${r.rep} tagged ${fmt(r.a.potentials)} lead(s) Potential in this window`}>
+                        +{fmt(r.a.potentials)} {periodWord}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -2816,22 +3074,22 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                       for the selected day — the day's worked potentials. */}
                   <div style={{display:'grid',gridTemplateColumns:'46px 1fr 34px 30px 34px 32px',gap:6,fontSize:8,fontWeight:700,letterSpacing:'.08em',color:'var(--text-light)'}}>
                     <span/><span/>
-                    <span style={{textAlign:'right'}}>CONT</span>
-                    <span style={{textAlign:'right'}}>POT</span>
-                    <span style={{textAlign:'right'}}>IMP</span>
-                    <span style={{textAlign:'right'}}>FRESH</span>
+                    <span style={{textAlign:'right'}} title="Contacted in this window">CONT</span>
+                    <span style={{textAlign:'right'}} title="Potential leads held in this campaign right now">POT</span>
+                    <span style={{textAlign:'right'}} title="Of the POTENTIAL leads: how many came from an imported list">IMP</span>
+                    <span style={{textAlign:'right'}} title="Of the POTENTIAL leads: how many were sourced fresh">FRESH</span>
                   </div>
                   {r.camps.map(c=>{
                     const v=c.o[repMetric];
                     return (
                       <div key={c.id} style={{display:'grid',gridTemplateColumns:'46px 1fr 34px 30px 34px 32px',gap:6,alignItems:'center'}}
-                        title={`${c.label} · contacted ${fmt(c.o.contacted)} · tagged potential ${fmt(c.o.potentials)} · assigned ${fmt(c.o.imported)} · fresh ${fmt(c.o.fresh)}`}>
+                        title={`${c.label} · holding ${fmt(c.o.potentialNow)} Potential now · tagged ${fmt(c.o.potentials)} ${periodWord} · contacted ${fmt(c.o.contacted)} · assigned ${fmt(c.o.assigned)} · of those potentials: ${fmt(c.o.imported)} imported / ${fmt(c.o.fresh)} fresh`}>
                         <span style={{fontSize:9.5,fontWeight:800,letterSpacing:'.05em',color:c.color,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.label}</span>
                         <span style={{height:6,borderRadius:999,background:'var(--bg)',overflow:'hidden',display:'block'}}>
                           <span style={{display:'block',height:'100%',borderRadius:999,background:c.color,width:Math.max(2,pct(v,r.maxCamp))+'%'}}/>
                         </span>
                         <span style={{textAlign:'right',fontSize:11.5,fontWeight:700,fontFamily:MONO,color:c.o.contacted?C.good:'var(--text-light)'}}>{fmt(c.o.contacted)}</span>
-                        <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:c.o.potentials?'var(--text)':'var(--text-light)'}}>{fmt(c.o.potentials)}</span>
+                        <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:c.o.potentialNow?'var(--text)':'var(--text-light)'}}>{fmt(c.o.potentialNow)}</span>
                         <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:C.blue}}>{fmt(c.o.imported)}</span>
                         <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:c.o.fresh?C.bad:'var(--text-light)'}}>{fmt(c.o.fresh)}</span>
                       </div>
@@ -2858,7 +3116,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
         </div>
 
         <div style={{marginTop:20,fontSize:10.5,fontFamily:MONO,color:'var(--text-light)'}}>
-          {cur.from===cur.to?cur.from:`${cur.from} → ${cur.to}`} · imported = assigned in window · potentials = tagged Potential in window · contacted = by last-contact date
+          {cur.from===cur.to?cur.from:`${cur.from} → ${cur.to}`} · POTENTIALS = held right now, not limited to this window · assigned = everything that landed on the rep · imported / fresh = the origin split of their POTENTIAL leads only · potentials tagged / contacted = inside the window
         </div>
       </div>
 
@@ -2869,25 +3127,33 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
         const isLG=(config.users||[]).some(u=>u.name===detail&&u.role==='leadgen');
         const role=(getProfile(detail).title||'').trim()||(isLG?'Lead gen':'Sales rep');
         const tiles=[
-          {label:'IMPORTED',  value:a.imported,  fg:C.blue,   tip:'Leads assigned in this window'},
-          {label:'SOURCED',   value:a.sourced,   fg:C.violet, tip:'Sourced fresh by this rep — judged at discovery, so pushing to Close keeps the credit'},
-          {label:'FRESH',     value:a.fresh,     fg:C.bad,    tip:'Not yet on Close — still to push'},
-          {label:'POTENTIALS',value:a.potentials,fg:'var(--text)', tip:'Tagged Potential in this window'},
+          {label:'POTENTIALS NOW',value:a.potentialNow, fg:'var(--text)', tip:'Potential leads this rep is holding right now — the same number they see in their own Potential tab. Not limited to the selected window.'},
+          {label:'ASSIGNED',  value:a.assigned,  fg:'var(--text-dim)', tip:'Everything that landed on this rep in the window, qualified or not — the raw intake, including untouched bulk-sheet imports'},
+          {label:'IMPORTED',  value:a.imported,  fg:C.blue,   tip:'POTENTIAL leads that came from an existing/imported list rather than being sourced'},
+          {label:'SOURCED',   value:a.sourced,   fg:C.violet, tip:'POTENTIAL leads sourced fresh by this rep — judged at discovery, so pushing to Close keeps the credit'},
+          {label:'FRESH',     value:a.fresh,     fg:C.bad,    tip:'POTENTIAL leads not yet on Close — still to push'},
+          {label:'TAGGED',    value:a.potentials,fg:'var(--text)', tip:'How many leads this rep tagged Potential INSIDE the selected window — the activity number, not the holdings'},
           {label:'CONTACTED', value:a.contacted, fg:C.good,   tip:'Contacted in this window (by last-contact date)'},
           {label:'TO WORK',   value:a.toWork,    fg:'var(--text-dim)', tip:'Currently Potential/HT and not yet contacted'},
         ];
+        // The sparkline and heatmap read whichever series is selected, so the same
+        // calendar can answer "how many did they tag / contact / send" per day.
+        const onDay=(ymd)=>(((dailySeries[heatSeries]||{})[detail]||{})[ymd]||0);
+        const seriesMeta=HEAT_SERIES.find(s=>s.id===heatSeries)||HEAT_SERIES[0];
         // last 7 days ending on the anchor day
         const hist=[]; for(let i=6;i>=0;i--){ const dt=new Date(anchor); dt.setDate(dt.getDate()-i); const k=ymdLocal(dt);
-          hist.push({key:k, v:potOn(detail,k), lab:dt.toLocaleDateString(undefined,{weekday:'narrow'})}); }
+          hist.push({key:k, v:onDay(k), lab:dt.toLocaleDateString(undefined,{weekday:'narrow'})}); }
         const hmax=Math.max(1,...hist.map(h=>h.v));
         const avg=Math.round(hist.reduce((n,h)=>n+h.v,0)/7);
-        // month heatmap around the anchor
-        const first=new Date(anchor.getFullYear(),anchor.getMonth(),1);
-        const daysIn=new Date(anchor.getFullYear(),anchor.getMonth()+1,0).getDate();
+        // month heatmap — navigable month (heatMonthOffset from today's month); the
+        // selected-day highlight still follows the board anchor.
+        const hm=new Date(today.getFullYear(),today.getMonth()+heatMonthOffset,1);
+        const first=new Date(hm.getFullYear(),hm.getMonth(),1);
+        const daysIn=new Date(hm.getFullYear(),hm.getMonth()+1,0).getDate();
         const cells=[]; for(let b=0;b<first.getDay();b++) cells.push(null);
-        let cmax=1; for(let n=1;n<=daysIn;n++){ const k=ymdLocal(new Date(anchor.getFullYear(),anchor.getMonth(),n)); cmax=Math.max(cmax,potOn(detail,k)); }
-        for(let n=1;n<=daysIn;n++){ const dt=new Date(anchor.getFullYear(),anchor.getMonth(),n); const k=ymdLocal(dt);
-          cells.push({n, key:k, v:potOn(detail,k), future:k>ymdLocal(today), sel:k===ymdLocal(anchor)}); }
+        let cmax=1; for(let n=1;n<=daysIn;n++){ const k=ymdLocal(new Date(hm.getFullYear(),hm.getMonth(),n)); cmax=Math.max(cmax,onDay(k)); }
+        for(let n=1;n<=daysIn;n++){ const dt=new Date(hm.getFullYear(),hm.getMonth(),n); const k=ymdLocal(dt);
+          cells.push({n, key:k, v:onDay(k), future:k>ymdLocal(today), sel:k===ymdLocal(anchor)}); }
         return (
           <div style={{position:'fixed',inset:0,zIndex:60}}>
             <div onClick={()=>setDetail('')} style={{position:'absolute',inset:0,background:'rgba(19,19,24,.4)'}}/>
@@ -2898,7 +3164,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                   <RepAvatar rep={detail} config={config} size={42}/>
                   <div style={{minWidth:0}}>
                     <div style={{fontFamily:SG,fontSize:18,fontWeight:800,letterSpacing:'-.02em'}}>{detail}</div>
-                    <div style={{fontSize:11.5,color:'#a1a1ac'}}>{role} · {periodTag}</div>
+                    <div style={{fontSize:11.5,color:H.label}}>{role} · {periodTag}</div>
                   </div>
                 </div>
                 <div style={{display:'flex',alignItems:'center',gap:8}}>
@@ -2908,7 +3174,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                       Dashboard →</button>
                   )}
                   <button onClick={()=>setDetail('')} title="Close"
-                    style={{width:30,height:30,borderRadius:9,border:'1px solid rgba(255,255,255,.18)',background:'transparent',color:'#d4d4d8',fontSize:14,cursor:'pointer',lineHeight:1}}>✕</button>
+                    style={{width:30,height:30,borderRadius:9,border:'1px solid rgba(255,255,255,.18)',background:'transparent',color:H.neutral,fontSize:14,cursor:'pointer',lineHeight:1}}>✕</button>
                 </div>
               </div>
 
@@ -2941,10 +3207,16 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                             <span style={{width:8,height:8,borderRadius:999,background:c.color}}/>
                             <span style={{fontSize:11.5,fontWeight:800,letterSpacing:'.04em',color:c.color}}>{c.label}</span>
                           </span>
-                          <span style={{fontSize:10.5,color:'var(--text-dim)'}}>{pct(o.potentials,Math.max(1,o.imported))}% of imported tagged</span>
+                          {/* Deliberately NOT a percentage: tagged-in-window and
+                              assigned-in-window are different populations, so a rep
+                              working a backlog produced readings like "160%". */}
+                          <span style={{fontSize:10.5,color:'var(--text-dim)'}}
+                            title={`Tagged ${fmt(o.potentials)} Potential ${periodWord}; ${fmt(o.assigned)} lead(s) were assigned to them in the same window. A rep working through a backlog can tag more than they were given.`}>
+                            {fmt(o.potentials)} tagged · {fmt(o.assigned)} assigned
+                          </span>
                         </div>
-                        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:9}}>
-                          {[{l:'IMPORTED',v:o.imported,fg:C.blue},{l:'SOURCED',v:o.sourced,fg:C.violet},{l:'POTENTIALS',v:o.potentials,fg:'var(--text)'}].map(x=>(
+                        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:9}}>
+                          {[{l:'POT NOW',v:o.potentialNow,fg:'var(--text)'},{l:'ASSIGNED',v:o.assigned,fg:'var(--text-dim)'},{l:'IMPORTED',v:o.imported,fg:C.blue},{l:'FRESH',v:o.fresh,fg:C.bad}].map(x=>(
                             <div key={x.l}>
                               <div style={{fontSize:9,fontWeight:700,letterSpacing:'.07em',color:'var(--text-light)'}}>{x.l}</div>
                               <div style={{fontFamily:MONO,fontSize:14,fontWeight:700,color:x.fg,marginTop:2}}>{fmt(x.v)}</div>
@@ -2967,10 +3239,18 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                   {campDefs.length===0 && <div style={{...card,padding:14,color:'var(--text-dim)',fontSize:12}}>No campaigns configured.</div>}
                 </div>
 
-                {/* last 7 days */}
-                <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',margin:'22px 0 9px'}}>
-                  <span style={{fontSize:10,fontWeight:800,letterSpacing:'.1em',color:'var(--text-light)'}}>POTENTIALS · LAST 7 DAYS</span>
+                {/* last 7 days — switchable series, so the same calendar can be
+                    read back as tagged / contacted / sent to SmartReach per day */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,flexWrap:'wrap',margin:'22px 0 9px'}}>
+                  <div style={track}>
+                    {HEAT_SERIES.map(s=>(
+                      <button key={s.id} onClick={()=>setHeatSeries(s.id)} style={{...pill(heatSeries===s.id),fontSize:11,padding:'5px 11px'}} title={s.tip}>{s.label}</button>
+                    ))}
+                  </div>
                   <span style={{fontSize:10.5,color:'var(--text-dim)',fontFamily:MONO}}>avg {avg}/day</span>
+                </div>
+                <div style={{fontSize:10,fontWeight:800,letterSpacing:'.1em',color:'var(--text-light)',marginBottom:7}}>
+                  {seriesMeta.label.toUpperCase()} · LAST 7 DAYS
                 </div>
                 <div style={{...card,padding:'14px 14px 10px',display:'flex',alignItems:'flex-end',justifyContent:'space-between',gap:6,height:118}}>
                   {hist.map(h=>(
@@ -2984,8 +3264,20 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                 </div>
 
                 {/* month heatmap */}
-                <div style={{fontSize:10,fontWeight:800,letterSpacing:'.1em',color:'var(--text-light)',margin:'22px 0 9px'}}>
-                  {anchor.toLocaleDateString(undefined,{month:'long',year:'numeric'}).toUpperCase()}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,margin:'22px 0 9px'}}>
+                  <span style={{display:'flex',alignItems:'center',gap:6}}>
+                    <button onClick={()=>setHeatMonthOffset(m=>m-1)} title="Previous month"
+                      style={{border:'1px solid var(--border)',background:'var(--card)',color:'var(--text)',borderRadius:6,width:22,height:22,fontSize:14,lineHeight:1,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0}}>‹</button>
+                    <span style={{fontSize:10,fontWeight:800,letterSpacing:'.1em',color:'var(--text-light)',minWidth:150,textAlign:'center'}}>
+                      {hm.toLocaleDateString(undefined,{month:'long',year:'numeric'}).toUpperCase()} · {seriesMeta.label.toUpperCase()}
+                    </span>
+                    <button onClick={()=>setHeatMonthOffset(m=>Math.min(0,m+1))} disabled={heatMonthOffset>=0} title="Next month"
+                      style={{border:'1px solid var(--border)',background:'var(--card)',color:heatMonthOffset>=0?'var(--text-light)':'var(--text)',borderRadius:6,width:22,height:22,fontSize:14,lineHeight:1,cursor:heatMonthOffset>=0?'default':'pointer',opacity:heatMonthOffset>=0?.45:1,display:'flex',alignItems:'center',justifyContent:'center',padding:0}}>›</button>
+                  </span>
+                  <span style={{fontSize:10.5,color:'var(--text-dim)',fontFamily:MONO}}
+                    title={`Total ${seriesMeta.label.toLowerCase()} for ${detail} in the shown month`}>
+                    {fmt(cells.reduce((n,c)=>n+(c&&!c.future?c.v:0),0))} this month
+                  </span>
                 </div>
                 <div style={{...card,padding:'12px 14px'}}>
                   <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:4,marginBottom:5}}>
@@ -2997,7 +3289,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                     {cells.map((c,i)=> c===null
                       ? <div key={'b'+i}/>
                       : <div key={c.key} onClick={c.future?undefined:()=>{ const off=Math.round((new Date(c.key+'T00:00:00')-today)/86400000); setDayOffset(Math.min(0,off)); }}
-                          title={c.future?'':`${c.key} · ${c.v} potential(s)`}
+                          title={c.future?'':`${c.key} · ${c.v} ${seriesMeta.label.toLowerCase()}`}
                           style={{aspectRatio:'1',borderRadius:8,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:1,
                             cursor:c.future?'default':'pointer',
                             border:`1px solid ${c.sel?C.ink:'var(--border)'}`,
@@ -3219,7 +3511,10 @@ function upsertLeadsToSupabase(arr){
 // based on. The sync_leads RPC writes it only if the DB still holds that version;
 // otherwise the lead is REJECTED and its current DB row is returned, so a stale
 // tab can't overwrite newer work (the Contacted→Potential clobber). Returns
-// {ok, accepted:[{id,version}], rejected:[{id,data,version}]}.
+// {ok, accepted:[{id,version}], rejected:[{id,data,version,reason}]}.
+// reason: 'stale'      — the row moved on while we were writing (merge + retry)
+//         'regression' — the server refused a write that would blank a worked
+//                        lead (adopt the server row, never retry).
 function syncLeadsToSupabase(arr, versions){
   if(!SB||!arr||!arr.length) return Promise.resolve({ok:true,accepted:[],rejected:[]});
   const v=versions||{};
@@ -3738,7 +4033,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const srFilename=`${rep}${srCsvCampaign?'_'+srCsvCampaign.replace(/[^\w]+/g,''):''}${isDayView?'_'+quotaDay:''}_smartreach.csv`;
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
-      <header className="no-print" style={{background:'#0d0d12',color:'#fff',padding:'14px 28px 16px',flexShrink:0}}>
+      <header className="no-print" style={{background:'var(--hero-bg)',color:'#fff',padding:'14px 28px 16px',flexShrink:0}}>
         {/* row 1 — profile + primary/secondary actions */}
         <div style={{display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
           <div style={{display:'flex',alignItems:'center',gap:13,minWidth:0}}>
@@ -3828,7 +4123,11 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
       <LeadsTable
         leads={tableLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin hideRepFilter config={config} feats={feats} campColorMap={campColorMap}
-        smartReachSend={null}   /* SmartReach API auto-send removed — the team uses the manual "⬇ SmartReach CSV" import (the SmartReach API can't set prospect ownership on push) */
+        /* SmartReach API auto-send (re-enabled 2026-07-28). owner_id is set to the
+           rep on the edge function, so a NEW prospect is owned correctly. Known
+           SmartReach limitation: a re-push of an email that already exists keeps
+           its FIRST owner (the assign_owner API is 403-gated for our plan). */
+        smartReachSend={isLeadgen?null:{ campaigns: srCampaignOpts, onSend:(ls,cid,clabel)=>importToSmartReach(rep,ls,cid,clabel) }}
         closeSend={isLeadgen?null:{ onSend:(ls)=>importToClose(rep,ls) }}
         hideExport
         filename={`${rep}_leads`} printTitle={`${rep}'s Lead Report`}
@@ -3937,7 +4236,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
   // as a manual override so it drives the recycle clock instead of the Close date.
   function setContactDate(l,dateStr){ if(onSave && dateStr){ onSave({...l,lastContactDate:dateStr,contactDateManual:true}); if(addToast) addToast(`Last-contacted date set to ${dateStr} for "${l.channelName}"`,'success'); } }
   // Deep-link to the lead's page in Close (only leads with a resolved Close id).
-  const closeUrl=id=>id?`https://app.close.com/lead/${id}/`:null;
+  const closeUrl=id=>closeLeadUrl({closeLeadId:id});
 
   // Backfill the Close lead id for contacted leads that ARE in Close but don't
   // have it stored (imported outside the dashboard, matched by email, etc.).
@@ -3973,12 +4272,20 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
   const [colFilter,setColFilter]=useState({});
   const [openFilterCol,setOpenFilterCol]=useState(null);
   const [histLead,setHistLead]=useState(null);
+  // Free-text search + pagination: Contacted grew to thousands of rows and used to
+  // render ALL of them with no search box, freezing the tab. Now it filters + pages.
+  const [search,setSearch]=useState('');
+  const [page,setPage]=useState(1);
+  const PAGE_SIZE=50;
+  useEffect(()=>{ setPage(1); },[search, colFilter.campaign, colFilter.assignedTo, colFilter.emails]);
   function handleSort(col,dir){ setSortCol(col); setSortDir(dir||'asc'); }
-  const colHeaderProps={sortCol,sortDir,onSort:handleSort,leads:contacted,colFilter,setColFilter,openFilterCol,setOpenFilterCol};
+  const colHeaderProps={sortCol,sortDir,onSort:handleSort,leads:contacted,colFilter,setColFilter,openFilterCol,setOpenFilterCol,config};
   const rows=contacted.filter(l=>{
+    if(search){ const s=search.toLowerCase(); const hay=[l.channelName,l.niche,l.platform,(l.emails||[])[0]].map(v=>String(v==null?'':v).toLowerCase()); if(!hay.some(h=>h.includes(s))) return false; }
     if(colFilter.campaign){ if(colFilter.campaign==='None'){ if((l.campaigns||[]).length>0) return false; } else if(!(l.campaigns||[]).includes(colFilter.campaign)) return false; }
     if(colFilter.assignedTo){ if(colFilter.assignedTo==='Unassigned'){ if(l.assignedTo) return false; } else if(l.assignedTo!==colFilter.assignedTo) return false; }
     if(colFilter.emails){ const n=(l.emails||[]).filter(Boolean).length; if(colFilter.emails==='No email' ? n>0 : n===0) return false; }
+    if(colFilter.followers){ const b=FOLLOWER_BUCKETS.find(x=>x.label===colFilter.followers); if(b && !b.test(parseFollowers(l.followers))) return false; }
     return true;
   }).sort((a,b)=>{
     if(!sortCol) return 0;
@@ -3993,6 +4300,9 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
     if(sortCol==='emails'){ const ea=(a.emails||[]).filter(Boolean)[0]||'', eb=(b.emails||[]).filter(Boolean)[0]||''; if(!ea&&eb) return 1; if(ea&&!eb) return -1; return dir*ea.localeCompare(eb); }
     return 0;
   });
+  const totalPages=Math.max(1, Math.ceil(rows.length/PAGE_SIZE));
+  const curPage=Math.min(page, totalPages);
+  const pageRows=rows.slice((curPage-1)*PAGE_SIZE, curPage*PAGE_SIZE);
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'auto'}}>
       <div style={{padding:'16px 24px',borderBottom:'1px solid var(--border)',background:'var(--card)',display:'flex',gap:12,flexShrink:0}}>
@@ -4002,8 +4312,10 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
         <div className="stat-card" style={{flex:1}}><div className="stat-label">Recycle Soon (&lt;14d)</div><div className="stat-value" style={{color:'var(--danger)'}}>{contacted.filter(l=>{const r=recycleInfo(l);return r&&r.left<=14&&r.left>0;}).length}</div></div>
       </div>
       <div style={{padding:'10px 24px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search channels, niches, platforms…"
+          style={{padding:'7px 12px',border:'1px solid var(--border)',borderRadius:8,fontSize:13,minWidth:280,outline:'none',background:'var(--card)',color:'var(--text)'}}/>
         <span style={{fontSize:12.5,color:'var(--text-dim)'}}>
-          {(()=>{const f=!!(colFilter.campaign||colFilter.assignedTo||colFilter.emails);return `${rows.length} contacted lead${rows.length!==1?'s':''}${f?' (filtered)':''}`;})()}
+          {(()=>{const f=!!(search||colFilter.campaign||colFilter.assignedTo||colFilter.emails);return `${rows.length} contacted lead${rows.length!==1?'s':''}${f?' (filtered)':''}`;})()}
         </span>
         <div style={{flex:1}}/>
         <button className="btn btn-outline btn-sm" title="Download the leads shown below (filtered set if a filter is on, otherwise all contacted) as a CSV for back-tracking"
@@ -4028,7 +4340,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
         </tr></thead>
         <tbody>
           {rows.length===0&&<tr><td colSpan={9} style={{textAlign:'center',padding:32,color:'var(--text-dim)'}}>{contacted.length===0?'No contacted leads yet':'No contacted leads match the filters'}</td></tr>}
-          {rows.map(l=>{
+          {pageRows.map(l=>{
             const r=recycleInfo(l);
             const e=effectiveContact(l);
             const email=(l.emails||[])[0];
@@ -4066,6 +4378,11 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
           })}
         </tbody>
       </table>
+      {totalPages>1 && <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:14,padding:'14px',flexShrink:0}}>
+        <button className="btn btn-outline btn-sm" disabled={curPage<=1} onClick={()=>setPage(curPage-1)}>← Prev</button>
+        <span style={{fontSize:12.5,color:'var(--text-dim)'}}>Page {curPage} of {totalPages} · {rows.length} lead{rows.length!==1?'s':''}</span>
+        <button className="btn btn-outline btn-sm" disabled={curPage>=totalPages} onClick={()=>setPage(curPage+1)}>Next →</button>
+      </div>}
       {histLead&&<LeadHistoryModal lead={leads.find(l=>l.id===histLead.id)||histLead} onClose={()=>setHistLead(null)}/>}
     </div>
   );
@@ -5008,14 +5325,19 @@ function DuplicatesView({groups,config,onSave,onDelete,addToast}) {
 }
 
 // ─── CAMPAIGN VIEW ────────────────────────────────────────
-function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,config}) {
+function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,config,isAdmin=true,currentUser=null}) {
   // A campaign tab holds only the campaign's ACTIVE leads (Potential / untagged).
   // Once a lead lands in a dedicated status tab — Pending Qualification, Contacted
   // (incl. Recently Contacted), or For Recycle — it's worked from that tab and
   // leaves the campaign list so the two don't show the same lead twice.
-  const filtered=leads.filter(l=>l.campaigns.includes(campaign.id) && isWorkable(l));
+  //
+  // Scoped like Pending Qualification and Already Partner: a rep sees only their
+  // own leads here, admins see the whole team's. Without this a rep opening MSN
+  // was looking at everyone's book.
+  const mine=isAdmin?leads:leads.filter(l=>!!currentUser && l.assignedTo===currentUser.name);
+  const filtered=mine.filter(l=>l.campaigns.includes(campaign.id) && isWorkable(l));
   const [repFilter,setRepFilter]=useState('');
-  const display=repFilter?filtered.filter(l=>l.assignedTo===repFilter):filtered;
+  const display=(isAdmin&&repFilter)?filtered.filter(l=>l.assignedTo===repFilter):filtered;
   const feats=config.features||{};
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
@@ -5026,20 +5348,24 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
       <div style={{background:'var(--card)',borderBottom:'1px solid var(--border)',padding:'10px 20px',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',flexShrink:0}}>
-        <div style={{display:'flex',gap:6}}>
-          <button className={`btn btn-sm ${!repFilter?'btn-primary':'btn-outline'}`} onClick={()=>setRepFilter('')}>All ({filtered.length})</button>
-          {(config.salesReps||[]).map(r=>{const cnt=filtered.filter(l=>l.assignedTo===r).length;return(
-            <button key={r} className={`btn btn-sm ${repFilter===r?'btn-primary':'btn-outline'}`} onClick={()=>setRepFilter(f=>f===r?'':r)}>
-              {r} ({cnt})
-            </button>
-          );})}
+        <div style={{display:'flex',gap:6,alignItems:'center'}}>
+          {isAdmin ? <>
+            <button className={`btn btn-sm ${!repFilter?'btn-primary':'btn-outline'}`} onClick={()=>setRepFilter('')}>All ({filtered.length})</button>
+            {(config.salesReps||[]).map(r=>{const cnt=filtered.filter(l=>l.assignedTo===r).length;return(
+              <button key={r} className={`btn btn-sm ${repFilter===r?'btn-primary':'btn-outline'}`} onClick={()=>setRepFilter(f=>f===r?'':r)}>
+                {r} ({cnt})
+              </button>
+            );})}
+          </> : (
+            <span className="count-label">{filtered.length} of your {campaign.label} lead{filtered.length!==1?'s':''}</span>
+          )}
         </div>
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
           {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={doExportCSV}>⬇ CSV</button>}
           {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={doExportPDF}>🖨 PDF</button>}
         </div>
       </div>
-      <LeadsTable leads={display} onEdit={onSave} onBulkAssign={onBulkAssign} showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap} filename={`${campaign.id}_leads`} printTitle={`${campaign.label} Campaign Report`}/>
+      <LeadsTable leads={display} onEdit={onSave} onBulkAssign={onBulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={feats} campColorMap={campColorMap} filename={`${campaign.id}_leads`} printTitle={`${campaign.label} Campaign Report`}/>
     </div>
   );
 }
@@ -5179,9 +5505,318 @@ function ArchiveView({loadArchived,onRestore,config,campColorMap,addToast}) {
   );
 }
 
+// ─── VERSION HISTORY / RESTORE POINTS (admin) ─────────────
+// Google-Sheets-style version history for the lead database. A snapshot is taken
+// automatically every 2 hours, and anyone can take one by hand before a risky
+// bulk action. Point 1 is a full snapshot; every point after it stores only the
+// leads that changed, so a day of history costs a few hundred KB, not 10MB.
+//
+// Restoring is safe by construction: it takes a snapshot of NOW first (so the
+// restore itself can be undone), and leads created after the chosen point are
+// archived rather than deleted.
+function RestorePointsView({addToast,currentUser}) {
+  const [points,setPoints]=useState(null);   // null = loading
+  const [tick,setTick]=useState(0);
+  const [sel,setSel]=useState(null);
+  const [preview,setPreview]=useState(null); // null = loading, false = failed
+  const [busy,setBusy]=useState('');
+  const [confirmText,setConfirmText]=useState('');
+
+  useEffect(()=>{
+    if(!SB){ setPoints([]); return; }
+    let stop=false; setPoints(null);
+    SB.from('restore_points').select('*').order('created_at',{ascending:false}).limit(120)
+      .then(({data,error})=>{ if(!stop) setPoints(error?[]:(data||[])); }, ()=>{ if(!stop) setPoints([]); });
+    return ()=>{ stop=true; };
+  },[tick]);
+
+  useEffect(()=>{
+    if(!SB||!sel){ setPreview(null); return; }
+    let stop=false; setPreview(null); setConfirmText('');
+    SB.rpc('preview_restore_point',{p_id:sel.id}).then(({data,error})=>{
+      if(stop) return;
+      setPreview(error?false:((data&&data[0])||false));
+    }, ()=>{ if(!stop) setPreview(false); });
+    return ()=>{ stop=true; };
+  },[sel&&sel.id]);
+
+  function takePoint(){
+    if(!SB) return;
+    const label=window.prompt('Name this restore point — something you’ll recognise later, e.g. "Before bulk re-tagging MSN".','Manual restore point');
+    if(label===null) return;
+    setBusy('create');
+    SB.rpc('create_restore_point',{p_label:label,p_by:(currentUser&&currentUser.name)||'admin',p_kind:'manual'})
+      .then(({error})=>{
+        setBusy('');
+        if(error){ if(addToast) addToast('Could not create restore point: '+error.message,'error'); reportError('createRestorePoint',error); return; }
+        if(addToast) addToast('Restore point saved','success');
+        setTick(t=>t+1);
+      },(e)=>{ setBusy(''); if(addToast) addToast('Could not create restore point','error'); reportError('createRestorePoint',e); });
+  }
+
+  function doRestore(){
+    if(!SB||!sel) return;
+    setBusy('restore');
+    SB.rpc('restore_to_point',{p_id:sel.id,p_by:(currentUser&&currentUser.name)||'admin'})
+      .then(({data,error})=>{
+        setBusy('');
+        if(error){ if(addToast) addToast('Restore failed: '+error.message,'error'); reportError('restoreToPoint',error); return; }
+        const r=(data&&data[0])||{};
+        if(addToast) addToast(`Restored — ${r.reverted||0} reverted, ${r.returned||0} brought back, ${r.archived_new||0} archived. Reloading…`,'success');
+        setTimeout(()=>window.location.reload(),1800);
+      },(e)=>{ setBusy(''); if(addToast) addToast('Restore failed','error'); reportError('restoreToPoint',e); });
+  }
+
+  const KIND={
+    auto:     {label:'Automatic', color:'var(--text-dim)'},
+    manual:   {label:'Saved by hand', color:'var(--primary)'},
+    'pre-restore':{label:'Before a restore', color:'#DE350B'},
+  };
+  const fmtTime=t=>{ try{ return new Date(t).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}); }catch(e){ return ''; } };
+  const dayLabel=t=>{
+    try{
+      const d=new Date(t), today=new Date(), y=new Date(Date.now()-864e5);
+      if(ymdLocal(d)===ymdLocal(today)) return 'Today';
+      if(ymdLocal(d)===ymdLocal(y)) return 'Yesterday';
+      return d.toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'});
+    }catch(e){ return ''; }
+  };
+
+  // Group by calendar day, the way Sheets does.
+  const groups=[];
+  (points||[]).forEach(p=>{
+    const d=dayLabel(p.created_at);
+    if(!groups.length||groups[groups.length-1].day!==d) groups.push({day:d,items:[]});
+    groups[groups.length-1].items.push(p);
+  });
+
+  const nothingToDo=preview&&!preview.will_revert&&!preview.will_return&&!preview.will_remove;
+  const needsTyped=preview&&((preview.will_revert||0)+(preview.will_return||0)+(preview.will_remove||0))>200;
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
+      <div className="toolbar no-print">
+        <span className="count-label">{points==null?'Loading…':`${points.length} restore point${points.length!==1?'s':''}`}</span>
+        <div style={{marginLeft:'auto',display:'flex',gap:8}}>
+          <button className="btn btn-outline btn-sm" onClick={()=>setTick(t=>t+1)}>&#8635; Refresh</button>
+          <button className="btn btn-primary btn-sm" disabled={busy==='create'} onClick={takePoint}>
+            {busy==='create'?'Saving…':'📌 Save a restore point now'}
+          </button>
+        </div>
+      </div>
+
+      <div style={{display:'flex',flex:1,overflow:'hidden'}}>
+        {/* Left: the timeline */}
+        <div style={{width:340,flexShrink:0,borderRight:'1px solid var(--border)',overflowY:'auto',background:'var(--card)'}}>
+          {points==null && <div style={{padding:'28px 16px',textAlign:'center',color:'var(--text-dim)',fontSize:13}}>Loading…</div>}
+          {points&&points.length===0 && (
+            <div style={{padding:'28px 16px',textAlign:'center',color:'var(--text-dim)',fontSize:13}}>
+              No restore points yet. One is taken automatically every 2 hours.
+            </div>
+          )}
+          {groups.map(g=>(
+            <div key={g.day}>
+              <div style={{padding:'10px 14px 6px',fontSize:11,fontWeight:700,letterSpacing:'.04em',textTransform:'uppercase',color:'var(--text-light)',position:'sticky',top:0,background:'var(--card)',zIndex:1}}>{g.day}</div>
+              {g.items.map(p=>{
+                const k=KIND[p.kind]||KIND.auto;
+                const on=sel&&sel.id===p.id;
+                return (
+                  <div key={p.id} onClick={()=>setSel(p)}
+                    style={{padding:'9px 14px',cursor:'pointer',borderLeft:'3px solid '+(on?'var(--primary)':'transparent'),
+                            background:on?'var(--bg)':'transparent'}}>
+                    <div style={{display:'flex',alignItems:'baseline',gap:8}}>
+                      <span style={{fontSize:13,fontWeight:on?700:600,color:'var(--text)'}}>{fmtTime(p.created_at)}</span>
+                      <span style={{fontSize:10.5,color:k.color,fontWeight:600}}>{k.label}</span>
+                      <span style={{marginLeft:'auto',fontSize:10.5,color:'var(--text-light)',fontVariantNumeric:'tabular-nums'}}>{(p.lead_count||0).toLocaleString()}</span>
+                    </div>
+                    <div style={{fontSize:11.5,color:'var(--text-dim)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {p.label}{p.created_by?' · '+p.created_by:''}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+
+        {/* Right: what restoring this point would do */}
+        <div style={{flex:1,overflowY:'auto',padding:'22px 26px'}}>
+          {!sel && (
+            <div style={{maxWidth:560,color:'var(--text-dim)',fontSize:13,lineHeight:1.7}}>
+              <div style={{fontSize:16,fontWeight:700,color:'var(--text)',marginBottom:10}}>Version history</div>
+              <p>Every lead in the database is snapshotted automatically every 2 hours. Pick a point on the left to see exactly what restoring it would change before anything happens.</p>
+              <p style={{marginTop:12}}>Restoring is reversible: the dashboard saves a snapshot of the current state first, and any lead added after the chosen point is archived rather than deleted.</p>
+              <p style={{marginTop:12}}>Take a point by hand before anything risky &mdash; a bulk re-tag, a big import, a mass assignment.</p>
+            </div>
+          )}
+          {sel && (
+            <div style={{maxWidth:640}}>
+              <div style={{fontSize:17,fontWeight:700,color:'var(--text)'}}>{sel.label}</div>
+              <div style={{fontSize:12,color:'var(--text-dim)',marginTop:4}}>
+                {(()=>{ try{ return new Date(sel.created_at).toLocaleString([],{dateStyle:'full',timeStyle:'short'}); }catch(e){ return sel.created_at; } })()}
+                {sel.created_by?' · saved by '+sel.created_by:''} · {(sel.lead_count||0).toLocaleString()} leads
+              </div>
+
+              {preview===null && <div style={{marginTop:22,fontSize:13,color:'var(--text-dim)'}}>Comparing with the database…</div>}
+              {preview===false && <div style={{marginTop:22,fontSize:13,color:'var(--danger)'}}>Couldn’t compare this point with the current database.</div>}
+              {preview && (
+                <>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))',gap:10,marginTop:20}}>
+                    {[
+                      {n:preview.will_revert, l:'reverted',  d:'edited since this point',      c:'#DE9B0B'},
+                      {n:preview.will_return, l:'brought back', d:'deleted since this point',  c:'var(--primary)'},
+                      {n:preview.will_remove, l:'archived',  d:'added after this point',       c:'#DE350B'},
+                      {n:preview.unchanged,   l:'untouched', d:'identical already',            c:'var(--text-light)'},
+                    ].map(s=>(
+                      <div key={s.l} style={{border:'1px solid var(--border)',borderRadius:8,padding:'12px 14px',background:'var(--card)'}}>
+                        <div style={{fontSize:22,fontWeight:800,color:s.c,fontVariantNumeric:'tabular-nums',lineHeight:1.1}}>{(s.n||0).toLocaleString()}</div>
+                        <div style={{fontSize:12,fontWeight:700,color:'var(--text)',marginTop:3}}>{s.l}</div>
+                        <div style={{fontSize:10.5,color:'var(--text-light)',marginTop:1}}>{s.d}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {nothingToDo ? (
+                    <div style={{marginTop:22,fontSize:13,color:'var(--text-dim)'}}>
+                      The database already matches this point exactly &mdash; there is nothing to restore.
+                    </div>
+                  ) : (
+                    <div style={{marginTop:22,border:'1px solid var(--border)',borderRadius:8,padding:'16px 18px',background:'var(--card)'}}>
+                      <div style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>Restore the database to this point</div>
+                      <div style={{fontSize:12,color:'var(--text-dim)',marginTop:6,lineHeight:1.6}}>
+                        A snapshot of the current state is saved first, so this can be undone. Leads added after this point are archived, never deleted. Everyone’s browser will pick up the change on the next sync.
+                      </div>
+                      {needsTyped && (
+                        <div style={{marginTop:12}}>
+                          <div style={{fontSize:11.5,color:'var(--text-dim)',marginBottom:5}}>This affects more than 200 leads. Type <b>RESTORE</b> to confirm.</div>
+                          <input type="text" style={{width:180}} value={confirmText} onChange={e=>setConfirmText(e.target.value)} placeholder="RESTORE"/>
+                        </div>
+                      )}
+                      <button className="btn btn-sm" style={{marginTop:14,background:'#DE350B',color:'#fff',borderColor:'#DE350B'}}
+                        disabled={busy==='restore'||(needsTyped&&confirmText.trim().toUpperCase()!=='RESTORE')}
+                        onClick={doRestore}>
+                        {busy==='restore'?'Restoring…':'↺ Restore to this point'}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── ERROR LOG (admin) ────────────────────────────────────
 // Shows client errors captured by reportError() so admins can pinpoint what's
 // failing live — the function/context, the message, who hit it, and where.
+// ─── AI SCRAPER (BETA) ────────────────────────────────────
+// Admin-only pilot. Reads AI lead-qualification SUGGESTIONS from
+// public.ai_qualifications (written by the `qualify-leads` edge function, which
+// runs unassigned leads through Claude against the pool rules). Nothing here
+// edits real leads — admins eyeball the AI's calls and mark Agree/Disagree so we
+// can judge whether the agent is trustworthy before wiring it into the pipeline.
+function AiScraperView({addToast}){
+  const [rows,setRows]=useState(null);   // null = loading
+  const [tick,setTick]=useState(0);
+  const [running,setRunning]=useState(false);
+  useEffect(()=>{
+    if(!SB){ setRows([]); return; }
+    let stop=false; setRows(null);
+    SB.from('ai_qualifications').select('*').order('created_at',{ascending:false}).limit(200)
+      .then(({data,error})=>{ if(!stop) setRows(error?[]:(data||[])); }, ()=>{ if(!stop) setRows([]); });
+    return ()=>{ stop=true; };
+  },[tick]);
+
+  function runBatch(){
+    const cfg=(typeof DEFAULT_CONFIG!=='undefined')?DEFAULT_CONFIG:{};
+    if(!cfg.supabaseUrl||!cfg.supabaseKey){ addToast&&addToast('Supabase not configured','error'); return; }
+    setRunning(true);
+    fetch(cfg.supabaseUrl+'/functions/v1/qualify-leads',{method:'POST',headers:{apikey:cfg.supabaseKey,Authorization:'Bearer '+cfg.supabaseKey,'Content-Type':'application/json'},body:JSON.stringify({limit:5})})
+      .then(r=>r.json()).then(j=>{
+        setRunning(false);
+        if(j&&j.ok){ addToast&&addToast(`AI qualified ${j.qualified} lead${j.qualified!==1?'s':''}`+(j.errors?` · ${j.errors} error${j.errors!==1?'s':''}`:''), j.qualified?'success':'info'); setTick(t=>t+1); }
+        else { addToast&&addToast((j&&j.error)||'AI run failed','error'); }
+      }).catch(e=>{ setRunning(false); addToast&&addToast('AI run failed: '+e.message,'error'); });
+  }
+
+  function review(id,verdict){
+    if(!SB) return;
+    SB.from('ai_qualifications').update({reviewed:true,review_verdict:verdict,reviewed_at:new Date().toISOString()}).eq('id',id)
+      .then(()=>{ setRows(rs=>(rs||[]).map(r=>r.id===id?{...r,reviewed:true,review_verdict:verdict}:r)); }, ()=>{ addToast&&addToast('Save failed','error'); });
+  }
+
+  const pick=(s,keys)=>{ for(const k of keys){ if(s&&s[k]!=null&&s[k]!=='') return s[k]; } return null; };
+  const vColor=v=> v==='qualified'?{bg:'#E3F5E9',fg:'#1E7B45'}: v==='not_qualified'?{bg:'#FCE8E6',fg:'#C0453A'}:{bg:'#FEF4E5',fg:'#B26A00'};
+  const reviewed=(rows||[]).filter(r=>r.reviewed);
+  const agreed=reviewed.filter(r=>r.review_verdict==='agree').length;
+  const agreePct=reviewed.length?Math.round(agreed/reviewed.length*100):null;
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
+      <div style={{padding:'14px 20px',borderBottom:'1px solid var(--card-border)',background:'var(--card)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <span style={{fontSize:16,fontWeight:700}}>🤖 AI Scraper</span>
+          <span style={{fontSize:10,fontWeight:800,letterSpacing:.5,color:'#B26A00',background:'#FEF4E5',padding:'3px 8px',borderRadius:20}}>BETA</span>
+          <span style={{fontSize:12.5,color:'var(--text-dim)'}}>Claude qualifies unassigned leads against your pool rules. Suggestions only — nothing is tagged, moved, or archived automatically.</span>
+        </div>
+      </div>
+      <div className="toolbar no-print">
+        <span className="count-label">{rows==null?'Loading…':`${rows.length} qualified`}{agreePct!=null?` · ${agreePct}% agreement (${agreed}/${reviewed.length})`:''}</span>
+        <div style={{marginLeft:'auto',display:'flex',gap:8}}>
+          <button className="btn btn-outline btn-sm" onClick={()=>setTick(t=>t+1)}>↻ Refresh</button>
+          <button className="btn btn-sm" disabled={running} style={{background:'var(--accent)',color:'#fff',borderColor:'var(--accent)'}} onClick={runBatch}>{running?'⏳ Running… (~30s)':'▶ Run AI on 5 leads'}</button>
+        </div>
+      </div>
+      <div className="table-container">
+        {rows==null
+          ? <div className="empty"><div className="empty-icon">⏳</div><h3>Loading…</h3></div>
+          : rows.length===0
+            ? <div className="empty"><div className="empty-icon">🤖</div><h3>No AI results yet</h3><p>Click “Run AI on 5 leads” and Claude will qualify a small batch of unassigned leads. Its verdicts show up here for you to grade — agree or disagree — so we can see how well it does before trusting it.</p></div>
+            : (
+            <table>
+              <thead><tr>
+                <th>Channel</th>
+                <th style={{width:90}}>Followers</th>
+                <th style={{width:80}}>Country</th>
+                <th style={{width:55}}>Email</th>
+                <th style={{width:110}}>AI Verdict</th>
+                <th style={{width:90}}>Pool</th>
+                <th style={{width:60}}>Conf.</th>
+                <th>Reason</th>
+                <th style={{width:150}}>Your call</th>
+              </tr></thead>
+              <tbody>
+                {rows.map(r=>{ const s=r.lead_snapshot||{}; const c=vColor(r.verdict); const name=pick(s,['name','channelName','channelTitle','title'])||r.lead_id; const url=pick(s,['url','channelUrl','link']); const email=pick(s,['email']); return (
+                  <tr key={r.id}>
+                    <td style={{fontSize:12.5,fontWeight:600,maxWidth:220}}>{url?<a href={url} target="_blank" rel="noreferrer" style={{color:'inherit'}}>{name}</a>:name}</td>
+                    <td style={{fontSize:12}}>{pick(s,['followers','subscribers','subs'])||'—'}</td>
+                    <td style={{fontSize:12}}>{pick(s,['country'])||'—'}</td>
+                    <td style={{textAlign:'center'}}>{email?<span title={email} style={{color:'#1E7B45',fontWeight:700}}>✓</span>:<span style={{color:'var(--text-light)'}}>—</span>}</td>
+                    <td><span style={{fontSize:11,fontWeight:700,background:c.bg,color:c.fg,padding:'3px 8px',borderRadius:20,whiteSpace:'nowrap'}}>{r.verdict}</span></td>
+                    <td style={{fontSize:12}}>{r.suggested_pool&&r.suggested_pool!=='none'?r.suggested_pool:<span style={{color:'var(--text-light)'}}>—</span>}</td>
+                    <td style={{fontSize:12,fontWeight:600}}>{r.confidence!=null?r.confidence+'%':'—'}</td>
+                    <td style={{fontSize:12,color:'var(--text-dim)',maxWidth:300}}>{r.reason}</td>
+                    <td>
+                      {r.reviewed
+                        ? <span style={{fontSize:11,fontWeight:700,color:r.review_verdict==='agree'?'#1E7B45':'#C0453A'}}>{r.review_verdict==='agree'?'✓ Agreed':'✗ Disagreed'}<button onClick={()=>review(r.id,r.review_verdict==='agree'?'disagree':'agree')} title="Flip your call" style={{marginLeft:6,fontSize:11,border:'none',background:'none',cursor:'pointer',color:'var(--text-light)'}}>↺</button></span>
+                        : <div style={{display:'flex',gap:6}}>
+                            <button onClick={()=>review(r.id,'agree')} className="btn btn-sm" style={{background:'#1E7B45',color:'#fff',borderColor:'#1E7B45',padding:'4px 9px',fontSize:11}}>Agree</button>
+                            <button onClick={()=>review(r.id,'disagree')} className="btn btn-sm btn-outline" style={{padding:'4px 9px',fontSize:11}}>Disagree</button>
+                          </div>}
+                    </td>
+                  </tr>
+                ); })}
+              </tbody>
+            </table>
+          )}
+      </div>
+    </div>
+  );
+}
+
 function ErrorLogView({addToast}) {
   const [rows,setRows]=useState(null);      // null = loading
   const [tick,setTick]=useState(0);
@@ -5241,40 +5876,264 @@ function ErrorLogView({addToast}) {
   );
 }
 
-// ─── HISTORY VIEW ─────────────────────────────────────────
-function HistoryView({history,addToast,feats,onRestore}) {
+// ─── FOR RECYCLE ──────────────────────────────────────────
+// A shared pool, not a per-rep list. `recycle_due_leads()` runs hourly in the
+// database and moves any contacted lead past its window (MSN/MCN 90 days,
+// everything else 30) into here, unassigned — so whoever gets to it first picks
+// it up. Picking up re-tags the lead Potential and drops it into that rep's
+// queue, which is the whole point: a lead that went cold gets another run.
+function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,onClaim,isAdmin,config,campColorMap}) {
+  const today=ymdLocal(new Date());
+  const freeAgents=leads.filter(l=>!l.assignedTo).length;
+  const releasedToday=leads.filter(l=>l.recycledAt===today).length;
+  const msn=leads.filter(l=>{const c=(l.campaigns||[]).join(' ').toUpperCase();return c.includes('MSN')||c.includes('MCN');}).length;
   return (
-    <div className="history-list">
-      {(!history || history.length===0) && (
-        <div style={{padding:'40px 24px',textAlign:'center',color:'var(--text-dim)'}}>
-          <div style={{fontSize:15,fontWeight:600,color:'var(--text)'}}>No activity recorded yet</div>
-          <div style={{fontSize:13,marginTop:6}}>Scraping, imports, edits, assignments, sends and deletes across the team will show up here.</div>
-        </div>
-      )}
-      {history.map(e=>(
-        <div className="history-item" key={e.id}>
-          <div className="history-icon-wrap">{e.icon}</div>
-          <div className="history-text">{e.text}{e.actor?<span style={{color:'var(--text-dim)',fontWeight:600}}> · {e.actor}</span>:''}</div>
-          <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,flexShrink:0}}>
-            <div className="history-time">{e.time}</div>
-            {e.restorable && (()=>{
-              // Label + tooltip per undo type, so the button says what it will
-              // actually do rather than a generic "Restore". The type comes from a
-              // light column, so the list never has to download undo payloads —
-              // those are fetched only when the button is actually clicked.
-              const t=e.restoreType||(e.restore&&e.restore.type);
-              const meta={
-                revert:  {label:'↩ Undo', tip:'Put the lead(s) back to how they were before this change. Any lead someone has edited since is skipped, not overwritten.'},
-                unimport:{label:'↩ Undo import', tip:'Remove the lead(s) this import added.'},
-                undelete:{label:'↩ Restore', tip:'Re-add the deleted lead(s).'},
-                unarchive:{label:'↩ Unarchive', tip:'Return the archived lead(s) to the active dashboard.'},
-              }[t]||{label:'↩ Undo', tip:'Undo this action'};
-              return <button className="btn btn-ghost btn-xs" title={meta.tip}
-                onClick={()=>onRestore&&onRestore(e)}>{meta.label}</button>;
-            })()}
+    <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
+      <div style={{padding:'14px 24px 0',flexShrink:0}}>
+        <div style={{display:'flex',gap:10,alignItems:'stretch',flexWrap:'wrap'}}>
+          <div className="stat-card orange" style={{flex:1,minWidth:150}}>
+            <div className="stat-label">Waiting to be picked up</div>
+            <div className="stat-value">{freeAgents}</div>
+          </div>
+          <div className="stat-card" style={{flex:1,minWidth:150}}>
+            <div className="stat-label">Released today</div>
+            <div className="stat-value">{releasedToday}</div>
+          </div>
+          <div className="stat-card" style={{flex:1,minWidth:150}}>
+            <div className="stat-label">MSN / MCN (90-day)</div>
+            <div className="stat-value">{msn}</div>
+          </div>
+          <div className="stat-card green" style={{flex:1,minWidth:150}}>
+            <div className="stat-label">Other campaigns (30-day)</div>
+            <div className="stat-value">{leads.length-msn}</div>
           </div>
         </div>
-      ))}
+        <div style={{fontSize:12,color:'var(--text-dim)',margin:'11px 2px 0',lineHeight:1.6}}>
+          These leads finished their recycle period and were released back to the team &mdash; nobody owns them.
+          Select the ones you want and hit <b>♻ Pick up &amp; re-qualify</b>: they get assigned to you, tagged
+          <b> Potential</b>, and their contact clock resets so they read as fresh to contact.
+        </div>
+      </div>
+      <LeadsTable leads={leads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete}
+        onArchive={onArchive} onBulkAssign={onBulkAssign} onClaim={onClaim}
+        claimLabel="♻ Pick up & re-qualify"
+        claimTitle="Assign these to you and tag them Potential — they move straight into your queue"
+        showAssigned showCampaign showOrigin hideRepFilter={!isAdmin}
+        config={config} feats={config.features||{}} campColorMap={campColorMap}
+        filename="recycle_leads" printTitle="For Recycle Leads"/>
+    </div>
+  );
+}
+
+// ─── HISTORY VIEW ─────────────────────────────────────────
+// Google-Sheets-style activity timeline for the whole dashboard. Consecutive
+// actions by the same person collapse into one session (Sheets does the same),
+// so a rep adding 40 leads reads as one entry you can expand — not 120 lines of
+// noise. Restore points are woven into the same timeline, so when you spot a bad
+// change you can see straight away which snapshot sits just before it.
+const HIST_SESSION_GAP_MS = 15*60*1000;   // a quiet gap this long starts a new session
+
+// Stable per-person dot colour. Falls back to a hash so a new teammate still
+// gets a consistent colour before anyone sets one on their profile.
+const HIST_DOT_FALLBACK=['#0B8A6B','#5b5bd6','#C2703D','#B0398F','#2F7AC4','#8A6D0B','#6B5BC4','#C24545'];
+function histDotColor(name){
+  const p=getProfile(name)||{};
+  if(p.color) return p.color;
+  let h=0; for(let i=0;i<String(name||'').length;i++) h=(h*31+String(name).charCodeAt(i))|0;
+  return HIST_DOT_FALLBACK[Math.abs(h)%HIST_DOT_FALLBACK.length];
+}
+
+// Coarse action type, derived from the icon the logger already stamps plus a few
+// text cues. Used only for filtering — nothing depends on getting it exactly right.
+function histKind(e){
+  const t=String(e&&e.text||'').toLowerCase(), i=String(e&&e.icon||'');
+  if(i==='🗑'||/deleted/.test(t)) return 'delete';
+  if(i==='➕'||i==='+'||/added|imported|scraped/.test(t)) return 'add';
+  if(i==='☁'||/close|smartreach|pushed|sent to/.test(t)) return 'send';
+  if(/assigned|reassign/.test(t)) return 'assign';
+  if(i==='🗄'||/archiv/.test(t)) return 'archive';
+  return 'edit';
+}
+const HIST_KINDS=[
+  {id:'all',    label:'Everything'},
+  {id:'edit',   label:'Edits & tags'},
+  {id:'add',    label:'Added / imported'},
+  {id:'assign', label:'Assignments'},
+  {id:'send',   label:'Sent to Close / SmartReach'},
+  {id:'archive',label:'Archived'},
+  {id:'delete', label:'Deleted'},
+];
+
+function HistoryView({history,addToast,feats,onRestore,onOpenRestorePoints,isAdmin}) {
+  const [who,setWho]=useState('all');
+  const [kind,setKind]=useState('all');
+  const [q,setQ]=useState('');
+  const [day,setDay]=useState('');
+  const [open,setOpen]=useState({});          // sessionKey -> expanded?
+  const [points,setPoints]=useState([]);      // restore points, woven into the timeline
+
+  useEffect(()=>{
+    if(!SB||!isAdmin) return;
+    let stop=false;
+    SB.from('restore_points').select('id,label,kind,created_at,lead_count').order('created_at',{ascending:false}).limit(80)
+      .then(({data,error})=>{ if(!stop&&!error) setPoints(data||[]); },()=>{});
+    return ()=>{ stop=true; };
+  },[isAdmin]);
+
+  const people=React.useMemo(()=>{
+    const s=new Set(); (history||[]).forEach(e=>{ if(e.actor) s.add(e.actor); });
+    return [...s].sort();
+  },[history]);
+
+  const filtered=React.useMemo(()=>{
+    const needle=q.trim().toLowerCase();
+    return (history||[]).filter(e=>{
+      if(who!=='all' && e.actor!==who) return false;
+      if(kind!=='all' && histKind(e)!==kind) return false;
+      if(day && String(e.time||'').slice(0,10)!==day) return false;
+      if(needle && !String(e.text||'').toLowerCase().includes(needle)) return false;
+      return true;
+    });
+  },[history,who,kind,q,day]);
+
+  // Group into per-person sessions, then per calendar day. `history` already
+  // arrives newest-first, so a session runs backwards from its newest event.
+  const days=React.useMemo(()=>{
+    const out=[]; let curDay=null, cur=null;
+    const dayOf=e=>String(e.time||'').slice(0,10);
+    filtered.forEach(e=>{
+      const d=dayOf(e), t=e.ts?Date.parse(e.ts):Date.parse(String(e.time||'').replace(' ','T'));
+      if(!curDay || curDay.day!==d){ curDay={day:d,sessions:[]}; out.push(curDay); cur=null; }
+      const breaks=!cur || cur.actor!==(e.actor||'') || !(isFinite(t)&&isFinite(cur.oldest)) || (cur.oldest-t)>HIST_SESSION_GAP_MS;
+      if(breaks){ cur={key:e.id,actor:e.actor||'',newest:t,oldest:t,items:[]}; curDay.sessions.push(cur); }
+      cur.items.push(e);
+      if(isFinite(t)) cur.oldest=t;
+    });
+    return out;
+  },[filtered]);
+
+  const fmtClock=v=>{ try{ const d=new Date(v); return isNaN(d)?'':d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}); }catch(e){ return ''; } };
+  const dayHeading=d=>{
+    try{
+      const today=ymdLocal(new Date()), y=ymdLocal(new Date(Date.now()-864e5));
+      if(d===today) return 'Today';
+      if(d===y) return 'Yesterday';
+      const dt=new Date(d+'T00:00:00');
+      return isNaN(dt)?d:dt.toLocaleDateString([],{weekday:'long',month:'long',day:'numeric'});
+    }catch(e){ return d; }
+  };
+  const undoMeta=e=>{
+    const t=e.restoreType||(e.restore&&e.restore.type);
+    return {
+      revert:  {label:'↩ Undo', tip:'Put the lead(s) back to how they were before this change. Any lead someone has edited since is skipped, not overwritten.'},
+      unimport:{label:'↩ Undo import', tip:'Remove the lead(s) this import added.'},
+      undelete:{label:'↩ Restore', tip:'Re-add the deleted lead(s).'},
+      unarchive:{label:'↩ Unarchive', tip:'Return the archived lead(s) to the active dashboard.'},
+    }[t]||{label:'↩ Undo', tip:'Undo this action'};
+  };
+
+  function EventRow({e,inset}){
+    return (
+      <div className="history-item" style={inset?{paddingLeft:34}:null}>
+        <div className="history-icon-wrap">{e.icon}</div>
+        <div className="history-text">{e.text}{e.actor?<span style={{color:'var(--text-dim)',fontWeight:600}}> · {e.actor}</span>:''}</div>
+        <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,flexShrink:0}}>
+          <div className="history-time">{e.ts?fmtClock(e.ts):e.time}</div>
+          {e.restorable && <button className="btn btn-ghost btn-xs" title={undoMeta(e).tip} onClick={()=>onRestore&&onRestore(e)}>{undoMeta(e).label}</button>}
+        </div>
+      </div>
+    );
+  }
+
+  const total=(history||[]).length;
+  const anyFilter=who!=='all'||kind!=='all'||q.trim()||day;
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
+      <div className="toolbar no-print" style={{flexWrap:'wrap',gap:8}}>
+        <span className="count-label">
+          {filtered.length===total?`${total} action${total!==1?'s':''}`:`${filtered.length} of ${total}`}
+        </span>
+        <input type="search" style={{width:210}} placeholder="Search actions…" value={q} onChange={e=>setQ(e.target.value)}/>
+        <select style={{width:150}} value={who} onChange={e=>setWho(e.target.value)}>
+          <option value="all">Everyone</option>
+          {people.map(p=><option key={p} value={p}>{p}</option>)}
+        </select>
+        <select style={{width:200}} value={kind} onChange={e=>setKind(e.target.value)}>
+          {HIST_KINDS.map(k=><option key={k.id} value={k.id}>{k.label}</option>)}
+        </select>
+        <input type="date" style={{width:150}} value={day} onChange={e=>setDay(e.target.value)}/>
+        {anyFilter && <button className="btn btn-ghost btn-sm" onClick={()=>{setWho('all');setKind('all');setQ('');setDay('');}}>Clear</button>}
+        {isAdmin && onOpenRestorePoints && (
+          <button className="btn btn-outline btn-sm" style={{marginLeft:'auto'}} onClick={onOpenRestorePoints}>🕘 Version History</button>
+        )}
+      </div>
+
+      <div className="history-list" style={{flex:1,overflowY:'auto'}}>
+        {total===0 && (
+          <div style={{padding:'40px 24px',textAlign:'center',color:'var(--text-dim)'}}>
+            <div style={{fontSize:15,fontWeight:600,color:'var(--text)'}}>No activity recorded yet</div>
+            <div style={{fontSize:13,marginTop:6}}>Scraping, imports, edits, assignments, sends and deletes across the team will show up here.</div>
+          </div>
+        )}
+        {total>0 && filtered.length===0 && (
+          <div style={{padding:'40px 24px',textAlign:'center',color:'var(--text-dim)'}}>
+            <div style={{fontSize:15,fontWeight:600,color:'var(--text)'}}>Nothing matches those filters</div>
+            <div style={{fontSize:13,marginTop:6}}>Try clearing the search or widening the date.</div>
+          </div>
+        )}
+
+        {days.map((d,di)=>(
+          <div key={d.day||di}>
+            <div style={{padding:'14px 18px 6px',fontSize:11,fontWeight:700,letterSpacing:'.05em',textTransform:'uppercase',color:'var(--text-light)'}}>{dayHeading(d.day)}</div>
+            {d.sessions.map((s,si)=>{
+              // Restore points that fall inside this session's window, so a bad
+              // change and the snapshot that predates it sit side by side.
+              const marks=points.filter(p=>{
+                const t=Date.parse(p.created_at);
+                return isFinite(t) && t<=s.newest && t>s.oldest-1;
+              });
+              const single=s.items.length===1;
+              const isOpen=!!open[s.key] || single;
+              const newestFirst=di===0&&si===0;
+              return (
+                <div key={s.key}>
+                  {single ? <EventRow e={s.items[0]}/> : (
+                    <>
+                      <div onClick={()=>setOpen(o=>({...o,[s.key]:!o[s.key]}))}
+                        style={{display:'flex',alignItems:'center',gap:10,padding:'10px 18px',cursor:'pointer',
+                                background:isOpen?'var(--card)':'transparent',borderRadius:8}}>
+                        <span style={{fontSize:11,color:'var(--text-dim)',width:12,flexShrink:0,transform:isOpen?'rotate(90deg)':'none',transition:'transform .12s'}}>▶</span>
+                        <span style={{fontSize:13,fontWeight:700,color:'var(--text)',flexShrink:0}}>{fmtClock(s.newest)}</span>
+                        <span style={{width:7,height:7,borderRadius:'50%',background:histDotColor(s.actor),flexShrink:0}}/>
+                        <span style={{fontSize:12.5,color:'var(--text-dim)'}}>{s.actor||'System'}</span>
+                        <span style={{fontSize:11.5,color:'var(--text-light)'}}>· {s.items.length} actions</span>
+                        {newestFirst && <span style={{fontSize:10.5,fontWeight:700,color:'var(--primary)',marginLeft:2}}>MOST RECENT</span>}
+                        <span style={{marginLeft:'auto',fontSize:11,color:'var(--text-light)'}}>
+                          {fmtClock(s.oldest)}–{fmtClock(s.newest)}
+                        </span>
+                      </div>
+                      {isOpen && s.items.map(e=><EventRow key={e.id} e={e} inset/>)}
+                    </>
+                  )}
+                  {marks.map(p=>(
+                    <div key={'rp'+p.id} style={{display:'flex',alignItems:'center',gap:9,padding:'7px 18px 7px 34px',fontSize:11.5,color:'var(--text-dim)'}}>
+                      <span style={{flex:'0 0 auto'}}>🕘</span>
+                      <span style={{fontWeight:600,color:'var(--text)'}}>{fmtClock(p.created_at)}</span>
+                      <span>snapshot &mdash; {p.label}</span>
+                      <span style={{color:'var(--text-light)'}}>({(p.lead_count||0).toLocaleString()} leads)</span>
+                      {onOpenRestorePoints && (
+                        <button className="btn btn-ghost btn-xs" style={{marginLeft:4}} onClick={onOpenRestorePoints}
+                          title="Open Version History to preview and restore this snapshot">Restore to here</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -5381,7 +6240,7 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   }
   function reset(){setLocal(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));}
 
-  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},agency:{label:'Agency',icon:'🏢'},'close-data':{label:'Close Leads Data',icon:'☁️'},pending:{label:'Pending Qualification',icon:'⏳'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
+  const TAB_META={home:{label:'Home',icon:'🏠'},scraper:{label:'Scraper',icon:'🔍'},history:{label:'History',icon:'📋'},'lead-mgmt':{label:'Lead Management',icon:'👥'},'google-import':{label:'Google Sheets Import',icon:'📊'},agency:{label:'Agency',icon:'🏢'},'close-data':{label:'Close Leads Data',icon:'☁️'},pending:{label:'Pending Qualification',icon:'⏳'},nq:{label:'NQ (Not Qualified)',icon:'⊘'},awaiting:{label:'Awaiting Potential',icon:'⌛'},contacted:{label:'Contacted Leads',icon:'✉️'},recycle:{label:'For Recycle',icon:'♻️'},msn:{label:'MSN Tab',icon:'🔵'},vvv:{label:'VVV Tab',icon:'🟣'}};
   const COL_META={thumbnail:'Thumbnail',channelName:'Channel Name',url:'URL',platform:'Platform',niche:'Niche',followers:'Followers',emails:'Email(s)',tags:'Status Tags',campaign:'Campaign',assignedTo:'Assigned To',dateAssigned:'Date Assigned'};
   const FEAT_META={bulkAssign:{label:'Bulk Assign'},exportCSV:{label:'Export CSV'},exportPDF:{label:'Export PDF'},dailyRefresh:{label:'Daily Auto-Refresh'},colorHighlights:{label:'Campaign Color Rows'},webhookTrigger:{label:'n8n Webhook'},historyRestore:{label:'History Restore'},emailValidation:{label:'Email Validation (future)'}};
 
@@ -5748,14 +6607,20 @@ function LoginScreen({config,onLogin}) {
     setStatus('loading');
     const ok=(role)=>{ setStatus('success'); setTimeout(()=>onLogin({name:selected.name, role:role||selected.role}),850); };
     const bad=()=>{ setStatus('idle'); setErr('Incorrect password'); setPw(''); };
-    // Fallback to the config/localStorage password (transition safety, e.g. if
-    // Supabase is unreachable or a credential hasn't been migrated yet).
+    // Offline fallback — ONLY when the server can't be reached. A definitive
+    // "no match" from verify_login MUST reject; otherwise the old config-default
+    // password keeps working after someone changes their password server-side
+    // (the "two passwords" bug).
     const fallback=()=>{ if(pw===effectivePassword(selected)) ok(selected.role); else bad(); };
     if(SB){
       // Primary: server-side hashed verification (verify_login RPC).
       SB.rpc('verify_login',{p_name:selected.name,p_password:pw})
-        .then(({data,error})=>{ if(!error && data && data.length) ok(data[0].role); else fallback(); })
-        .catch(fallback);
+        .then(({data,error})=>{
+          if(error) return fallback();                      // server errored → offline fallback
+          if(data && data.length) return ok(data[0].role);  // server match → in
+          return bad();                                     // server ran, no match → reject
+        })
+        .catch(fallback);                                   // couldn't reach server → offline fallback
     } else { fallback(); }
   }
   useEffect(()=>{
@@ -5788,7 +6653,7 @@ function LoginScreen({config,onLogin}) {
         <div className="lg-glow lg-glow1"/><div className="lg-glow lg-glow2"/>
         <div className="lg-brand-top"><span className="lg-wordmark">Enfinity</span></div>
         <div className="lg-brand-mid">
-          <span className="lg-pill"><span className="lg-pill-dot"/>Sales Dashboard</span>
+          <span className="lg-pill"><span className="lg-pill-dot"/>Lead Management</span>
           <h1 className="lg-hero">Welcome back.</h1>
           <p className="lg-subcopy">Pick your profile to jump straight back into your pipeline, deals, and daily numbers.</p>
         </div>
@@ -5938,7 +6803,7 @@ function ChangePasswordModal({user,onClose,addToast}) {
     };
     if(SB){
       SB.rpc('set_password',{p_name:user.name,p_old:cur,p_new:next}).then(({data,error})=>{
-        if(!error && data===true){ addToast('Password updated','success'); onClose(); }
+        if(!error && data===true){ try{localStorage.removeItem(pwKey(user.name));}catch(e){} addToast('Password updated — use it on all your devices','success'); onClose(); }
         else if(!error && data===false){ setErr('Current password is incorrect'); }
         else { localSave(); }
       }).catch(localSave);
@@ -5971,7 +6836,7 @@ function ChangePasswordModal({user,onClose,addToast}) {
             <input type="password" value={confirm} onChange={e=>{setConfirm(e.target.value);setErr('');}}/></div>
           {err && <div className="login-err" style={{textAlign:'left'}}>{err}</div>}
           <div style={{fontSize:11,color:'var(--text-light)',lineHeight:1.5,background:'var(--bg)',padding:'8px 10px',borderRadius:'var(--radius)'}}>
-            ⓘ Your new password is saved in <b>this browser only</b> — there's no server to sync it. On another device you'll still use the default until you change it there too.
+            ⓘ Your new password <b>syncs across all your devices</b> — it's saved securely on the server, so you'll use it everywhere you sign in. (If the server is briefly unreachable, it saves to this device as a fallback.)
           </div>
           <div className="modal-footer">
             <div>{hasOverride && <button type="button" className="btn btn-ghost btn-sm" onClick={resetToDefault}>↺ Reset to default</button>}</div>
@@ -6091,8 +6956,13 @@ function ProfileModal({user,config,onClose,addToast}) {
 }
 
 // ─── GLOBAL SEARCH (command palette) ──────────────────────
-function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenLead,onOpenSettings,onOpenChangePw,onToggleDark,onLogout}) {
+function GlobalSearch({leads,config,isAdmin,currentUser,dupIndex,onClose,onNavigate,onOpenRep,onOpenLead,onOpenSettings,onOpenChangePw,onToggleDark,onLogout}) {
   const [q,setQ]=useState('');
+  // Same rule the rest of the app uses: an admin sees everything, a rep sees
+  // their own leads plus anything unclaimed (the pools they work from). Applied
+  // to archived hits too, which arrive straight from the database.
+  const me=(currentUser&&currentUser.name)||'';
+  const canSee=l=>isAdmin || !l.assignedTo || l.assignedTo===me || l.scrapedBy===me;
   const inputRef=useRef(null);
   useEffect(()=>{
     inputRef.current&&inputRef.current.focus();
@@ -6111,6 +6981,8 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
     {id:'agency',label:'Agency Folders',icon:'▦'},
     {id:'close-data',label:'Close Leads Data',icon:'☁'},
     {id:'pending',label:'Pending Qualification',icon:'◔'},
+    {id:'nq',label:'NQ (Not Qualified)',icon:'⊘'},
+    {id:'awaiting',label:'Awaiting Potential',icon:'⌛'},
     {id:'contacted',label:'Contacted Leads',icon:'✉'},{id:'recycle',label:'For Recycle',icon:'↻'},
   ].filter(p=>(config.tabs||{})[p.id]);
   if((config.tabs||{}).pools!==false){
@@ -6121,7 +6993,37 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
 
   const reps=(config.salesReps||[]).filter(r=>!ql||match(r)).map(r=>({label:`${r}'s Dashboard`,icon:'👤',kind:'Sales Reps',run:()=>{onOpenRep(r);onClose();}}));
 
-  const leadHits=(!ql?[]:leads.filter(l=>match(l.channelName)||match(l.niche)||match(l.platform)||(l.emails||[]).some(match)).slice(0,8))
+  // Search EVERYTHING on the lead, not just name/niche/platform/email — a URL, a
+  // channel id, a note, a campaign, a tag or the rep's name are all things people
+  // actually paste into search. `leads` is already scoped to what this account is
+  // allowed to see, so widening the fields never widens visibility.
+  const leadMatch=l=>match(l.channelName)||match(l.niche)||match(l.platform)||(l.emails||[]).some(match)
+    ||match(l.url)||match(l.channelId)||match(l.note)||match(l.assignedTo)||match(l.scrapedBy)
+    ||match(l.agency)||match(l.followers)||(l.campaigns||[]).some(match)||(l.tags||[]).some(match)
+    ||(l.channels||[]).some(match);
+  const liveHits=!ql?[]:leads.filter(l=>canSee(l)&&leadMatch(l)).slice(0,8);
+
+  // Archived leads live only in the database, so they can't be matched in memory.
+  // Without this, searching for a lead someone archived returns "no matches" and
+  // looks like the lead is gone.
+  const [archHits,setArchHits]=useState([]);
+  useEffect(()=>{
+    if(!SB || ql.length<2){ setArchHits([]); return; }
+    let stop=false;
+    const t=setTimeout(()=>{
+      const like=`%${ql.replace(/[%,()]/g,' ')}%`;
+      SB.from('leads').select('id,data').eq('archived',true)
+        .or(`data->>channelName.ilike.${like},data->>url.ilike.${like},data->>niche.ilike.${like}`)
+        .limit(5)
+        .then(({data,error})=>{
+          if(stop||error||!Array.isArray(data)) return;
+          setArchHits(data.map(r=>r.data).filter(Boolean).map(d=>({...d,archived:true})).filter(canSee));
+        },()=>{});
+    },250);
+    return()=>{ stop=true; clearTimeout(t); };
+  },[ql]);
+
+  const leadHits=[...liveHits,...archHits].slice(0,10)
     .map(l=>({label:l.channelName,lead:l,kind:'Leads',run:()=>{onOpenLead(l);onClose();}}));
 
   const ACTION_DEFS=[
@@ -6155,22 +7057,61 @@ function GlobalSearch({leads,config,isAdmin,onClose,onNavigate,onOpenRep,onOpenL
                 const active=flat[0]===it;
                 if(it.lead){
                   const l=it.lead;
+                  const loc=leadLocation(l,config);
+                  const dups=(dupIndex&&dupIndex[leadKey(l)])||null;
+                  const dupCount=dups?dups.length:0;
+                  const emails=(l.emails||[]).filter(Boolean);
+                  const camps=(l.campaigns||[]).filter(Boolean);
+                  const chUrl=channelUrl(l), clUrl=closeLeadUrl(l);
                   return (
                     <div key={i} className={`cmdk-item cmdk-lead${active?' cmdk-active':''}`} onClick={it.run}>
                       <div className="cmdk-lead-av">{avatarLetter(l.channelName)}</div>
                       <div className="cmdk-lead-main">
                         <div className="cmdk-lead-name">{l.channelName}
                           <span className="cmdk-lead-plat">{PLATFORM_ICON[l.platform]||''} {l.platform}</span>
+                          {l.archived && <span className="cmdk-loc cmdk-loc-arch">🗄 Archived</span>}
+                        </div>
+                        {/* WHERE IT LIVES comes first — the point of a search hit is
+                            knowing which tab to open to work the lead. */}
+                        <div className="cmdk-lead-where">
+                          <span className="cmdk-loc">📍 {loc.label}</span>
+                          <span>{l.assignedTo?('@'+l.assignedTo):'Unassigned'}</span>
+                          {l.scrapedBy && l.scrapedBy!==l.assignedTo && <span>· sourced by {l.scrapedBy}</span>}
+                          {dupCount>1 && <span className="cmdk-loc cmdk-loc-dup">⧉ {dupCount} copies</span>}
                         </div>
                         <div className="cmdk-lead-meta">
-                          {l.niche||'—'} · {l.followers||'—'} followers · {l.assignedTo?('@'+l.assignedTo):'Unassigned'}
+                          {l.niche||'—'} · {l.followers||'—'} followers
                           {leadOrigin(l)==='Fresh'?' · Fresh':' · Imported'}
+                          {isInClose(l)?' · on Close':''}
+                          {l.dateAssigned?` · assigned ${l.dateAssigned}`:''}
+                          {l.lastContactDate?` · last contact ${l.lastContactDate}`:''}
                         </div>
-                        {(l.tags||[]).length>0 && <div className="cmdk-lead-tags">
+                        <div className="cmdk-lead-meta">
+                          {emails.length?`✉ ${emails.slice(0,2).join(', ')}${emails.length>2?` +${emails.length-2}`:''}`:'✉ no email'}
+                          {isAdmin && leadNeedsQA(l,config) ? ` · QA: ${leadQA(l)}` : ''}
+                        </div>
+                        {(l.tags||[]).length+camps.length>0 && <div className="cmdk-lead-tags">
                           {l.tags.slice(0,4).map(t=>{ const c=TAG_COLORS[t]||{bg:'#F0F2F5',color:'#68737D'}; return <span key={t} style={{background:c.bg,color:c.color}}>{t==='HT'?'⚡ HT':t}</span>; })}
+                          {camps.slice(0,3).map(c=>{ const cd=(config.campaigns||[]).find(x=>x.id===c); return <span key={'c'+c} style={{background:'var(--bg)',color:cd?cd.color:'var(--text-dim)'}}>◆ {cd?cd.label:c}</span>; })}
                         </div>}
+                        {l.note && <div className="cmdk-lead-note">📝 {String(l.note).slice(0,110)}{String(l.note).length>110?'…':''}</div>}
                       </div>
-                      <span className="cmdk-kind">Open ↵</span>
+                      <div className="cmdk-lead-actions">
+                        <span className="cmdk-kind">Open ↵</span>
+                        <div className="cmdk-links">
+                          {chUrl && <a className="cmdk-goto" href={chUrl} target="_blank" rel="noreferrer"
+                            title={chUrl} onClick={e=>e.stopPropagation()}>
+                            {PLATFORM_ICON[l.platform]||'▶'} Channel ↗</a>}
+                          {clUrl
+                            ? <a className="cmdk-goto cmdk-goto-close" href={clUrl} target="_blank" rel="noreferrer"
+                                title="Open this lead in Close.io" onClick={e=>e.stopPropagation()}>☁ Close ↗</a>
+                            : isInClose(l) && <span className="cmdk-goto cmdk-goto-off"
+                                title="This channel is on Close, but its Close id hasn't been resolved yet — open the Contacted tab and the dashboard will backfill it.">☁ on Close</span>}
+                        </div>
+                        {!l.archived && <button type="button" className="cmdk-goto"
+                          title={`Open ${loc.label} to work this lead`}
+                          onClick={e=>{e.stopPropagation();onNavigate(loc.tab);onClose();}}>Go to {loc.label} →</button>}
+                      </div>
                     </div>
                   );
                 }
@@ -6600,7 +7541,14 @@ function App() {
     const evs=diffHistory(old, updated, (currentUser&&currentUser.name)||'');
     if(evs.length) updated.history=pushHist(updated, evs);
     setLeads(ls=>ls.map(l=>l.id===updated.id?updated:l));
-    queueEditLog({old,updated,evs,stampedContact,requalified});
+    // A QA-only change writes nothing to the shared activity log. That log feeds
+    // the History tab, which reps can read — and QA is an admin-only marker, so
+    // even a bare "Lead X updated" line would leak that we are reviewing them.
+    // It still persists on the lead itself, so the marker survives normally.
+    const QA_ONLY=['qaStatus','qaBy','qaAt'];
+    const onlyQAChanged = !!old && !evs.length &&
+      Object.keys({...old,...updated}).every(k=>QA_ONLY.includes(k) || stableStringify(old[k])===stableStringify(updated[k]));
+    if(!onlyQAChanged) queueEditLog({old,updated,evs,stampedContact,requalified});
   }
   // A bulk action (the Apply bar) calls saveL once per selected lead, all in the
   // SAME tick. Logging each one separately meant a 12-lead tag wrote 12 history
@@ -6650,7 +7598,9 @@ function App() {
   function logH(icon,text,restore){
     const actor=(currentUser&&currentUser.name)||'';
     const localId=Date.now()+'_'+Math.floor(Math.random()*1e6);
-    setHistory(h=>[{id:localId,icon,text,actor,time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:!!restore,restore:restore||null},...h]);
+    // `ts` is the raw ISO timestamp — the History timeline groups on it, so a
+    // pre-formatted display string alone isn't enough.
+    setHistory(h=>[{id:localId,icon,text,actor,ts:new Date().toISOString(),time:new Date().toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:!!restore,restore:restore||null},...h]);
     // Persist to the shared activity log, INCLUDING the undo payload — so undo
     // survives a reload and works for teammates, not just this browser session.
     // Capture the row id back onto the entry: without it, undoing an in-session
@@ -6819,6 +7769,35 @@ function App() {
     addToast(`${ids.length} leads assigned to ${rep}`,'success');
     logH('✅',`Bulk: ${ids.length} leads → ${rep}`, before.length?{type:'revert',before,after}:null);
   }
+  // Pick up recycled leads. A lead that aged out of Contacted is unassigned and
+  // sits in For Recycle for anyone to take — this claims the selected ones under
+  // the current user AND re-qualifies them as Potential in one step, so they go
+  // straight back into that rep's working queue. The contact clock is cleared so
+  // the lead reads as fresh-to-contact rather than "contacted 91 days ago".
+  function claimRecycled(ids){
+    const me=(currentUser&&currentUser.name)||'';
+    if(!me){ addToast('Sign in to pick up a lead','error'); return; }
+    const idSet=new Set(ids.map(String));
+    const before=leads.filter(l=>idSet.has(String(l.id))).map(undoSnap);
+    const today=ymdLocal(new Date());
+    setLeads(ls=>ls.map(l=>{
+      if(!idSet.has(String(l.id))) return l;
+      const tags=[...(l.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'&&t!=='Pending Qualification')];
+      if(!tags.includes('Potential')) tags.push('Potential');
+      const evs=[histEvent(me,'assigned',{from:l.assignedTo||'',to:me,via:'recycle pick-up'}),
+                 histEvent(me,'qualified',{from:'For Recycle',to:'Potential',via:'recycle pick-up'})];
+      return {...l, assignedTo:me, dateAssigned:today, tags,
+        lastContactDate:null, contactDateManual:false,
+        scrapedBy:humanScraper(l)||l.scrapedBy||null,
+        history:pushHist(l,evs)};
+    }));
+    const after=before.map(b=>({...b, assignedTo:me, dateAssigned:today,
+      tags:[...(b.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'&&t!=='Pending Qualification'),'Potential'],
+      lastContactDate:null}));
+    addToast(`♻ ${ids.length} lead(s) picked up and tagged Potential — they're in your queue now`,'success');
+    logH('♻️',`Recycle pick-up: ${ids.length} lead(s) → ${me}, re-tagged Potential`, before.length?{type:'revert',before,after}:null);
+  }
+
   // Distribute lead-gen JC's QUALIFIED (Potential-tagged) leads to the sales team.
   // RULE: high-ticket Potentials all go to Rein; every other Potential is split
   // EVENLY across Mikka, Chase and Pen — with fresh and imported balanced
@@ -7273,6 +8252,16 @@ function App() {
       links: Array.isArray(x.links)?x.links:[],
       addedAt: x.addedAt || null,
       agency: x.agency || null,
+      // Who worked the lead before it aged out into For Recycle. The recycle job
+      // unassigns the lead so anyone can pick it up; this keeps the attribution.
+      recycledFrom: x.recycledFrom || null, recycledAt: x.recycledAt || null,
+      // Set on an archived duplicate that was folded into the record a rep works,
+      // so the merge stays traceable (and undoable) from the Archive tab.
+      mergedInto: x.mergedInto || null, mergedAt: x.mergedAt || null,
+      // Admin QA review. Unset reads as "Awaiting", so nothing needs backfilling.
+      qaStatus: x.qaStatus==='Done QA' ? 'Done QA' : null, qaBy: x.qaBy || null, qaAt: x.qaAt || null,
+      // Per-lead SmartReach push record — makes the daily send count measurable.
+      smartReachAt: x.smartReachAt || null, smartReachCampaign: x.smartReachCampaign || null,
       source: x.source,
     };
   }
@@ -7390,7 +8379,7 @@ function App() {
       const loaded=res&&res.items;
       if(loaded && loaded.length){
         supabaseHadLeadsRef.current=true;
-        const snap={}; loaded.forEach(l=>snap[String(l.id)]=JSON.stringify(l));
+        const snap={}; loaded.forEach(l=>snap[String(l.id)]=stableStringify(l));
         leadsSyncRef.current=snap;
         leadVersionsRef.current=(res&&res.versions)||{};
         setLeads(loaded);
@@ -7405,8 +8394,11 @@ function App() {
     // quietly made every reloaded entry dead). We deliberately DON'T pull the
     // payloads here — only the has_payload flag — so 200 rows of undo data don't
     // ride along on every page load. The payload is fetched when Undo is clicked.
-    try{ if(SB) SB.from('activity_log').select('id,created_at,actor,icon,text,has_payload,payload_type').order('created_at',{ascending:false}).limit(200)
-      .then(({data})=>{ if(Array.isArray(data)&&data.length) setHistory(data.map(r=>({id:'db_'+r.id, icon:r.icon||'•', text:r.text||'', actor:r.actor||'', time:new Date(r.created_at).toLocaleString('en-CA',{hour12:false}).replace(',',''), restorable:!!r.has_payload, restoreType:r.payload_type||null, restore:null, dbId:r.id}))); }, ()=>{}); }catch(e){}
+    // 800, not 200: the History tab now groups actions into sessions and is the
+    // thing you use to work out WHAT to restore, so it has to reach back past a
+    // single busy morning. Payloads are still excluded, so the rows stay light.
+    try{ if(SB) SB.from('activity_log').select('id,created_at,actor,icon,text,has_payload,payload_type').order('created_at',{ascending:false}).limit(800)
+      .then(({data})=>{ if(Array.isArray(data)&&data.length) setHistory(data.map(r=>({id:'db_'+r.id, icon:r.icon||'•', text:r.text||'', actor:r.actor||'', ts:r.created_at, time:new Date(r.created_at).toLocaleString('en-CA',{hour12:false}).replace(',',''), restorable:!!r.has_payload, restoreType:r.payload_type||null, restore:null, dbId:r.id}))); }, ()=>{}); }catch(e){}
   },[]);
 
   // Persist lead changes to Supabase (debounced, upsert-only — deletes go through
@@ -7415,7 +8407,7 @@ function App() {
     if(!SB || !leadsReady) return;
     const h=setTimeout(()=>{
       const prev=leadsSyncRef.current, snap={}, changed=[];
-      leads.forEach(l=>{ const k=String(l.id), j=JSON.stringify(l); snap[k]=j; if(prev[k]!==j) changed.push(l); });
+      leads.forEach(l=>{ const k=String(l.id), j=stableStringify(l); snap[k]=j; if(prev[k]!==j) changed.push(l); });
       // Stamp every locally-changed lead BEFORE the write goes out, so any poll
       // whose fetch is already in flight knows its answer is stale for this lead.
       const now=Date.now(); changed.forEach(l=>{ writeStampRef.current[String(l.id)]=now; });
@@ -7437,11 +8429,20 @@ function App() {
             res.rejected.forEach(r=>{
               const id=String(r.id); byId[id]=r;
               leadVersionsRef.current[id]=r.version;          // write against the fresh version
-              if(r.data) snap[id]=JSON.stringify(r.data);      // provisional; corrected below if we merge
+              if(r.data) snap[id]=stableStringify(r.data);      // provisional; corrected below if we merge
             });
             setLeads(cur=>cur.map(l=>{
               const id=String(l.id), r=byId[id];
               if(!r || !r.data) return l;
+              // reason:'regression' — the server refused this write because it would
+              // have reset a worked lead back to blank (no tags, no owner, no new
+              // history). That is never a real edit, so take the server's row flat
+              // and do NOT retry: re-applying our fields would just re-push the blank.
+              // 'owner' / 'tags' — the server refused a write that changed the owner
+              // or the tags without recording anything, i.e. a stale copy rather than
+              // an edit. Take theirs and NEVER retry: re-applying our fields would
+              // just re-push the stale value and restart the ping-pong.
+              if(r.reason==='regression' || r.reason==='owner' || r.reason==='tags') return r.data;
               let base=null; try{ base=JSON.parse(prev[id]||'null'); }catch(e){}
               const m=mergeLeadEdit(r.data, l, base);
               if(m!==r.data){ merged[id]=m; return m; }        // our edit survived — keep + re-push
@@ -7456,13 +8457,42 @@ function App() {
                 if(!r2 || !r2.ok) return;
                 (r2.accepted||[]).forEach(a=>{ leadVersionsRef.current[String(a.id)]=a.version; });
                 // Give up after ONE retry so we can never loop; say so honestly.
+                // CRITICAL: adopt the server's row for anything still rejected.
+                // Leaving it dirty was not a no-op — the poll skips dirty leads
+                // (it keeps the local copy), so the lead never converged and the
+                // debounce re-pushed it forever. That is the ping-pong that drove
+                // JC's leads to version 50 and kept pulling them back off Rein.
                 if(r2.rejected && r2.rejected.length){
-                  addToast(`${r2.rejected.length} edit(s) couldn't be saved — someone else is editing them. Please re-check those leads.`,'error');
+                  const take={};
+                  r2.rejected.forEach(r=>{ if(r&&r.data){ const id=String(r.id);
+                    take[id]=r.data;
+                    leadVersionsRef.current[id]=r.version;
+                    leadsSyncRef.current[id]=stableStringify(r.data);   // clean → poll may adopt again
+                    delete writeStampRef.current[id];
+                  }});
+                  if(Object.keys(take).length) setLeads(cur=>cur.map(l=>take[String(l.id)]||l));
+                  addToast(`${r2.rejected.length} edit(s) couldn't be saved — someone else changed those leads first. Showing their version; please re-check.`,'error');
                   reportError('syncRetryRejected', new Error(r2.rejected.length+' lead(s) still rejected after merge'));
                 }
               });
             }
-            const adopted=res.rejected.length-retry.length;
+            const blanked=res.rejected.filter(r=>r.reason==='regression').length;
+            const flipped=res.rejected.filter(r=>r.reason==='owner').length;
+            if(blanked>0){
+              addToast(`${blanked} lead(s) were about to be reset to blank — the server blocked it and kept the saved version`,'error');
+              reportError('syncGuardRegression', new Error(blanked+' lead(s) blocked from being reset to blank'));
+            }
+            if(flipped>0){
+              addToast(`${flipped} lead(s) were about to be moved back to their old owner — the server blocked it and kept the current one`,'error');
+              reportError('syncGuardOwner', new Error(flipped+' lead(s) blocked from an unrecorded owner change'));
+            }
+            const retagged=res.rejected.filter(r=>r.reason==='tags').length;
+            if(retagged>0){
+              addToast(`${retagged} lead(s) were about to have their tags rolled back — the server blocked it and kept the saved tags`,'error');
+              reportError('syncGuardTags', new Error(retagged+' lead(s) blocked from an unrecorded tag change'));
+            }
+            const blocked=blanked+flipped+retagged;
+            const adopted=res.rejected.length-retry.length-blocked;
             if(adopted>0) addToast(`${adopted} lead(s) were updated by someone else — refreshed to the latest`,'info');
           }
           leadsSyncRef.current=snap;
@@ -7505,7 +8535,7 @@ function App() {
           const out=[];
           local.forEach(l=>{
             const id=String(l.id), r=remoteById[id];
-            const dirty=JSON.stringify(l)!==synced[id];         // local edit not yet pushed
+            const dirty=stableStringify(l)!==synced[id];         // local edit not yet pushed
             // Edited while this fetch was in flight → the response predates the
             // edit and cannot be trusted for this lead, even though it's already
             // been marked synced. This is what was reverting Pending→Potential.
@@ -7515,12 +8545,12 @@ function App() {
             // the synced-snapshot update made the next debounce treat every adopted row
             // as a local edit and re-push it — two tabs then ping-pong forever, churning
             // versions and REJECTING reps' real tags (the "tag keeps reverting" storm).
-            else { const take=(dirty||staleForThisLead)?l:r; out.push(take); if(take===r){ leadVersionsRef.current[id]=remoteVersions[id]; leadsSyncRef.current[id]=JSON.stringify(r); } }
+            else { const take=(dirty||staleForThisLead)?l:r; out.push(take); if(take===r){ leadVersionsRef.current[id]=remoteVersions[id]; leadsSyncRef.current[id]=stableStringify(r); } }
           });
-          remote.forEach(l=>{ const id=String(l.id); if(!localIds.has(id)){ out.push(l); leadVersionsRef.current[id]=remoteVersions[id]; leadsSyncRef.current[id]=JSON.stringify(l); } });   // new from other reps → track version + mark synced
+          remote.forEach(l=>{ const id=String(l.id); if(!localIds.has(id)){ out.push(l); leadVersionsRef.current[id]=remoteVersions[id]; leadsSyncRef.current[id]=stableStringify(l); } });   // new from other reps → track version + mark synced
           if(out.length===local.length){
-            const lm={}; local.forEach(l=>lm[String(l.id)]=JSON.stringify(l));
-            if(out.every(l=>lm[String(l.id)]===JSON.stringify(l))) return local;  // no change → no churn
+            const lm={}; local.forEach(l=>lm[String(l.id)]=stableStringify(l));
+            if(out.every(l=>lm[String(l.id)]===stableStringify(l))) return local;  // no change → no churn
           }
           return out;
         });
@@ -7551,7 +8581,7 @@ function App() {
     const check=()=>{ if(stop) return; tag().then(t=>{ if(stop||!t) return; if(baseline==null){ baseline=t; return; } if(t!==baseline) setUpdateAvailable(true); }); };
     check();  // establishes the baseline
     const iv=setInterval(check,180000);   // re-check every 3 min
-    const hasUnsaved=()=>{ const s=leadsSyncRef.current||{}; return (leadsLiveRef.current||[]).some(l=>JSON.stringify(l)!==(s[String(l.id)]||' ')); };
+    const hasUnsaved=()=>{ const s=leadsSyncRef.current||{}; return (leadsLiveRef.current||[]).some(l=>stableStringify(l)!==(s[String(l.id)]||'~none~')); };
     const onVis=()=>{
       if(document.visibilityState==='visible'){ check(); }
       else if(updateAvailableRef.current && !hasUnsaved()){ try{ location.reload(); }catch(e){} }  // reload quietly while away
@@ -7646,42 +8676,54 @@ function App() {
     fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
       .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(resp=>{
-        if(resp && resp.ok===false) throw new Error(resp.error||'SmartReach error');
+        if(resp && resp.ok===false){
+          // Surface the REAL reason. The edge fn returns {error} for hard fails and
+          // {errors:[{step,status,body}]} for per-chunk SmartReach errors — the old
+          // code threw a bare 'SmartReach error' and discarded the latter, so the log
+          // never said why. Now the detail lands in the toast AND error_logs.
+          const detail=resp.error||(Array.isArray(resp.errors)&&resp.errors.length?('SmartReach: '+JSON.stringify(resp.errors).slice(0,400)):'SmartReach error');
+          throw new Error(detail);
+        }
         const n=(resp&&typeof resp.assigned==='number'&&resp.assigned)?resp.assigned:emailable.length;
+        // Warn (don't fail) when leads were dropped for a bad/missing email — one bad
+        // address no longer sinks the whole push, but the rep should know it was skipped.
+        const skipped=(resp&&Array.isArray(resp.skipped))?resp.skipped:[];
+        if(skipped.length){ const names=skipped.slice(0,3).map(s=>s.name||s.email||'?').join(', '); addToast(`⚠ ${skipped.length} lead(s) skipped — no valid email: ${names}${skipped.length>3?'…':''}`,'info'); }
         addToast(`✓ ${n} prospect(s) added to SmartReach → ${dest}`,'success'); logH('✉',`SmartReach: ${n} → ${dest} (${rep})`);
+        // Stamp each lead so the send is countable per rep per DAY. Until now a
+        // send left only one activity-log line with a total, so "how many did
+        // they push on the 24th" was unanswerable and the Home report couldn't
+        // cross-check the contacted number against it.
+        const sent=new Set(emailable.map(l=>String(l.id)));
+        const day=ymdLocal(new Date());
+        setLeads(ls=>ls.map(l=>{
+          if(!sent.has(String(l.id))) return l;
+          return {...l, smartReachAt:day, smartReachCampaign:dest,
+            history:pushHist(l,[histEvent(rep,'smartreach',{to:dest})])};
+        }));
       })
       .catch(e=>{ addToast(`SmartReach send failed for ${rep}: ${e.message}`,'error'); logH('✉',`SmartReach send failed for ${rep}`); reportError('importToSmartReach:'+rep, e); });
   }
 
+  // Auto-recycle now lives in the DATABASE (`recycle_due_leads()`, run hourly by
+  // pg_cron) instead of here. The old client-side version only ran while someone
+  // had a tab open — so leads sat in Contacted through a quiet weekend — and it
+  // rewrote lead objects from browser state, which is the write pattern that
+  // caused version churn. The 30s poll picks the moved leads up like any other
+  // remote change. This effect just tells the current user when it happened.
+  const recycleSeenRef=useRef(null);
   useEffect(()=>{
     if(!leadsReady) return;
-    function checkRecycle(){
-      const now=new Date();
-      setLeads(ls=>{
-        const recycled=[];
-        const updated=ls.map(l=>{
-          if(!isContacted(l)||l.tags.includes('For Recycle')||!l.lastContactDate) return l;
-          const diff=Math.floor((now-new Date(l.lastContactDate))/86400000);
-          const threshold=recycleThresholdDays(l);
-          if(diff>=threshold){
-            recycled.push(l.channelName);
-            // Move to For Recycle and mark Imported (it's already been worked / is in Close).
-            return{...l,tags:[...l.tags.filter(t=>t!=='Contacted'),'For Recycle'],imported:true,
-              history:pushHist(l,[histEvent('System','recycle',{via:`${threshold}-day recycle period reached`})])};
-          }
-          return l;
-        });
-        if(recycled.length>0){
-          setHistory(h=>[{id:Date.now(),icon:'♻️',text:`Auto-recycled ${recycled.length} lead(s): ${recycled.join(', ')}`,time:now.toLocaleString('en-CA',{hour12:false}).replace(',',''),restorable:false},...h]);
-          setTimeout(()=>addToast(`♻ ${recycled.length} contacted lead(s) reached their recycle period — moved to For Recycle`,'info'),0);
-        }
-        return updated;
-      });
+    const now=ymdLocal(new Date());
+    const fresh=leads.filter(l=>(l.tags||[]).includes('For Recycle') && l.recycledAt===now).map(l=>l.id);
+    if(recycleSeenRef.current===null){ recycleSeenRef.current=new Set(fresh); return; }
+    const seen=recycleSeenRef.current;
+    const added=fresh.filter(id=>!seen.has(id));
+    if(added.length){
+      added.forEach(id=>seen.add(id));
+      addToast(`♻ ${added.length} lead(s) reached their recycle period — now up for grabs in For Recycle`,'info');
     }
-    checkRecycle();
-    const t=setInterval(checkRecycle,3600000);
-    return()=>clearInterval(t);
-  },[leadsReady]);
+  },[leads,leadsReady]);
 
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
@@ -7747,8 +8789,11 @@ function App() {
   // Contacted / For Recycle) is triaged by definition, so a missing campaign must
   // not drag it back into Pending — that made a just-tagged lead look like the
   // tag never stuck, and showed Contacted leads in two tabs at once.
-  const isPendingLead = l => (l.tags||[]).includes('Pending Qualification') ||
-    (l.assignedTo && (l.campaigns||[]).length===0 && !hasStatusTag(l));
+  // NQ leads are explicitly excluded — a lead the rep rejected is Not Qualified,
+  // never Pending, so it can't sit in both tabs.
+  const isPendingLead = l => !(l.tags||[]).includes('NQ') && !(l.tags||[]).includes('Awaiting Potential') && (
+    (l.tags||[]).includes('Pending Qualification') ||
+    (l.assignedTo && (l.campaigns||[]).length===0 && !hasStatusTag(l)));
   // Non-admins only see their OWN leads on scoped tabs (e.g. Pending); admins see all.
   const canSeeLead = l => isAdmin || (currentUser && l.assignedTo===currentUser.name);
   const counts=React.useMemo(()=>{
@@ -7756,6 +8801,8 @@ function App() {
     return {
       potential:vLeads.filter(l=>l.tags.includes('Potential')).length,
       pending:vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l)).length,
+      nq:vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l)).length,
+      awaiting:vLeads.filter(l=>(l.tags||[]).includes('Awaiting Potential')&&canSeeLead(l)).length,
       contacted:vLeads.filter(l=>isContacted(l)).length,
       recycle:vLeads.filter(l=>l.tags.includes('For Recycle')).length,
       recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=rc).length,
@@ -7792,7 +8839,10 @@ function App() {
   // The sales-floor reps who split the MSN/VIRALS pool — every 'employee' (so
   // Bella/Mica and future hires are included automatically, same as Chase/etc).
   const POOL_REPS=(config.users||[]).filter(u=>u.role==='employee').map(u=>u.name);
-  const poolShareRep = l => { if(!POOL_REPS.length) return null; const k=leadKey(l)||String(l.id||''); let h=0; for(let i=0;i<k.length;i++) h=((h<<5)-h+k.charCodeAt(i))|0; return POOL_REPS[Math.abs(h)%POOL_REPS.length]; };
+  // Per-pool rep lists. VIRALS is ALSO worked by JC (on top of High Ticket), so it
+  // splits 4 ways (employees + JC); MSN stays the employees only.
+  const poolRepsFor = pid => (pid==='virals' && !POOL_REPS.includes('JC')) ? POOL_REPS.concat(['JC']) : POOL_REPS;
+  const poolShareRep = (l, reps) => { reps=(reps&&reps.length)?reps:POOL_REPS; if(!reps.length) return null; const k=leadKey(l)||String(l.id||''); let h=0; for(let i=0;i<k.length;i++) h=((h<<5)-h+k.charCodeAt(i))|0; return reps[Math.abs(h)%reps.length]; };
   // JC works ONLY the High Ticket pool; the three reps (+ everyone else) work
   // MSN/VIRALS and never see High Ticket. Admins see every pool for oversight.
   const isJC = !!(currentUser && currentUser.name==='JC');
@@ -7801,16 +8851,25 @@ function App() {
   // trio member; other pools unchanged.
   const poolTabLeads = pid => {
     const ls=poolLeads(pid);
-    if((pid==='msn'||pid==='virals') && currentUser && POOL_REPS.includes(currentUser.name))
-      return ls.filter(l=>poolShareRep(l)===currentUser.name);
+    const reps=poolRepsFor(pid);
+    if((pid==='msn'||pid==='virals') && currentUser && reps.includes(currentUser.name))
+      return ls.filter(l=>poolShareRep(l, reps)===currentUser.name);
     return ls;
   };
-  const poolVisibleToUser = pid => pid==='highticket' ? canSeeHighTicket : (isAdmin || !isJC);
+  // Already-CLAIMED leads from a pool (assigned or campaign-tagged) — surfaced only
+  // when a rep searches the pool tab, so a search can find a lead that already left
+  // the unclaimed queue. Admins see all of them; a rep sees only their own.
+  const poolClaimedLeads = pid => vLeads.filter(l=>l.pool===pid && (l.assignedTo || (l.campaigns||[]).length>0)
+    && (isAdmin || (currentUser && l.assignedTo===currentUser.name)));
+  // High Ticket = admins + JC. MSN = reps + admins, NOT JC. VIRALS = everyone
+  // (admins, the reps, AND JC — JC now shares the VIRALS split too).
+  const poolVisibleToUser = pid => pid==='highticket' ? canSeeHighTicket : (pid==='virals' ? true : (isAdmin || !isJC));
   const visiblePools = POOLS.filter(p=>poolVisibleToUser(p.id));
 
   const NAV_MAIN=[
     {id:'home',icon:'⊟',label:'Home'},
     {id:'scraper',icon:'◎',label:'Scraper'},
+    {id:'ai-scraper',icon:'🤖',label:'AI Scraper'},
     {id:'history',icon:'◷',label:'History'},
     {id:'lead-mgmt',icon:'◉',label:'Lead Management'},
     {id:'google-import',icon:'◫',label:'Google Sheets'},
@@ -7820,10 +8879,13 @@ function App() {
     {id:'knowledge',icon:'📚',label:'Knowledge Base'},
     {id:'attendance',icon:'⏱',label:'Attendance'},
     {id:'archive',icon:'🗄',label:'Archive'},
+    {id:'restore',icon:'🕘',label:'Version History'},
     {id:'errors',icon:'🐞',label:'Error Log'},
   ];
   const NAV_FILTER=[
     {id:'pending',icon:'◔',label:'Pending Qualification',count:counts.pending,cls:'orange'},
+    {id:'nq',icon:'⊘',label:'NQ',count:counts.nq,cls:'red'},
+    {id:'awaiting',icon:'⌛',label:'Awaiting Potential',count:counts.awaiting,cls:'amber'},
     {id:'contacted',icon:'✉',label:'Contacted',count:counts.contacted,cls:'blue'},
     {id:'recycle',icon:'↻',label:'For Recycle',count:counts.recycle,cls:'orange'},
     {id:'partner',icon:'🤝',label:'Already Partner',count:counts.partner,cls:'green'},
@@ -7838,19 +8900,28 @@ function App() {
     if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} tools={config.kbTools||(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[])} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle} onDeleteTool={deleteKbTool} dark={darkMode}/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
-    if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory}/>;
+    if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory} isAdmin={isAdmin} onOpenRestorePoints={isAdmin?(()=>setTab('restore')):null}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={nonPoolLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
     if(tab==='lead-mgmt') return <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} onAutoAssignJC={(isAdmin||(currentUser&&currentUser.name==='JC'))?autoAssignJC:null} onVerifyUrls={isAdmin?(()=>verifyUrls(nonPoolLeads)):null} addToast={addToast} config={config}/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
+    // NQ (Not Qualified): rep-scoped like Pending — reps see only their own.
+    if(tab==='nq') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="nq_leads" printTitle="Not Qualified (NQ)"/>;
+    if(tab==='awaiting') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('Awaiting Potential')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="awaiting_potential" printTitle="Awaiting Potential"/>;
     if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap} addToast={addToast}/>;
-    if(tab==='recycle') return <LeadsTable leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recycle_leads" printTitle="For Recycle Leads"/>;
+    // For Recycle is a SHARED POOL, not a per-rep list: a lead that ages out of
+    // Contacted is unassigned, so everyone sees the same board and whoever gets
+    // there first picks it up. "Pick up & re-qualify" claims it AND tags it
+    // Potential in one step so it lands straight in that rep's queue.
+    if(tab==='recycle') return <RecycleView leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={claimRecycled} isAdmin={isAdmin} config={config} campColorMap={campColorMap}/>;
     // Already Partner: the lead is won and out of the pipeline. Reps see their
     // own, admins see everyone's — same scoping as Pending.
     if(tab==='partner') return <LeadsTable leads={vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="already_partner" printTitle="Already Partner"/>;
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
     if(tab==='duplicates') return <DuplicatesView groups={myDupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
     if(tab==='archive') return isAdmin ? <ArchiveView loadArchived={loadArchivedFromSupabase} onRestore={restoreArchived} config={config} campColorMap={campColorMap} addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
+    if(tab==='restore') return isAdmin ? <RestorePointsView addToast={addToast} currentUser={currentUser}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='errors') return isAdmin ? <ErrorLogView addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
+    if(tab==='ai-scraper') return isAdmin ? <AiScraperView addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='google-import') return <GoogleImportView onImport={importLeads} addToast={addToast}/>;
     if(tab==='agency') return <AgencyView agencies={agencies} setAgencies={setAgencies} leads={vLeads} config={config} currentUser={currentUser} isAdmin={isAdmin} addToast={addToast} onImportSheet={importAgencyLeads}/>;
     if(tab==='close-data') return <CloseSearchView config={config}/>;
@@ -7860,14 +8931,14 @@ function App() {
       // High Ticket is JC-only; JC in turn only works High Ticket. Bounce to Home
       // anyone who reaches a pool they shouldn't see.
       if(!poolVisibleToUser(pid)) return <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
-      if(pool) return <LeadsTable leads={poolTabLeads(pid)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} showAssigned showOrigin showCampaign hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename={`pool_${pid}`} printTitle={`${pool.label} Pool`}/>;
+      if(pool) return <LeadsTable leads={poolTabLeads(pid)} searchAlsoLeads={poolClaimedLeads(pid)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} showAssigned showOrigin showCampaign hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename={`pool_${pid}`} printTitle={`${pool.label} Pool`}/>;
     }
     const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);
-    if(camp) return <CampaignView campaign={camp} campColor={camp.color} leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config}/>;
+    if(camp) return <CampaignView campaign={camp} campColor={camp.color} leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config} isAdmin={isAdmin} currentUser={currentUser}/>;
     return null;
   }
 
-  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',contacted:'Contacted Leads',recycle:'For Recycle',partner:'Already Partner',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',nq:'Not Qualified (NQ)',awaiting:'Awaiting Potential',contacted:'Contacted Leads',recycle:'For Recycle',partner:'Already Partner',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',restore:'Version History',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // "New build available" banner — rendered on login AND inside the app, so even a
   // logged-out stale tab is told to reload.
@@ -7878,6 +8949,46 @@ function App() {
     </div>
   ) : null;
 
+  // Duplicate-leads banner — a rep is told, on every screen, that a channel they
+  // hold is also on someone else's list. There is no dismiss: it clears itself
+  // only when the duplicates are actually settled (reassigned or the extra record
+  // removed), which is the point — a dismissable warning gets dismissed and two
+  // reps keep emailing the same creator.
+  //
+  // Admins are excluded on purpose: they see EVERY duplicate group in the team, so
+  // the banner would be permanently stuck for them. They have the Duplicates tab
+  // and its sidebar count instead.
+  const dupBanner = (!isAdmin && myDupGroups.length>0) ? (()=>{
+    const n=myDupGroups.length;
+    const crossRep=myDupGroups.filter(g=>g.reps.length>1).length;
+    const onTab=tab==='duplicates'&&!showRepSelect;
+    return (
+      <div className="dup-banner" style={{flexShrink:0,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',
+        padding:'10px 20px',fontSize:13,fontWeight:600,fontFamily:'inherit',
+        marginTop:updateAvailable?40:0}}>
+        <span style={{fontSize:15,lineHeight:1}}>⧉</span>
+        <span>
+          {crossRep>0
+            ? <>You have <b>{crossRep}</b> lead{crossRep!==1?'s':''} another rep is also working{n>crossRep?<> (and {n-crossRep} more duplicate record{n-crossRep!==1?'s':''} of your own)</>:''} — settle {crossRep===1?'it':'them'} so you don’t double-contact the creator.</>
+            : <>You have <b>{n}</b> duplicate lead record{n!==1?'s':''} — the same channel is on your list more than once.</>}
+        </span>
+        {!onTab && (
+          <button onClick={()=>{ setShowRepSelect(false); setTab('duplicates'); }}
+            className="dup-banner-btn"
+            style={{marginLeft:'auto',border:'none',borderRadius:8,
+              padding:'6px 14px',fontWeight:700,fontSize:12.5,cursor:'pointer',fontFamily:'inherit'}}>
+            Review duplicates →
+          </button>
+        )}
+        {onTab && <span style={{marginLeft:'auto',fontSize:11.5,fontWeight:600,opacity:.8}}>This clears once none of your leads are duplicated.</span>}
+      </div>
+    );
+  })() : null;
+
+  // Memoised so the provider doesn't hand a new object to every consumer on
+  // each render (LeadsTable memoises off it).
+  const adminCtxValue=React.useMemo(()=>({isAdmin, name:(currentUser&&currentUser.name)||''}),[isAdmin,currentUser&&currentUser.name]);
+
   // Gate the entire app behind login.
   const resetToken=(()=>{ try{ return new URLSearchParams(window.location.search).get('reset'); }catch(e){ return null; } })();
   if(resetToken) return <ResetPasswordScreen token={resetToken} onDone={()=>{ try{ window.history.replaceState({},'',window.location.pathname); }catch(e){}; window.location.reload(); }}/>;
@@ -7885,14 +8996,16 @@ function App() {
 
   return (
     <DupContext.Provider value={dupIndex}>
+    <AdminContext.Provider value={adminCtxValue}>
     <div id="root" style={{display:'flex',flexDirection:'column',height:'100vh'}}>
       {updateBanner}
+      {dupBanner}
       {/* TOPBAR */}
       <div className="topbar">
         <div className="topbar-brand">
           <div>
             <div>Enfinity</div>
-            <div className="tagline">Sales Dashboard</div>
+            <div className="tagline">Lead Management</div>
           </div>
         </div>
         <div style={{flex:1}}/>
@@ -8010,10 +9123,11 @@ function App() {
             <span className="sct-icon">{navCollapsed?'»':'«'}</span><span className="sct-label">Collapse</span>
           </div>
           <div className="sidebar-section-label">Main</div>
-          {NAV_MAIN.filter(n=>(n.id==='attendance'||n.id==='archive'||n.id==='errors')?isAdmin:((n.id==='leaves'||n.id==='knowledge')?config.tabs[n.id]!==false:config.tabs[n.id])).map(n=>(
+          {NAV_MAIN.filter(n=>(n.id==='attendance'||n.id==='archive'||n.id==='restore'||n.id==='errors'||n.id==='ai-scraper')?isAdmin:((n.id==='leaves'||n.id==='knowledge')?config.tabs[n.id]!==false:config.tabs[n.id])).map(n=>(
             <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
               {n.id==='errors' && errUnseen>0 && <span className="nav-badge red">{errUnseen>99?'99+':errUnseen}</span>}
+              {n.id==='ai-scraper' && <span className="nav-badge amber">BETA</span>}
             </div>
           ))}
           <div className="nav-divider"/>
@@ -8042,7 +9156,9 @@ function App() {
             <div className="sidebar-section-label">Campaigns</div>
             {(config.campaigns||[]).map(c=>{
               const id=c.id.toLowerCase();
-              const cnt=vLeads.filter(l=>l.campaigns.includes(c.id) && isWorkable(l)).length;
+              // Scoped like every other lead tab: a rep's badge counts THEIR
+              // leads in that campaign, admins see the whole team's.
+              const cnt=vLeads.filter(l=>l.campaigns.includes(c.id) && isWorkable(l) && canSeeLead(l)).length;
               return(
                 <div key={id} title={c.label} className={`nav-item ${tab===id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(id);}}>
                   <span className="nav-icon" style={{color:c.color}}>●</span>{c.label}
@@ -8087,7 +9203,7 @@ function App() {
       {showChangePw && <ChangePasswordModal user={currentUser} onClose={()=>setShowChangePw(false)} addToast={addToast}/>}
       {showAdminReset && isAdmin && <AdminResetModal admin={currentUser} config={config} onClose={()=>setShowAdminReset(false)} addToast={addToast}/>}
       {showProfile && <ProfileModal user={currentUser} config={config} onClose={()=>setShowProfile(false)} addToast={addToast}/>}
-      {showSearch && <GlobalSearch leads={canSeeHighTicket?leads:leads.filter(l=>!(l.pool==='highticket'&&isPoolCandidate(l)))} config={config} isAdmin={isAdmin}
+      {showSearch && <GlobalSearch leads={canSeeHighTicket?leads:leads.filter(l=>!(l.pool==='highticket'&&isPoolCandidate(l)))} config={config} isAdmin={isAdmin} currentUser={currentUser} dupIndex={dupIndex}
         onClose={()=>setShowSearch(false)}
         onNavigate={id=>{setShowRepSelect(false);setTab(id);}}
         onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}}
@@ -8102,6 +9218,7 @@ function App() {
         onKeepAll={()=>{ addToast(`${importWarn.length} recently-contacted lead(s) kept as-is`,'info'); setImportWarn(null); }}
         onClose={()=>setImportWarn(null)}/>}
     </div>
+    </AdminContext.Provider>
     </DupContext.Provider>
   );
 }
