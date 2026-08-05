@@ -5779,7 +5779,11 @@ function AiScraperView({addToast}){
     fetch(cfg.supabaseUrl+'/functions/v1/qualify-leads',{method:'POST',headers:{apikey:cfg.supabaseKey,Authorization:'Bearer '+cfg.supabaseKey,'Content-Type':'application/json'},body:JSON.stringify({searchPrompt:q,searchLimit:8,vision})})
       .then(r=>r.json()).then(j=>{
         setSearching(false);
-        if(j&&j.ok){ addToast&&addToast(`Found & qualified ${j.qualified} channel${j.qualified!==1?'s':''} for “${q}”`+(j.errors?` · ${j.errors} error${j.errors!==1?'s':''}`:''), j.qualified?'success':'info'); setTick(t=>t+1); }
+        if(j&&j.ok){
+          if(j.qualified){ addToast&&addToast(`Found & qualified ${j.qualified} NEW channel${j.qualified!==1?'s':''}`+(j.dedup_removed?` · skipped ${j.dedup_removed} already in your database`:'')+(j.errors?` · ${j.errors} error${j.errors!==1?'s':''}`:''),'success'); }
+          else { addToast&&addToast(j.note||'No new channels found','info'); }
+          setTick(t=>t+1);
+        }
         else { addToast&&addToast((j&&j.error)||'Search failed','error'); }
       }).catch(e=>{ setSearching(false); addToast&&addToast('Search failed: '+e.message,'error'); });
   }
