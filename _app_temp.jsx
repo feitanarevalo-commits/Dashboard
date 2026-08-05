@@ -5727,6 +5727,8 @@ function AiScraperView({addToast}){
   const [savingG,setSavingG]=useState(false);
   const [showG,setShowG]=useState(false);
   const [vision,setVision]=useState(true);   // let the AI look at video thumbnails
+  const [searchQ,setSearchQ]=useState('');
+  const [searching,setSearching]=useState(false);
   useEffect(()=>{
     if(!SB){ setRows([]); return; }
     let stop=false; setRows(null);
@@ -5768,6 +5770,19 @@ function AiScraperView({addToast}){
     SB.from('ai_qualifications').delete().neq('lead_id','__never__')
       .then(({error})=>{ if(error){ addToast&&addToast('Clear failed','error'); return; } setRows([]); addToast&&addToast('AI results cleared','success'); }, ()=>{ addToast&&addToast('Clear failed','error'); });
   }
+  function runSearch(){
+    const cfg=(typeof DEFAULT_CONFIG!=='undefined')?DEFAULT_CONFIG:{};
+    const q=searchQ.trim();
+    if(!q){ addToast&&addToast('Type what to search for','error'); return; }
+    if(!cfg.supabaseUrl||!cfg.supabaseKey){ addToast&&addToast('Supabase not configured','error'); return; }
+    setSearching(true);
+    fetch(cfg.supabaseUrl+'/functions/v1/qualify-leads',{method:'POST',headers:{apikey:cfg.supabaseKey,Authorization:'Bearer '+cfg.supabaseKey,'Content-Type':'application/json'},body:JSON.stringify({searchPrompt:q,searchLimit:8,vision})})
+      .then(r=>r.json()).then(j=>{
+        setSearching(false);
+        if(j&&j.ok){ addToast&&addToast(`Found & qualified ${j.qualified} channel${j.qualified!==1?'s':''} for “${q}”`+(j.errors?` · ${j.errors} error${j.errors!==1?'s':''}`:''), j.qualified?'success':'info'); setTick(t=>t+1); }
+        else { addToast&&addToast((j&&j.error)||'Search failed','error'); }
+      }).catch(e=>{ setSearching(false); addToast&&addToast('Search failed: '+e.message,'error'); });
+  }
 
   function review(id,verdict){
     if(!SB) return;
@@ -5789,6 +5804,12 @@ function AiScraperView({addToast}){
           <span style={{fontSize:10,fontWeight:800,letterSpacing:.5,color:'#B26A00',background:'#FEF4E5',padding:'3px 8px',borderRadius:20}}>BETA</span>
           <span style={{fontSize:12.5,color:'var(--text-dim)'}}>Claude qualifies unassigned leads against your Knowledge Base rules. Suggestions only — nothing is tagged, moved, or archived automatically.</span>
           <button onClick={()=>setShowG(s=>!s)} className="btn btn-outline btn-sm" style={{marginLeft:'auto',fontSize:12}}>{showG?'▾':'▸'} 🧭 Custom Guidelines{guidelines.trim()&&!showG?' •':''}</button>
+        </div>
+        <div style={{display:'flex',gap:8,marginTop:12}}>
+          <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')runSearch();}}
+            placeholder="🔎 Describe channels to find on YouTube — e.g. “active satisfying cleaning compilation channels”"
+            style={{flex:1,fontFamily:'inherit',fontSize:13.5,padding:'10px 14px',borderRadius:10,border:'1px solid var(--card-border)',background:'var(--bg)',color:'var(--text)'}}/>
+          <button className="btn btn-sm" disabled={searching||!searchQ.trim()} style={{background:'var(--accent)',color:'#fff',borderColor:'var(--accent)',whiteSpace:'nowrap'}} onClick={runSearch}>{searching?'⏳ Searching YouTube…':'Search & qualify'}</button>
         </div>
         {showG && <div style={{marginTop:12}}>
           <div style={{fontSize:12,color:'var(--text-dim)',marginBottom:6}}>House rules the AI applies <b>on top of</b> your Knowledge Base, every run. Example: <i>“Reject channels averaging under 5 minutes. Pakistan is OK for MSN. Prefer 20k+ views/video.”</i> Your per-lead comments below are also fed to the AI as it learns.</div>
@@ -5832,7 +5853,7 @@ function AiScraperView({addToast}){
               <tbody>
                 {rows.map(r=>{ const s=r.lead_snapshot||{}; const c=vColor(r.verdict); const name=pick(s,['name','channelName','channelTitle','title'])||r.lead_id; const url=pick(s,['url','channelUrl','link']); const email=pick(s,['email']); return (
                   <tr key={r.id}>
-                    <td style={{fontSize:12.5,fontWeight:600,maxWidth:220}}>{url?<a href={url} target="_blank" rel="noreferrer" style={{color:'inherit'}}>{name}</a>:name}</td>
+                    <td style={{fontSize:12.5,fontWeight:600,maxWidth:220}}>{String(r.lead_id).startsWith('search_')&&<span title="Found via prompt search" style={{fontSize:10,marginRight:5,color:'var(--accent)'}}>🔎</span>}{url?<a href={url} target="_blank" rel="noreferrer" style={{color:'inherit'}}>{name}</a>:name}</td>
                     <td style={{fontSize:12}}>{pick(s,['followers','subscribers','subs'])||'—'}</td>
                     <td style={{fontSize:12}}>{pick(s,['country'])||'—'}</td>
                     <td style={{textAlign:'center'}}>{email?<span title={email} style={{color:'#1E7B45',fontWeight:700}}>✓</span>:<span style={{color:'var(--text-light)'}}>—</span>}</td>
