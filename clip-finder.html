@@ -48,6 +48,8 @@
     [data-theme="light"] .moon,[data-theme="dark"] .sun{display:none}
 
     .panel{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow:var(--shadow); margin-bottom:18px}
+    .divider{display:flex; align-items:center; gap:12px; margin:16px 0; color:var(--faint); font:600 11px 'Plus Jakarta Sans',sans-serif; text-transform:uppercase; letter-spacing:.08em}
+    .divider::before,.divider::after{content:""; flex:1; height:1px; background:var(--line)}
     label.lbl{display:block; font:600 12.5px 'Plus Jakarta Sans',sans-serif; color:var(--muted); margin:0 0 6px}
     textarea#transcript{width:100%; min-height:180px; resize:vertical; font:500 14px/1.5 'Plus Jakarta Sans',sans-serif; color:var(--text); background:var(--bg2); border:1px solid var(--line); border-radius:12px; padding:13px 14px; outline:none; transition:border-color .15s,box-shadow .15s}
     textarea#transcript:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
@@ -126,7 +128,9 @@
     </div>
 
     <div class="panel">
-      <label class="lbl" for="transcript">Transcript <span style="color:var(--faint);font-weight:500">— paste a timestamped transcript (e.g. YouTube “Show transcript”), or plain text</span></label>
+      <label class="lbl" for="ytUrl">YouTube link <span style="color:var(--faint);font-weight:500">— paste a link and we’ll transcribe + find the highlights automatically</span></label>
+      <input type="text" id="ytUrl" placeholder="https://www.youtube.com/watch?v=..." style="height:48px;font-size:15px">
+      <div class="divider">or paste a transcript</div>
       <textarea id="transcript" placeholder="0:00  Welcome back to the show...&#10;0:15  The biggest mistake I made was hiring too fast...&#10;0:45  Here's the one metric I wish I tracked earlier..."></textarea>
       <div class="opts">
         <div class="opt"><label>Clips</label><input type="number" id="numClips" value="5" min="1" max="20"></div>
@@ -139,9 +143,6 @@
             <option value="claude-haiku-4-5-20251001">Haiku 4.5 — fastest</option>
           </select>
         </div>
-      </div>
-      <div class="opts" style="margin-top:12px">
-        <div class="opt" style="grid-column:1/-1"><label>YouTube URL or ID (optional — makes each clip a clickable “watch at” link)</label><input type="text" id="ytUrl" placeholder="https://www.youtube.com/watch?v=... or the video ID"></div>
       </div>
       <div class="runrow">
         <button class="btn primary" id="runBtn"><svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg> Find clips</button>
@@ -188,7 +189,7 @@
 2:30  When I realized, I called them and admitted it immediately. That honesty is why they signed a two year deal the next week. Transparency wins.`;
 
     $('#exampleBtn').onclick = () => { $('#transcript').value = EXAMPLE; $('#numClips').value = 3; toast('Example transcript loaded'); };
-    $('#clearBtn').onclick = () => { $('#transcript').value=''; results.innerHTML=''; statusEl.textContent=''; statusEl.classList.remove('err'); };
+    $('#clearBtn').onclick = () => { $('#transcript').value=''; $('#ytUrl').value=''; results.innerHTML=''; statusEl.textContent=''; statusEl.classList.remove('err'); };
 
     function scoreClass(n){ return n>=85?'good':n>=70?'mid':'low'; }
 
@@ -221,22 +222,23 @@
     }
 
     async function run(){
+      const url = $('#ytUrl').value.trim();
       const transcript = $('#transcript').value.trim();
-      if(!transcript){ statusEl.textContent='Paste a transcript first.'; statusEl.classList.add('err'); $('#transcript').focus(); return; }
+      if(!url && !transcript){ statusEl.textContent='Paste a YouTube link or a transcript first.'; statusEl.classList.add('err'); $('#ytUrl').focus(); return; }
       statusEl.classList.remove('err');
-      const vid = ytId($('#ytUrl').value);
+      const vid = ytId(url);
       const btn = $('#runBtn'); btn.disabled = true;
-      statusEl.innerHTML = `<span class="spinner"></span> Claude is reading the transcript and picking the best moments…`;
+      const payload = { numClips:+$('#numClips').value||5, minDuration:+$('#minDuration').value||20, maxDuration:+$('#maxDuration').value||75, model:$('#model').value };
+      if(url){ payload.youtubeUrl = url; statusEl.innerHTML = `<span class="spinner"></span> Transcribing the video and finding highlights… (longer videos take a bit)`; }
+      else { payload.transcript = transcript; statusEl.innerHTML = `<span class="spinner"></span> Claude is reading the transcript and picking the best moments…`; }
       results.innerHTML = Array.from({length:3}).map(()=>'<div class="skel"></div>').join('');
       const t0 = performance.now();
       try{
-        const r = await fetch(FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
-          transcript, numClips:+$('#numClips').value||5, minDuration:+$('#minDuration').value||20, maxDuration:+$('#maxDuration').value||75, model:$('#model').value
-        })});
+        const r = await fetch(FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
         const j = await r.json();
         if(!j.ok){ throw new Error(j.error || ('HTTP '+r.status)); }
         const secs = ((performance.now()-t0)/1000).toFixed(1);
-        statusEl.textContent = `Found ${j.count} clip${j.count===1?'':'s'} in ${secs}s · ${j.model}`;
+        statusEl.textContent = `Found ${j.count} clip${j.count===1?'':'s'} in ${secs}s · ${j.model}${j.via==='supadata'?' · auto-transcribed':''}`;
         render(j.clips, vid);
       }catch(e){
         results.innerHTML='';
