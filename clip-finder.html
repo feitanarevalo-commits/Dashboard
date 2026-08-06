@@ -136,6 +136,20 @@
         <div class="opt"><label>Clips</label><input type="number" id="numClips" value="5" min="1" max="20"></div>
         <div class="opt"><label>Min sec</label><input type="number" id="minDuration" value="20" min="5" max="180"></div>
         <div class="opt"><label>Max sec</label><input type="number" id="maxDuration" value="75" min="10" max="240"></div>
+        <div class="opt"><label>Lang</label>
+          <select id="lang" title="Preferred transcript language">
+            <option value="en">English</option>
+            <option value="es">Spanish</option>
+            <option value="pt">Portuguese</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="it">Italian</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+            <option value="ar">Arabic</option>
+            <option value="hi">Hindi</option>
+          </select>
+        </div>
         <div class="opt"><label>Model</label>
           <select id="model">
             <option value="claude-sonnet-5">Sonnet 5 — balanced (rec.)</option>
@@ -228,7 +242,7 @@
       statusEl.classList.remove('err');
       const vid = ytId(url);
       const btn = $('#runBtn'); btn.disabled = true;
-      const payload = { numClips:+$('#numClips').value||5, minDuration:+$('#minDuration').value||20, maxDuration:+$('#maxDuration').value||75, model:$('#model').value };
+      const payload = { numClips:+$('#numClips').value||5, minDuration:+$('#minDuration').value||20, maxDuration:+$('#maxDuration').value||75, model:$('#model').value, lang:$('#lang').value||'en' };
       if(url){ payload.youtubeUrl = url; statusEl.innerHTML = `<span class="spinner"></span> Transcribing the video and finding highlights… (longer videos take a bit)`; }
       else { payload.transcript = transcript; statusEl.innerHTML = `<span class="spinner"></span> Claude is reading the transcript and picking the best moments…`; }
       results.innerHTML = Array.from({length:3}).map(()=>'<div class="skel"></div>').join('');
