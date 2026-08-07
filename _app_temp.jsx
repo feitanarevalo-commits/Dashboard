@@ -1897,7 +1897,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
           <table>
             <thead>
               <tr>
-                {feats.bulkAssign && <th style={{width:40}}><input type="checkbox" checked={allSel} onChange={toggleAll}/></th>}
+                {feats.bulkAssign && <th style={{width:82}}><label title="Select all rows" style={{display:'inline-flex',alignItems:'center',gap:5,cursor:'pointer',whiteSpace:'nowrap'}}><input type="checkbox" checked={allSel} onChange={toggleAll}/><span style={{fontSize:9,letterSpacing:.3}}>Select all</span></label></th>}
                 {cols.thumbnail && <th style={{width:50}}>Photo</th>}
                 {cols.channelName && <ColHeader col="channelName" label="Channel" {...colHeaderProps}/>}
                 {cols.url && <th>URL</th>}
