@@ -5210,10 +5210,14 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
     </>
   );
 
-  // A rep sees only the channels THEY scraped; admins see the whole queue.
+  // A rep sees only the channels THEY scraped AND that haven't been handed to
+  // another rep; admins see the whole queue. (Without the assignedTo guard, a
+  // channel a rep scraped but that was assigned to someone else kept showing on
+  // the scraper of the person who scraped it — e.g. Bella's scrapes assigned to
+  // Mikka were still appearing on Bella's Scraper.)
   const myName=currentUser&&currentUser.name;
   const seeAll=isAdminUser(currentUser);
-  const queue=leads.filter(l=>!hasAnyStatusTag(l,config) && leadOrigin(l)!=='Imported' && (seeAll || l.scrapedBy===myName));
+  const queue=leads.filter(l=>!hasAnyStatusTag(l,config) && leadOrigin(l)!=='Imported' && (seeAll || (l.scrapedBy===myName && (!l.assignedTo || l.assignedTo===myName))));
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
       <LeadsTable leads={queue} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onArchive={onArchive} onBulkAssign={onBulkAssign}
