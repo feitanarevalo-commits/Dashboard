@@ -5510,8 +5510,9 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
 }
 
 // ─── LEAD MGMT VIEW ───────────────────────────────────────
-function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onClearAll,onAutoAssignJC,onVerifyUrls,addToast,config}) {
+function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onClearAll,onAutoAssignJC,onVerifyUrls,addToast,config,jcPlan=null}) {
   const [repView,setRepView]=useState('');
+  const [jcPrev,setJcPrev]=useState(false);
   const feats=config.features||{};
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
@@ -5522,6 +5523,7 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
   const pool=leads.filter(l=>!hasTabStatusTag(l));
   const unassigned=pool.filter(l=>!l.assignedTo);
   const display=repView==='unassigned'?unassigned:repView?pool.filter(l=>l.assignedTo===repView):pool;
+  const jcPreviewPlan = (jcPrev && jcPlan) ? jcPlan() : null;   // dry-run for the preview panel
 
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
@@ -5536,11 +5538,13 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
         <button className={`btn btn-sm ${repView==='unassigned'?'btn-danger':'btn-outline'}`} onClick={()=>setRepView(v=>v==='unassigned'?'':'unassigned')} style={repView==='unassigned'?{}:{borderColor:'var(--warn)',color:'var(--warn)'}}>
           Unassigned ({unassigned.length})
         </button>
-        {onAutoAssignJC && (()=>{ const jcN=leads.filter(l=>l.assignedTo==='JC' && (l.tags||[]).includes('Potential')).length; return (
+        {onAutoAssignJC && (()=>{ const jcN=leads.filter(l=>l.assignedTo==='JC' && (l.tags||[]).includes('Potential')).length; return (<>
           <button className="btn btn-sm btn-primary" style={{marginLeft:8}} disabled={!jcN}
-            title="Distribute JC's qualified (Potential) leads — high-ticket → Rein, everything else split evenly (fresh & imported balanced) across Mikka / Chase / Pen"
+            title="Distribute JC's Potential leads — High-Ticket → Rein · MSN/other → Chase/Rein/Mikka · VIRALS → Chase/Mikka (fresh & imported balanced)"
             onClick={onAutoAssignJC}>⚡ Auto-assign JC's leads{jcN?` (${jcN})`:''}</button>
-        ); })()}
+          {jcPlan && <button className="btn btn-sm btn-outline" onClick={()=>setJcPrev(v=>!v)}
+            title="See exactly how JC's leads would be split — before assigning">{jcPrev?'▾':'▸'} 🔍 Preview split</button>}
+        </>); })()}
         {onVerifyUrls && (()=>{ const bad=leads.filter(l=>l.urlBroken).length; return (
           <button className="btn btn-sm btn-outline" style={{marginLeft:8}} onClick={onVerifyUrls}
             title="Check every YouTube URL still resolves; fills missing follower counts and flags broken links (⚠ bad link)">🔗 Verify URLs{bad?` · ⚠ ${bad} broken`:''}</button>
@@ -5549,6 +5553,31 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
           onClick={()=>{ const ans=window.prompt(`⚠ DANGER: this permanently deletes ALL ${leads.length} lead(s) from the shared database — for EVERY rep — and cannot be undone.\n\nTo confirm, type DELETE (in capitals) below:`); if(ans==null) return; if(ans.trim()==='DELETE') onClearAll(); else addToast('Clear All cancelled — you must type DELETE exactly to confirm','info'); }}
           title="Permanently delete every lead">🗑 Clear ALL leads</button>}
       </div>
+      {jcPreviewPlan && (
+        <div style={{background:'var(--bg)',borderBottom:'1px solid var(--border)',padding:'13px 20px',fontSize:12.5,flexShrink:0}} className="no-print">
+          {jcPreviewPlan.targets.length===0
+            ? <span style={{color:'var(--text-dim)'}}>⚠ JC has <b>no Potential-tagged leads</b> to distribute yet — tag his leads Potential first, and this preview will fill in.</span>
+            : <div style={{display:'flex',flexDirection:'column',gap:9}}>
+                <div style={{fontWeight:800,fontSize:13}}>Preview — <span style={{color:'var(--accent)'}}>{jcPreviewPlan.moved.length}</span> of JC's {jcPreviewPlan.targets.length} Potential lead{jcPreviewPlan.targets.length!==1?'s':''} would be assigned:</div>
+                <div style={{display:'flex',gap:22,flexWrap:'wrap'}}>
+                  <span>🎯 <b>{jcPreviewPlan.ht.length}</b> High-Ticket → <b>{jcPreviewPlan.HT_REP||'—'}</b></span>
+                  <span>📊 <b>{jcPreviewPlan.msn.length}</b> MSN/other → <b>{jcPreviewPlan.MSN_REPS.join(' / ')||'—'}</b></span>
+                  <span>🔥 <b>{jcPreviewPlan.virals.length}</b> VIRALS → <b>{jcPreviewPlan.VIRALS_REPS.join(' / ')||'—'}</b></span>
+                </div>
+                <div style={{display:'flex',gap:14,flexWrap:'wrap',alignItems:'center',paddingTop:8,borderTop:'1px solid var(--border)'}}>
+                  <span style={{fontWeight:700,color:'var(--text-dim)'}}>Each rep receives:</span>
+                  {Object.keys(jcPreviewPlan.tally).length===0
+                    ? <span style={{color:'var(--text-dim)'}}>nobody — no eligible target reps</span>
+                    : Object.keys(jcPreviewPlan.tally).sort().map(r=>(
+                        <span key={r} style={{display:'inline-flex',alignItems:'center',gap:6,padding:'3px 10px',borderRadius:999,background:'var(--card)',border:'1px solid var(--border)'}}>
+                          <b>{r}</b> <span style={{color:'var(--accent)',fontWeight:800}}>+{jcPreviewPlan.tally[r]}</span>
+                        </span>
+                      ))}
+                </div>
+                <div style={{fontSize:11,color:'var(--text-light)'}}>Fresh &amp; imported are balanced within each split. Nothing moves until you click “Auto-assign JC's leads”.</div>
+              </div>}
+        </div>
+      )}
       <LeadsTable leads={display} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onArchive={onArchive} onBulkAssign={onBulkAssign} showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap} filename="lead_management" printTitle="Lead Management Report"/>
     </div>
   );
@@ -8048,14 +8077,15 @@ function App() {
   // Fresh and imported are round-robined SEPARATELY within each split so every rep
   // gets an even mix of both. Only Potential-tagged JC leads are moved.
   function jcPotentialLeads(){ return leads.filter(l=>l.assignedTo==='JC' && (l.tags||[]).includes('Potential')); }
-  function autoAssignJC(){
+  // Pure dry-run of the JC distribution — used BOTH for the preview (before you
+  // click) and the real assignment, so the two can never disagree.
+  function jcAssignPlan(){
     const valid=new Set((config.salesReps||[]).concat((config.users||[]).map(u=>u.name)));
     const pick=arr=>arr.filter(r=>valid.has(r));
     const HT_REP = valid.has('Rein') ? 'Rein' : null;
     const MSN_REPS = pick(['Chase','Rein','Mikka']);      // MSN + general potentials
     const VIRALS_REPS = pick(['Chase','Mikka']);
     const targets = jcPotentialLeads();
-    if(!targets.length){ addToast("No Potential-tagged leads under JC to distribute — tag his leads Potential first.",'info'); return; }
     const isHT = l => l.pool==='highticket' || (l.tags||[]).includes('HT') || parseFollowers(l.followers)>=500000;
     const isVirals = l => l.pool==='virals' || (l.campaigns||[]).some(c=>/viral/i.test(String(c)));
     const ht = targets.filter(isHT);
@@ -8074,6 +8104,11 @@ function App() {
     spread(msn, MSN_REPS);
     spread(virals, VIRALS_REPS);
     const moved = targets.filter(l=>map[l.id]);
+    return {targets, ht, msn, virals, map, tally, moved, HT_REP, MSN_REPS, VIRALS_REPS};
+  }
+  function autoAssignJC(){
+    const {targets, ht, msn, virals, map, tally, moved, HT_REP, MSN_REPS, VIRALS_REPS}=jcAssignPlan();
+    if(!targets.length){ addToast("No Potential-tagged leads under JC to distribute — tag his leads Potential first.",'info'); return; }
     if(!moved.length){ addToast('No target reps (Rein / Chase / Mikka) available to distribute to','info'); return; }
     const summary = `Distribute ${moved.length} of JC's Potential lead(s)?\n\n`
       + `• ${ht.filter(l=>map[l.id]).length} High-Ticket → ${HT_REP||'(Rein not available)'}\n`
@@ -9166,7 +9201,7 @@ function App() {
     if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory} isAdmin={isAdmin} onOpenRestorePoints={isAdmin?(()=>setTab('restore')):null}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={nonPoolLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
-    if(tab==='lead-mgmt') return <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} onAutoAssignJC={(isAdmin||(currentUser&&currentUser.name==='JC'))?autoAssignJC:null} onVerifyUrls={isAdmin?(()=>verifyUrls(nonPoolLeads)):null} addToast={addToast} config={config}/>;
+    if(tab==='lead-mgmt') return <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} onAutoAssignJC={(isAdmin||(currentUser&&currentUser.name==='JC'))?autoAssignJC:null} jcPlan={(isAdmin||(currentUser&&currentUser.name==='JC'))?jcAssignPlan:null} onVerifyUrls={isAdmin?(()=>verifyUrls(nonPoolLeads)):null} addToast={addToast} config={config}/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     // NQ (Not Qualified): rep-scoped like Pending — reps see only their own.
     if(tab==='nq') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="nq_leads" printTitle="Not Qualified (NQ)"/>;
