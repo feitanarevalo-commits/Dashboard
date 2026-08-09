@@ -166,6 +166,18 @@ function leadOrigin(lead){
 }
 // Convenience: a Fresh lead is one not yet on Close.
 function isFresh(lead){ return leadOrigin(lead)==='Fresh'; }
+// Where a lead ENTERED the system: a Google-Sheet / agency IMPORT vs sourced in the
+// DASHBOARD (scraper or manual add). Uses the explicit `source` field first, then
+// falls back to the lead's first 'scraped' history event for older records that
+// pre-date the source tag. Returns 'import' | 'dashboard' | 'other'.
+function leadSource(l){
+  if(!l) return 'other';
+  if(l.source==='import') return 'import';
+  if(l.source==='scraper'||l.source==='manual') return 'dashboard';
+  const sc=(l.history||[]).find(e=>e && e.type==='scraped');
+  if(sc) return String(sc.via||'').toLowerCase().includes('import') ? 'import' : 'dashboard';
+  return 'other';
+}
 // Was this lead FRESH WHEN WE FOUND IT — i.e. did the rep actually source it?
 // leadOrigin() cannot answer that: pushing a lead to Close gives it a
 // closeLeadId, which flips it to 'Imported'. So a rep's own fresh find reads
@@ -2886,6 +2898,17 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
     {label:'fresh',    value:o.fresh,     fg:C.bad,   tip:'POTENTIAL leads not yet on Close — the still-to-push queue (empties as leads are pushed)'},
   ];
 
+  // Lead sources this window: Sheet import vs Dashboard-sourced (scoped to viewer).
+  const srcWinLeads = leads.filter(l=>{
+    if(lockedRep && l.assignedTo!==lockedRep) return false;
+    const d=String(l.dateAssigned||l.addedAt||'').slice(0,10);
+    return d>=cur.from && d<=cur.to;
+  });
+  const srcImport=srcWinLeads.filter(l=>leadSource(l)==='import').length;
+  const srcDash=srcWinLeads.filter(l=>leadSource(l)==='dashboard').length;
+  const srcOther=srcWinLeads.filter(l=>leadSource(l)==='other').length;
+  const srcAll=srcImport+srcDash+srcOther;
+
   return (
     <div className="home-content" style={{fontFamily:SG,color:'var(--text)',padding:'22px 24px 60px'}}>
       <div style={{width:'100%',maxWidth:1320,margin:'0 auto'}}>
@@ -2948,6 +2971,37 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
             </div>
           </div>
         </div>
+
+        {/* ── Lead sources: sheet import vs dashboard-scraped ── */}
+        {srcAll>0 && (
+          <div style={{...card,padding:'16px 18px',marginBottom:16}}>
+            <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',gap:16,flexWrap:'wrap'}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:800,letterSpacing:'.06em',color:'var(--text-dim)'}}>LEAD SOURCES · {periodWord}</div>
+                <div style={{fontSize:11.5,color:'var(--text-light)',marginTop:2}}>where the {fmt(srcAll)} lead{srcAll!==1?'s':''} added {periodWord} came from</div>
+              </div>
+              <div style={{display:'flex',gap:26,flexWrap:'wrap'}}>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:28,fontWeight:800,fontFamily:MONO,lineHeight:1,color:'#3B82F6'}}>{fmt(srcImport)}</div>
+                  <div style={{fontSize:11,fontWeight:700,color:'var(--text-dim)',marginTop:4}}>📄 Sheet import <span style={{color:'var(--text-light)',fontWeight:600}}>· {Math.round(srcImport/srcAll*100)}%</span></div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:28,fontWeight:800,fontFamily:MONO,lineHeight:1,color:'#8B5CF6'}}>{fmt(srcDash)}</div>
+                  <div style={{fontSize:11,fontWeight:700,color:'var(--text-dim)',marginTop:4}}>🖥 Dashboard <span style={{color:'var(--text-light)',fontWeight:600}}>· {Math.round(srcDash/srcAll*100)}%</span></div>
+                </div>
+                {srcOther>0 && <div style={{textAlign:'right'}} title="Leads whose source predates provenance tracking (e.g. loaded from Close)">
+                  <div style={{fontSize:28,fontWeight:800,fontFamily:MONO,lineHeight:1,color:'var(--text-dim)'}}>{fmt(srcOther)}</div>
+                  <div style={{fontSize:11,fontWeight:700,color:'var(--text-light)',marginTop:4}}>Other</div>
+                </div>}
+              </div>
+            </div>
+            <div style={{display:'flex',height:8,borderRadius:999,overflow:'hidden',background:'var(--bg)',gap:2,marginTop:14}}>
+              <div style={{background:'#3B82F6',width:pct(srcImport,srcAll)+'%'}} title={`Sheet import: ${srcImport}`}/>
+              <div style={{background:'#8B5CF6',width:pct(srcDash,srcAll)+'%'}} title={`Dashboard: ${srcDash}`}/>
+              <div style={{background:'var(--border)',width:pct(srcOther,srcAll)+'%'}} title={`Other: ${srcOther}`}/>
+            </div>
+          </div>
+        )}
 
         {/* ── Hero + campaign cards ── */}
         <div style={{display:'grid',gridTemplateColumns:'minmax(280px, 1.05fr) minmax(320px, 1.95fr)',gap:16,marginBottom:16}} className="lp-top">
@@ -8358,7 +8412,7 @@ function App() {
       if(k) seen.add(k);
       // Stamp who scraped it + open its timeline with that fact.
       const who=l.scrapedBy||myName;
-      fresh.push({...l, scrapedBy: who, history: pushHist(l,[histEvent(who,'scraped',{via:'scraper'})])});
+      fresh.push({...l, scrapedBy: who, source:'scraper', history: pushHist(l,[histEvent(who,'scraped',{via:'scraper'})])});
     });
     if(fresh.length) setLeads(existing=>{
       // Re-dedupe vs the LATEST existing (live-sync could have changed it).
