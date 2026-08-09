@@ -542,6 +542,21 @@ const DupContext = React.createContext(null);
 // toggle lives deep inside LeadsTable, which is rendered from a dozen places
 // (and via RepDashboard, which doesn't take an isAdmin prop at all).
 const AdminContext = React.createContext({isAdmin:false,name:''});
+// Live presence — who's signed in and whether they're active / idle / away.
+const PresenceContext = React.createContext({online:[], me:''});
+// Derive a status from a presence row. last_seen = heartbeat (tab open),
+// last_active = last mouse/keyboard activity. Thresholds: >3m no activity = Idle,
+// >10m = Away (AFK); no heartbeat for 90s = Offline (drops off the online list).
+function presenceStatus(u){
+  const now=Date.now();
+  const seen=now-new Date(u.last_seen).getTime();
+  const idleMs=now-new Date(u.last_active||u.last_seen).getTime();
+  if(seen>90000)       return {key:'offline',label:'Offline',color:'#9AA0A6',idleMs};
+  if(idleMs>10*60000)  return {key:'away',   label:'Away',   color:'#E8912D',idleMs};
+  if(idleMs>3*60000)   return {key:'idle',   label:'Idle',   color:'#E6B800',idleMs};
+  return                      {key:'active', label:'Active', color:'#22A559',idleMs};
+}
+function fmtAgo(ms){ const m=Math.floor(ms/60000); if(m<1)return'just now'; if(m<60)return m+'m ago'; const h=Math.floor(m/60); return h+'h ago'; }
 
 // ─── PERMISSIONS ──────────────────────────────────────────
 function userRole(name, config){
@@ -2674,6 +2689,8 @@ function mergeQuotas(def, stored){
 
 function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const isAdmin = !!(currentUser && currentUser.role==='admin');
+  const presence = React.useContext(PresenceContext);
+  const onlineUsers = presence.online || [];
   // Non-admins only ever see THEIR own row.
   const lockedRep = (currentUser && currentUser.role!=='admin') ? currentUser.name : null;
   const SG="'Space Grotesk',sans-serif";
@@ -2872,6 +2889,38 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   return (
     <div className="home-content" style={{fontFamily:SG,color:'var(--text)',padding:'22px 24px 60px'}}>
       <div style={{width:'100%',maxWidth:1320,margin:'0 auto'}}>
+
+        {/* ── Who's online (live presence) ── */}
+        {onlineUsers.length>0 && (
+          <div style={{...card,padding:'14px 18px',marginBottom:16}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+              <span style={{width:9,height:9,borderRadius:999,background:'#22A559',boxShadow:'0 0 0 3px rgba(34,165,89,.18)'}}/>
+              <span style={{fontSize:13.5,fontWeight:800,letterSpacing:'.01em'}}>Who’s online</span>
+              <span style={{fontSize:12,color:'var(--text-dim)'}}>· {onlineUsers.length} on the dashboard right now</span>
+              <span style={{marginLeft:'auto',fontSize:10.5,color:'var(--text-light)',display:'inline-flex',gap:12,flexWrap:'wrap'}}>
+                <span><span style={{color:'#22A559',fontWeight:800}}>●</span> Active</span>
+                <span><span style={{color:'#E6B800',fontWeight:800}}>●</span> Idle (3m+)</span>
+                <span><span style={{color:'#E8912D',fontWeight:800}}>●</span> Away (10m+)</span>
+              </span>
+            </div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
+              {onlineUsers.map(u=>{ const s=presenceStatus(u); return (
+                <div key={u.name} style={{display:'flex',alignItems:'center',gap:9,padding:'7px 13px 7px 8px',borderRadius:999,background:'var(--bg)',border:'1px solid var(--border)'}}>
+                  <span style={{position:'relative'}}>
+                    <RepAvatar rep={u.name} config={config} size={30} bgOverride="var(--bg)"/>
+                    <span title={s.label} style={{position:'absolute',bottom:-1,right:-1,width:10,height:10,borderRadius:'50%',background:s.color,border:'2px solid var(--bg)'}}/>
+                  </span>
+                  <div style={{lineHeight:1.25}}>
+                    <div style={{fontSize:13,fontWeight:700}}>{u.name}{u.name===presence.me && <span style={{fontSize:10,fontWeight:700,color:'var(--text-light)',marginLeft:5}}>(you)</span>}</div>
+                    <div style={{fontSize:11,fontWeight:600,color:s.color,display:'flex',alignItems:'center',gap:5}}>
+                      {s.label}{s.key!=='active' && <span style={{color:'var(--text-light)',fontWeight:500}}>· active {fmtAgo(s.idleMs)}</span>}
+                    </div>
+                  </div>
+                </div>
+              );})}
+            </div>
+          </div>
+        )}
 
         {/* ── Header: title + day nav + period ── */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,flexWrap:'wrap',marginBottom:20}}>
@@ -7430,6 +7479,39 @@ function App() {
   const [currentUser,setCurrentUser]=useState(()=>{ try{return JSON.parse(localStorage.getItem('currentUser')||'null');}catch(e){return null;} });
   // Stamp error reports with who's signed in.
   useEffect(()=>{ ERR_USER = currentUser||null; },[currentUser]);
+  // ── Live presence ──────────────────────────────────────────
+  // Heartbeat every 25s (proves the tab is open) + track real activity
+  // (mouse/keyboard) so we can tell Active vs Idle vs Away. Poll the shared
+  // `presence` table every 15s to render who's online and toast new logins.
+  const [onlineUsers,setOnlineUsers]=useState([]);
+  useEffect(()=>{
+    if(!SB || !currentUser){ setOnlineUsers([]); return; }
+    const me=currentUser.name, role=currentUser.role||'';
+    let lastActive=Date.now();
+    const bump=()=>{ lastActive=Date.now(); };
+    const acts=['mousemove','mousedown','keydown','scroll','touchstart'];
+    acts.forEach(ev=>window.addEventListener(ev,bump,{passive:true}));
+    const beat=()=>{ try{ SB.from('presence').upsert({name:me,role,last_seen:new Date().toISOString(),last_active:new Date(lastActive).toISOString(),updated_at:new Date().toISOString()},{onConflict:'name'}).then(()=>{},()=>{}); }catch(e){} };
+    beat();
+    const hb=setInterval(beat,25000);
+    const seen={cur:null};   // null until first poll, so we don't toast everyone on load
+    const poll=()=>{ try{ SB.from('presence').select('name,role,last_seen,last_active').then(({data,error})=>{
+      if(error||!data) return;
+      const now=Date.now();
+      const online=data.filter(u=> now-new Date(u.last_seen).getTime() < 90000)
+                       .sort((a,b)=> a.name===me?-1 : (b.name===me?1 : String(a.name).localeCompare(String(b.name))));
+      const names=new Set(online.map(u=>u.name));
+      if(seen.cur){ online.forEach(u=>{ if(u.name!==me && !seen.cur.has(u.name)) addToast(`🟢 ${u.name} just logged in`,'info'); }); }
+      seen.cur=names;
+      setOnlineUsers(online);
+    },()=>{}); }catch(e){} };
+    poll();
+    const pl=setInterval(poll,15000);
+    // Best-effort: on tab close, push last_seen into the past so we drop off fast.
+    const bye=()=>{ try{ SB.from('presence').update({last_seen:new Date(Date.now()-3600000).toISOString()}).eq('name',me).then(()=>{},()=>{}); }catch(e){} };
+    window.addEventListener('beforeunload',bye);
+    return ()=>{ clearInterval(hb); clearInterval(pl); acts.forEach(ev=>window.removeEventListener(ev,bump)); window.removeEventListener('beforeunload',bye); };
+  },[currentUser]);
   // Agency folders (per-rep). Persisted to localStorage — membership is by
   // stable leadKey, so folders survive reloads even though leads are in-memory.
   const [agencies,setAgencies]=useState(()=>{ try{return JSON.parse(localStorage.getItem('agencies')||'[]');}catch(e){return [];} });
@@ -9062,6 +9144,7 @@ function App() {
   // Memoised so the provider doesn't hand a new object to every consumer on
   // each render (LeadsTable memoises off it).
   const adminCtxValue=React.useMemo(()=>({isAdmin, name:(currentUser&&currentUser.name)||''}),[isAdmin,currentUser&&currentUser.name]);
+  const presenceValue=React.useMemo(()=>({online:onlineUsers, me:(currentUser&&currentUser.name)||''}),[onlineUsers,currentUser&&currentUser.name]);
 
   // Gate the entire app behind login.
   const resetToken=(()=>{ try{ return new URLSearchParams(window.location.search).get('reset'); }catch(e){ return null; } })();
@@ -9071,6 +9154,7 @@ function App() {
   return (
     <DupContext.Provider value={dupIndex}>
     <AdminContext.Provider value={adminCtxValue}>
+    <PresenceContext.Provider value={presenceValue}>
     <div id="root" style={{display:'flex',flexDirection:'column',height:'100vh'}}>
       {updateBanner}
       {dupBanner}
@@ -9084,6 +9168,20 @@ function App() {
         </div>
         <div style={{flex:1}}/>
         <div className="topbar-right">
+          {onlineUsers.length>0 && (
+            <div title="Who's online — click for details on Home" onClick={()=>{setShowRepSelect(false);setTab('home');}}
+              style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',padding:'3px 11px 3px 5px',borderRadius:20,border:'1px solid rgba(255,255,255,.14)',marginRight:4}}>
+              <div style={{display:'flex'}}>
+                {onlineUsers.slice(0,5).map((u,i)=>{ const s=presenceStatus(u); return (
+                  <span key={u.name} title={`${u.name} — ${s.label}`} style={{position:'relative',marginLeft:i?-9:0,zIndex:20-i}}>
+                    <RepAvatar rep={u.name} config={config} size={26} bgOverride="#17172a"/>
+                    <span style={{position:'absolute',bottom:-1,right:-1,width:9,height:9,borderRadius:'50%',background:s.color,border:'2px solid #17172a'}}/>
+                  </span>
+                );})}
+              </div>
+              <span style={{fontSize:12,fontWeight:700,color:'#fff',whiteSpace:'nowrap',letterSpacing:.2}}>{onlineUsers.length} online</span>
+            </div>
+          )}
           <button className="topbar-icon-btn" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </button>
@@ -9292,6 +9390,7 @@ function App() {
         onKeepAll={()=>{ addToast(`${importWarn.length} recently-contacted lead(s) kept as-is`,'info'); setImportWarn(null); }}
         onClose={()=>setImportWarn(null)}/>}
     </div>
+    </PresenceContext.Provider>
     </AdminContext.Provider>
     </DupContext.Provider>
   );
