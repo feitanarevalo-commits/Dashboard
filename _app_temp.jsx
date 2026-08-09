@@ -4086,7 +4086,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
         {/* row 1 — profile + primary/secondary actions */}
         <div style={{display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
           <div style={{display:'flex',alignItems:'center',gap:13,minWidth:0}}>
-            <RepAvatar rep={rep} config={config} size={44} online bgOverride={repColor}/>
+            <RepAvatar rep={rep} config={config} size={44} bgOverride={repColor}/>
             <div style={{minWidth:0}}>
               <div style={{fontFamily:SG,fontSize:20,fontWeight:700,letterSpacing:'-.02em',lineHeight:1.1,color:'#fff'}}>{rep}'s Dashboard</div>
               <div style={{marginTop:3,fontSize:12.5,color:'#a1a1ac',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
