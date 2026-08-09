@@ -2742,7 +2742,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   // including untouched bulk-sheet imports). `imported`/`fresh`/`sourced` count
   // QUALIFIED leads only — a rep who imports 2,000 raw rows from a sheet hasn't
   // sourced 2,000 fresh leads, and the board used to read as if they had.
-  const EMPTY=()=>({assigned:0,imported:0,potentials:0,potentialNow:0,contacted:0,pending:0,fresh:0,toWork:0,sourced:0});
+  const EMPTY=()=>({assigned:0,imported:0,potentials:0,potentialNow:0,contacted:0,contactedNow:0,pending:0,fresh:0,toWork:0,sourced:0});
   function buildStats(w){
     const inW=d=>{ const s=String(d||'').slice(0,10); return !!s && s>=w.from && s<=w.to; };
     const byRep={}, byCamp={}, team=EMPTY();
@@ -2783,6 +2783,13 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
       if((l.tags||[]).includes('Potential')){
         if(rep){ bucket(rep,null).potentialNow++; camps.forEach(c=>bucket(rep,c).potentialNow++); }
         camps.forEach(c=>byCamp[c].potentialNow++); team.potentialNow++;
+      }
+      // Contacted leads the rep is HOLDING right now (tagged Contacted), independent
+      // of the window — the headline "Contacted" metric. `contacted` above stays the
+      // window flow (contacted in this period, by last-contact date).
+      if(isDirectContacted(l)){
+        if(rep){ bucket(rep,null).contactedNow++; camps.forEach(c=>bucket(rep,c).contactedNow++); }
+        camps.forEach(c=>byCamp[c].contactedNow++); team.contactedNow++;
       }
       // Potentials are credited to WHOEVER tagged it, from the lead's timeline.
       (l.history||[]).forEach(e=>{
@@ -2865,11 +2872,11 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
 
   // ── Rep rows ──────────────────────────────────────────────
   const orderIdx=n=>{ const i=REP_ORDER.indexOf(n); return i<0?REP_ORDER.length+1:i; };
-  const metricLabel={potentialNow:'POTENTIALS',assigned:'ASSIGNED',contacted:'CONTACTED'}[repMetric];
+  const metricLabel={potentialNow:'POTENTIALS',assigned:'ASSIGNED',contactedNow:'CONTACTED'}[repMetric];
   const metricTip={
     potentialNow:'Leads this rep is holding as Potential right now — the same number they see in their own Potential tab. Not limited to the selected window.',
     assigned:'Everything that landed on this rep inside the selected window.',
-    contacted:'Leads this rep contacted inside the selected window (by last-contact date).',
+    contactedNow:'Leads this rep has contacted (tagged Contacted) that they are holding right now. Not limited to the selected window.',
   }[repMetric];
   const periodWord = period==='daily' ? (dayOffset===0?'today':'that day') : period==='weekly' ? 'this week' : 'this month';
   let repRows=reps.map(rep=>{
@@ -3131,13 +3138,15 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
             <div style={{fontSize:11.5,color:'var(--text-dim)',marginTop:2}}>
               {repMetric==='potentialNow'
                 ? `Potential leads each rep is holding right now · +N ${periodWord} is what they tagged in the window`
+                : repMetric==='contactedNow'
+                ? `Contacted leads each rep is holding right now (not limited to ${periodWord})`
                 : `Showing ${metricLabel.toLowerCase()} in this window`} · click a rep to open their dashboard
             </div>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:9,flexWrap:'wrap'}}>
             <span style={{fontSize:9.5,fontWeight:700,letterSpacing:'.1em',color:'var(--text-light)'}}>BAR</span>
             <div style={track}>
-              {[{id:'potentialNow',label:'Potentials'},{id:'assigned',label:'Assigned'},{id:'contacted',label:'Contacted'}].map(m=>(
+              {[{id:'potentialNow',label:'Potentials'},{id:'assigned',label:'Assigned'},{id:'contactedNow',label:'Contacted'}].map(m=>(
                 <button key={m.id} onClick={()=>setRepMetric(m.id)} style={pill(repMetric===m.id)}>{m.label}</button>
               ))}
             </div>
