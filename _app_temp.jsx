@@ -9168,20 +9168,6 @@ function App() {
         </div>
         <div style={{flex:1}}/>
         <div className="topbar-right">
-          {onlineUsers.length>0 && (
-            <div title="Who's online — click for details on Home" onClick={()=>{setShowRepSelect(false);setTab('home');}}
-              style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',padding:'3px 11px 3px 5px',borderRadius:20,border:'1px solid rgba(255,255,255,.14)',marginRight:4}}>
-              <div style={{display:'flex'}}>
-                {onlineUsers.slice(0,5).map((u,i)=>{ const s=presenceStatus(u); return (
-                  <span key={u.name} title={`${u.name} — ${s.label}`} style={{position:'relative',marginLeft:i?-9:0,zIndex:20-i}}>
-                    <RepAvatar rep={u.name} config={config} size={26} bgOverride="#17172a"/>
-                    <span style={{position:'absolute',bottom:-1,right:-1,width:9,height:9,borderRadius:'50%',background:s.color,border:'2px solid #17172a'}}/>
-                  </span>
-                );})}
-              </div>
-              <span style={{fontSize:12,fontWeight:700,color:'#fff',whiteSpace:'nowrap',letterSpacing:.2}}>{onlineUsers.length} online</span>
-            </div>
-          )}
           <button className="topbar-icon-btn" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </button>
