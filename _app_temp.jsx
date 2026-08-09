@@ -1782,7 +1782,10 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
       const j=await r.json().catch(()=>({}));
       if(j && j.ok!==false){
         const subs=String(j.subs||'').trim(), cid=String(j.channelId||'').trim(), nm=String(j.name||'').trim();
-        const dead=j.notFound || (!cid && !subs && !nm);
+        // Broken only on an explicit not-found (real 404); an empty lookup response
+        // (e.g. an unresolvable @handle URL, or a rate-limited API) is treated as
+        // "still fine" so the false "bad link" badge clears.
+        const dead=j.notFound === true;
         if(!dead) patchLead(lead.id,{ urlBroken:false, channelId:lead.channelId||cid, followers:String(lead.followers||'').trim()?lead.followers:(subs||lead.followers) });
       }
     }catch(e){}
@@ -8379,7 +8382,12 @@ function App() {
           const j=await r.json().catch(()=>({}));
           if(!j || j.ok===false) return;   // lookup itself failed — leave the lead as-is
           const subs=String(j.subs||'').trim(), cid=String(j.channelId||'').trim(), nm=String(j.name||'').trim();
-          const dead = j.notFound || (!cid && !subs && !nm);
+          // Only flag BROKEN when the lookup explicitly says the channel doesn't
+          // exist (a real 404). An empty response is NOT proof the link is bad —
+          // it happens for @handle / custom (/c/, /user/) URLs the lookup can't
+          // resolve and when the API is rate-limited/quota'd — so those stay as-is
+          // (and any earlier false "broken" flag gets cleared by the else branch).
+          const dead = j.notFound === true;
           // Only record when the bad-link verdict actually FLIPS, so a repeat
           // sweep doesn't stack an identical entry on every lead each time.
           const actor=(currentUser&&currentUser.name)||'System';
