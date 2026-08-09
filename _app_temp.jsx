@@ -7590,6 +7590,28 @@ function App() {
   const [showSettings,setShowSettings]=useState(false);
   const [activeRep,setActiveRep]=useState(()=>localStorage.getItem('activeRep')||null);
   const [showRepSelect,setShowRepSelect]=useState(false);
+  // ── Back navigation: remember where you were so a Back button can return to the
+  // most recent view. Tracks the full nav state (tab + active rep + rep-select).
+  const navStack=useRef([]);
+  const lastNav=useRef({tab,activeRep,showRepSelect});
+  const backingRef=useRef(false);
+  const [canBack,setCanBack]=useState(false);
+  useEffect(()=>{
+    const cur={tab,activeRep,showRepSelect};
+    const p=lastNav.current;
+    if(p.tab!==cur.tab || p.activeRep!==cur.activeRep || p.showRepSelect!==cur.showRepSelect){
+      // Record the view we just LEFT (unless this change was itself a Back).
+      if(!backingRef.current){ navStack.current.push(p); if(navStack.current.length>60) navStack.current.shift(); }
+      backingRef.current=false; lastNav.current=cur; setCanBack(navStack.current.length>0);
+    }
+  },[tab,activeRep,showRepSelect]);
+  function goBack(){
+    if(!navStack.current.length) return;
+    const prev=navStack.current.pop();
+    backingRef.current=true;   // so the effect above doesn't re-record this as a forward nav
+    setShowRepSelect(prev.showRepSelect); setActiveRep(prev.activeRep); setTab(prev.tab);
+    setCanBack(navStack.current.length>0);
+  }
   const [darkMode,setDarkMode]=useState(()=>localStorage.getItem('darkMode')==='true');
   const [currentUser,setCurrentUser]=useState(()=>{ try{return JSON.parse(localStorage.getItem('currentUser')||'null');}catch(e){return null;} });
   // Stamp error reports with who's signed in.
@@ -9309,6 +9331,11 @@ function App() {
             <div className="tagline">Lead Management</div>
           </div>
         </div>
+        <button className="topbar-icon-btn" onClick={goBack} disabled={!canBack}
+          title="Back to your previous view" aria-label="Back"
+          style={{marginLeft:10,opacity:canBack?1:.35,cursor:canBack?'pointer':'default'}}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
         <div style={{flex:1}}/>
         <div className="topbar-right">
           <button className="topbar-icon-btn" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
