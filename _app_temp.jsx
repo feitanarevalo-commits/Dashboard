@@ -2275,6 +2275,62 @@ function fmtCloseDate(iso){
 function isNegCloseStatus(s){
   return /not\s*interested|unqualified|not\s*qualif|do\s*not\s*contact|lost|bad\s*fit|dead|reject|declin/i.test(String(s||''));
 }
+// Compact Close-DB search for the rep-dashboard header — type a name/email/URL and
+// get a dropdown of matching Close leads (status, owner, last-contacted, open link).
+// Reuses the same closeSearchWebhook as the full Search Close DB tab.
+function MiniCloseSearch({config}){
+  const wh=(config.closeSearchWebhook||'').trim();
+  const [q,setQ]=useState('');
+  const [open,setOpen]=useState(false);
+  const [loading,setLoading]=useState(false);
+  const [res,setRes]=useState(null);   // {leads,total,err} or null
+  const seq=useRef(0);
+  const boxRef=useRef(null);
+  useEffect(()=>{ const h=e=>{ if(boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  function run(e){ e&&e.preventDefault(); const term=q.trim(); if(!term||!wh) return;
+    const my=++seq.current; setLoading(true); setOpen(true); setRes(null);
+    fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:term})})
+      .then(r=>r.json()).then(d=>{ if(my!==seq.current) return; setRes({leads:(d&&d.leads)||[], total:(d&&d.total)||0, err:(d&&d.ok===false)?(d.error||'failed'):null}); })
+      .catch(()=>{ if(my===seq.current) setRes({leads:[],total:0,err:'search failed'}); })
+      .finally(()=>{ if(my===seq.current) setLoading(false); });
+  }
+  return (
+    <div ref={boxRef} style={{position:'relative'}}>
+      <form onSubmit={run} style={{display:'flex',alignItems:'center',gap:6,background:'#17171f',border:'1px solid #26262f',borderRadius:9,padding:'0 10px',height:34}}>
+        <span style={{color:'#71717a',fontSize:13}}>☁</span>
+        <input value={q} onChange={e=>setQ(e.target.value)} onFocus={()=>{ if(res) setOpen(true); }}
+          placeholder="Search Close DB…" title="Search your Close database by name, email or URL"
+          style={{background:'transparent',border:'none',color:'#f4f4f5',fontSize:13,fontFamily:'inherit',outline:'none',width:158}}/>
+        <button type="submit" disabled={!q.trim()||loading} aria-label="Search Close"
+          style={{background:'none',border:'none',color:q.trim()?'#d4d4d8':'#52525b',cursor:q.trim()?'pointer':'default',fontSize:13,padding:0,lineHeight:1}}>{loading?'…':'🔍'}</button>
+      </form>
+      {open && (res||loading) && (
+        <div style={{position:'absolute',top:'calc(100% + 6px)',right:0,width:340,maxHeight:360,overflowY:'auto',background:'#1b1b23',border:'1px solid #2f2f3a',borderRadius:12,boxShadow:'0 16px 40px -12px rgba(0,0,0,.5)',padding:8,zIndex:60}}>
+          {loading && <div style={{padding:12,color:'#a1a1aa',fontSize:12.5}}>Searching Close…</div>}
+          {!loading && res && res.err && <div style={{padding:12,color:'#f87171',fontSize:12.5}}>Search failed: {res.err}</div>}
+          {!loading && res && !res.err && res.leads.length===0 && <div style={{padding:12,color:'#a1a1aa',fontSize:12.5}}>No Close leads match “{q}”. <span style={{color:'#6b6b76'}}>Likely a fresh lead.</span></div>}
+          {!loading && res && !res.err && res.leads.length>0 && <>
+            <div style={{fontSize:11,color:'#71717a',padding:'2px 6px 6px'}}>{res.total} match{res.total!==1?'es':''}{res.total>res.leads.length?` · showing ${res.leads.length}`:''}</div>
+            {res.leads.slice(0,8).map(l=>{ const neg=isNegCloseStatus(l.status); return (
+              <div key={l.id} style={{padding:'7px 8px',borderRadius:8,display:'flex',flexDirection:'column',gap:3}}>
+                <div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'space-between'}}>
+                  <span style={{fontSize:12.5,fontWeight:600,color:'#f4f4f5',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.channelName||l.name||'—'}</span>
+                  {l.closeUrl && <a href={l.closeUrl} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#818cf8',flexShrink:0,textDecoration:'none'}}>Open ↗</a>}
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:8,fontSize:11,color:'#a1a1aa',flexWrap:'wrap'}}>
+                  {l.status && <span style={{padding:'1px 7px',borderRadius:999,fontWeight:600,background:neg?'#3a1e1e':'#26263a',color:neg?'#f87171':'#a5b4fc'}}>{neg?'⚠ ':''}{l.status}</span>}
+                  {l.assignedTo && <span>{l.assignedTo}</span>}
+                  {l.lastContacted && <span>· {fmtCloseDate(l.lastContacted)}</span>}
+                </div>
+              </div>
+            );})}
+          </>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CloseSearchView({config}) {
   const [q,setQ]=useState('');
   const [leads,setLeads]=useState([]);
@@ -4185,25 +4241,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             </div>
           </div>
           <div style={{flex:1,minWidth:12}}></div>
-          {feats.exportCSV && !isLeadgen && (
-            <div style={{display:'flex',alignItems:'center',gap:6}}>
-              <div style={{display:'flex',alignItems:'center',gap:8,background:'#17171f',border:'1px solid #26262f',borderRadius:9,padding:'0 10px',height:34}}>
-                <span style={{width:7,height:7,borderRadius:'50%',background:'#818cf8',flexShrink:0}}></span>
-                <select value={srCsvCampaign} onChange={e=>setSrCsvCampaign(e.target.value)}
-                  title="Choose which campaign to export to SmartReach (blank = all Potential/HT leads with an email)"
-                  style={{background:'transparent',border:'none',color:'#f4f4f5',fontSize:13,fontFamily:'inherit',cursor:'pointer',outline:'none'}}>
-                  <option value="" style={{background:'#1b1b23',color:'#f4f4f5'}}>SmartReach: all campaigns</option>
-                  {(config.campaigns||[]).map(c=><option key={c.id} value={c.id} style={{background:'#1b1b23',color:'#f4f4f5'}}>SmartReach: {c.label} only</option>)}
-                </select>
-              </div>
-              <button onClick={()=>exportSmartReachCSV(smartReachLeads,srFilename)} disabled={!srCount}
-                aria-label="Download SmartReach CSV"
-                title={srCount?`Download the SmartReach CSV of ${rep}'s ${srCsvCampaign?srCsvCampaign+' ':''}${isDayView?('assigned '+quotaDay+' '):''}Potential/HT leads that have an email (${srCount})`:`No emailable Potential/HT leads to export${isDayView?' for '+quotaDay:''}${srCsvCampaign?' in '+srCsvCampaign:''}`}
-                style={{display:'flex',alignItems:'center',gap:5,height:34,padding:'0 12px',background:srCount?'#17171f':'#141419',border:'1px solid #26262f',borderRadius:9,color:srCount?'#d4d4d8':'#52525b',fontSize:13,fontWeight:600,fontFamily:'inherit',cursor:srCount?'pointer':'not-allowed'}}>
-                ⬇{srCount?` ${srCount}`:''}
-              </button>
-            </div>
-          )}
+          {!isLeadgen && (config.closeSearchWebhook||'').trim() && <MiniCloseSearch config={config}/>}
           <button onClick={()=>setShowAdd(true)} title={`Manually add a lead under ${rep}`}
             style={{display:'flex',alignItems:'center',gap:7,background:'#4f46e5',border:'none',color:'#fff',fontSize:13,fontWeight:600,padding:'0 15px',height:34,borderRadius:9,cursor:'pointer',fontFamily:'inherit'}}>
             <span style={{fontSize:16,lineHeight:0}}>+</span> Add Lead
