@@ -8040,40 +8040,57 @@ function App() {
     logH('♻️',`Recycle pick-up: ${ids.length} lead(s) → ${me}, re-tagged Potential`, before.length?{type:'revert',before,after}:null);
   }
 
-  // Distribute lead-gen JC's QUALIFIED (Potential-tagged) leads to the sales team.
-  // RULE: high-ticket Potentials all go to Rein; every other Potential is split
-  // EVENLY across Mikka, Chase and Pen — with fresh and imported balanced
-  // SEPARATELY so each rep gets an even mix of both.
+  // Distribute lead-gen JC's QUALIFIED (Potential-tagged) leads to the sales team by
+  // category:
+  //   • High-Ticket → Rein
+  //   • MSN (+ anything not HT/VIRALS) → split evenly across Chase / Rein / Mikka
+  //   • VIRALS → split evenly across Chase / Mikka
+  // Fresh and imported are round-robined SEPARATELY within each split so every rep
+  // gets an even mix of both. Only Potential-tagged JC leads are moved.
   function jcPotentialLeads(){ return leads.filter(l=>l.assignedTo==='JC' && (l.tags||[]).includes('Potential')); }
   function autoAssignJC(){
-    // Every sales-floor rep (role 'employee') shares JC's distributed leads —
-    // this includes Bella/Mica and any future hire automatically. HT still → Rein.
-    const REST=(config.users||[]).filter(u=>u.role==='employee').map(u=>u.name);
-    if(!REST.length){ addToast('No sales reps configured to distribute to','info'); return; }
-    const isHT = l => l.pool==='highticket' || (l.tags||[]).includes('HT') || parseFollowers(l.followers)>=500000;
+    const valid=new Set((config.salesReps||[]).concat((config.users||[]).map(u=>u.name)));
+    const pick=arr=>arr.filter(r=>valid.has(r));
+    const HT_REP = valid.has('Rein') ? 'Rein' : null;
+    const MSN_REPS = pick(['Chase','Rein','Mikka']);      // MSN + general potentials
+    const VIRALS_REPS = pick(['Chase','Mikka']);
     const targets = jcPotentialLeads();
-    if(!targets.length){ addToast("No qualified (Potential) leads under JC to distribute",'info'); return; }
+    if(!targets.length){ addToast("No Potential-tagged leads under JC to distribute — tag his leads Potential first.",'info'); return; }
+    const isHT = l => l.pool==='highticket' || (l.tags||[]).includes('HT') || parseFollowers(l.followers)>=500000;
+    const isVirals = l => l.pool==='virals' || (l.campaigns||[]).some(c=>/viral/i.test(String(c)));
     const ht = targets.filter(isHT);
-    const nonHT = targets.filter(l=>!isHT(l));
-    const fresh = nonHT.filter(l=>leadOrigin(l)==='Fresh');
-    const imported = nonHT.filter(l=>leadOrigin(l)!=='Fresh');
-    if(!window.confirm(`Distribute ${targets.length} of JC's qualified (Potential) lead(s)?\n\n• ${ht.length} high-ticket → Rein\n• ${nonHT.length} other (${fresh.length} fresh + ${imported.length} imported) → split evenly across ${REST.join(' / ')}`)) return;
+    const rest = targets.filter(l=>!isHT(l));
+    const virals = rest.filter(isVirals);
+    const msn = rest.filter(l=>!isVirals(l));             // MSN + anything else
+    const map={}; const tally={};
+    const inc=(r,l)=>{ if(!r) return; map[l.id]=r; tally[r]=(tally[r]||0)+1; };
+    // fresh & imported balanced independently across a rep list
+    const spread=(list,reps)=>{ if(!reps.length) return;
+      const fr=list.filter(l=>leadOrigin(l)==='Fresh'), im=list.filter(l=>leadOrigin(l)!=='Fresh');
+      let a=0; fr.forEach(l=>inc(reps[a++%reps.length],l));
+      let b=0; im.forEach(l=>inc(reps[b++%reps.length],l));
+    };
+    ht.forEach(l=>inc(HT_REP,l));
+    spread(msn, MSN_REPS);
+    spread(virals, VIRALS_REPS);
+    const moved = targets.filter(l=>map[l.id]);
+    if(!moved.length){ addToast('No target reps (Rein / Chase / Mikka) available to distribute to','info'); return; }
+    const summary = `Distribute ${moved.length} of JC's Potential lead(s)?\n\n`
+      + `• ${ht.filter(l=>map[l.id]).length} High-Ticket → ${HT_REP||'(Rein not available)'}\n`
+      + `• ${msn.filter(l=>map[l.id]).length} MSN/other → ${MSN_REPS.join(' / ')||'(none)'}\n`
+      + `• ${virals.filter(l=>map[l.id]).length} VIRALS → ${VIRALS_REPS.join(' / ')||'(none)'}\n\n`
+      + `Fresh & imported are balanced within each split.\nResult: ${Object.keys(tally).sort().map(r=>`${r} +${tally[r]}`).join(' · ')}`;
+    if(!window.confirm(summary)) return;
+    // Credit JC (the lead-gen who qualified it) via qualifiedBy so his KPI survives
+    // the handoff; assignment date resets to the handoff day.
     const today=new Date().toISOString().split('T')[0];
-    const map={}; const tally={Rein:0}; REST.forEach(r=>{ tally[r]=0; });
-    ht.forEach(l=>{ map[l.id]='Rein'; tally.Rein++; });
-    // Fresh and imported each round-robin independently so both are balanced per rep.
-    let fi=0; fresh.forEach(l=>{ const rep=REST[fi++%REST.length]; map[l.id]=rep; tally[rep]++; });
-    let ii=0; imported.forEach(l=>{ const rep=REST[ii++%REST.length]; map[l.id]=rep; tally[rep]++; });
-    // Credit JC (the lead-gen who sourced/qualified it) via qualifiedBy — this
-    // survives the reassignment so his lead-gen KPI stays accurate even though the
-    // lead now belongs to a sales rep. Assignment date resets to the handoff day.
     const me=(currentUser&&currentUser.name)||'';
-    const before=targets.map(undoSnap);
-    const after=targets.map(l=>({...undoSnap(l), assignedTo:map[l.id], dateAssigned:today}));
+    const before=moved.map(undoSnap);
+    const after=moved.map(l=>({...undoSnap(l), assignedTo:map[l.id], dateAssigned:today}));
     setLeads(ls=>ls.map(l=> map[l.id] ? {...l,assignedTo:map[l.id],dateAssigned:today,qualifiedBy:l.qualifiedBy||l.assignedTo,handedOffAt:today,
-      history:pushHist(l,[histEvent(me,'assigned',{from:l.assignedTo||'',to:map[l.id],via:'auto-assign'})])} : l));
-    addToast(`Distributed JC's Potential leads → Rein ${tally.Rein} (high-ticket) · ${REST.map(r=>`${r} ${tally[r]}`).join(' · ')}`,'success');
-    logH('⚡',`Auto-assigned ${targets.length} JC Potential leads — high-ticket→Rein, rest→${REST.join('/')}`,{type:'revert',before,after});
+      history:pushHist(l,[histEvent(me,'assigned',{from:l.assignedTo||'',to:map[l.id],via:'auto-assign JC'})])} : l));
+    addToast(`Distributed JC's Potential leads → ${Object.keys(tally).sort().map(r=>`${r} ${tally[r]}`).join(' · ')}`,'success');
+    logH('⚡',`Auto-assigned ${moved.length} JC Potential leads — HT→Rein · MSN→Chase/Rein/Mikka · VIRALS→Chase/Mikka`,{type:'revert',before,after});
   }
   function bulkDelete(ids){
     if(!ids||!ids.length) return;
