@@ -74,6 +74,7 @@
     .statusrow.err{color:var(--bad)}
     .spinner{width:16px;height:16px;border:2px solid var(--line-hi);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;flex:none}
     @keyframes spin{100%{transform:rotate(360deg)}}
+    .hidden{display:none !important}
 
     .grid{display:flex; flex-direction:column; gap:12px}
     .clip{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; display:flex; gap:16px; transition:transform .12s,border-color .12s,box-shadow .12s}
@@ -128,8 +129,8 @@
     </div>
 
     <div class="panel">
-      <label class="lbl" for="ytUrl">YouTube link <span style="color:var(--faint);font-weight:500">— paste a link and we’ll transcribe + find the highlights automatically</span></label>
-      <input type="text" id="ytUrl" placeholder="https://www.youtube.com/watch?v=..." style="height:48px;font-size:15px">
+      <label class="lbl" for="ytUrl">Video link <span style="color:var(--faint);font-weight:500">— YouTube (finds highlights) or a direct .mp4 URL (finds highlights AND can compile them into a reel)</span></label>
+      <input type="text" id="ytUrl" placeholder="https://www.youtube.com/watch?v=...  or  https://.../video.mp4" style="height:48px;font-size:15px">
       <div class="divider">or paste a transcript</div>
       <textarea id="transcript" placeholder="0:00  Welcome back to the show...&#10;0:15  The biggest mistake I made was hiring too fast...&#10;0:45  Here's the one metric I wish I tracked earlier..."></textarea>
       <div class="opts">
@@ -167,13 +168,27 @@
 
     <div class="statusrow" id="status"></div>
     <div class="grid" id="results"></div>
+
+    <div id="reelBar" class="hidden" style="margin-top:18px; display:flex; gap:12px; align-items:center; flex-wrap:wrap">
+      <button class="btn primary" id="reelBtn"><svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;stroke:#fff;fill:none"><rect x="2" y="4" width="14" height="16" rx="2"/><path d="M16 9l6-3v12l-6-3"/></svg> Compile these highlights into a reel</button>
+      <span class="reelnote" id="reelNote" style="color:var(--muted);font-size:13px"></span>
+    </div>
+    <div id="reelResult" class="hidden" style="margin-top:14px; background:var(--card); border:1px solid var(--line-hi); border-radius:16px; padding:16px; box-shadow:var(--shadow)">
+      <video id="reelVideo" controls playsinline style="width:100%; border-radius:12px; background:#000; display:block"></video>
+      <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap">
+        <a class="btn primary" id="reelDownload" download>Download reel</a>
+        <a class="btn" id="reelOpen" target="_blank" rel="noopener">Open in new tab</a>
+      </div>
+    </div>
   </div>
   <div class="toast" id="toast"></div>
 
   <script>
     const FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/clip-finder';
+    const REEL_FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/render-compilation';
     const $ = s => document.querySelector(s);
     const results = $('#results'), statusEl = $('#status');
+    let lastClips = [], lastSourceUrl = '';
 
     // theme
     $('#themeBtn').onclick = () => {
@@ -203,7 +218,7 @@
 2:30  When I realized, I called them and admitted it immediately. That honesty is why they signed a two year deal the next week. Transparency wins.`;
 
     $('#exampleBtn').onclick = () => { $('#transcript').value = EXAMPLE; $('#numClips').value = 3; toast('Example transcript loaded'); };
-    $('#clearBtn').onclick = () => { $('#transcript').value=''; $('#ytUrl').value=''; results.innerHTML=''; statusEl.textContent=''; statusEl.classList.remove('err'); };
+    $('#clearBtn').onclick = () => { $('#transcript').value=''; $('#ytUrl').value=''; results.innerHTML=''; statusEl.textContent=''; statusEl.classList.remove('err'); lastClips=[]; lastSourceUrl=''; $('#reelBar').classList.add('hidden'); $('#reelResult').classList.add('hidden'); };
 
     function scoreClass(n){ return n>=85?'good':n>=70?'mid':'low'; }
 
@@ -254,12 +269,48 @@
         const secs = ((performance.now()-t0)/1000).toFixed(1);
         statusEl.textContent = `Found ${j.count} clip${j.count===1?'':'s'} in ${secs}s · ${j.model}${j.via==='supadata'?' · auto-transcribed':''}`;
         render(j.clips, vid);
+        // Offer to compile the highlights into a reel — only possible when the source is a fetchable video (not YouTube).
+        lastClips = j.clips || []; lastSourceUrl = url;
+        $('#reelResult').classList.add('hidden');
+        const renderable = url && /^https?:\/\//.test(url) && !vid;
+        if(lastClips.length && url){
+          $('#reelBar').classList.remove('hidden');
+          $('#reelBtn').disabled = !renderable;
+          $('#reelNote').textContent = renderable ? '' : 'Reel rendering needs the actual video file — YouTube can’t be pulled. Use a direct .mp4 URL, or add a downloader for YouTube.';
+        } else { $('#reelBar').classList.add('hidden'); }
       }catch(e){
         results.innerHTML='';
         statusEl.textContent = 'Error: ' + e.message;
         statusEl.classList.add('err');
       }finally{ btn.disabled=false; }
     }
+
+    async function compileReel(){
+      if(!lastClips.length || !lastSourceUrl) return;
+      const btn = $('#reelBtn'); btn.disabled = true; statusEl.classList.remove('err');
+      const t0 = performance.now();
+      statusEl.innerHTML = `<span class="spinner"></span> Cutting the highlights and rendering your reel…`;
+      try{
+        const segments = lastClips.map(c => ({ start:c.start, end:c.end, title:c.title }));
+        const sub = await fetch(REEL_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sourceUrl:lastSourceUrl, segments, aspect:'16:9', transition:'smooth' }) });
+        const sj = await sub.json();
+        if(!sj.ok || !sj.renderId) throw new Error(sj.error || 'Render did not start.');
+        const rid = sj.renderId;
+        while(true){
+          await new Promise(r=>setTimeout(r,5000));
+          const pr = await fetch(REEL_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ renderId: rid }) });
+          const pj = await pr.json();
+          if(!pj.ok) throw new Error(pj.error || 'Poll failed.');
+          const secs = Math.round((performance.now()-t0)/1000);
+          statusEl.innerHTML = `<span class="spinner"></span> Rendering reel… (${pj.status}, ${secs}s)`;
+          if(pj.status==='done' && pj.url){ statusEl.textContent = `Reel ready in ${secs}s.`; $('#reelVideo').src = pj.url; $('#reelDownload').href = pj.url; $('#reelOpen').href = pj.url; $('#reelResult').classList.remove('hidden'); $('#reelResult').scrollIntoView({behavior:'smooth'}); break; }
+          if(pj.status==='failed') throw new Error('Render failed: ' + (pj.error||'unknown'));
+          if(secs>600) throw new Error('Render timed out.');
+        }
+      }catch(e){ statusEl.textContent = 'Error: ' + e.message; statusEl.classList.add('err'); }
+      finally{ btn.disabled = false; }
+    }
+    $('#reelBtn').onclick = compileReel;
     $('#runBtn').onclick = run;
     $('#transcript').addEventListener('keydown', e => { if((e.metaKey||e.ctrlKey) && e.key==='Enter') run(); });
   </script>
