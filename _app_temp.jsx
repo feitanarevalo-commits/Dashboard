@@ -2499,7 +2499,7 @@ function getKbExcerpt(body, n){
   return '';
 }
 // Unified Knowledge Base UI — Tools launchpad + Manual articles (same design language).
-function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmin,onAddArticle,onEditArticle,onDeleteArticle,onDeleteTool,dark}) {
+function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmin,onAddArticle,onEditArticle,onDeleteArticle,onDeleteTool,onTour,dark}) {
   // Accent options: Blue #2f6bf0/#7db0ff · Indigo #5b5bd6/#a6a6ff · Teal #0f9b8e/#67e8d5 · Violet #7c5cfc/#c4a6ff
   const accent='#5b5bd6', accentLight='#a6a6ff';
   // KB surface palette — the dark hero is fixed; the reading surfaces (page,
@@ -2602,6 +2602,7 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth="2.2" strokeLinecap="round" style={{position:'absolute',left:16,top:'50%',transform:'translateY(-50%)'}}><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
               <input className="kbl-search" value={query} onChange={e=>setQuery(e.target.value)} placeholder={searchPh} style={{width:'100%',padding:'13px 16px 13px 46px',fontFamily:'inherit',fontSize:15,color:'#fff',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.14)',borderRadius:13,outline:'none'}}/>
             </div>
+            {onTour && <button onClick={onTour} title="A quick, interactive walkthrough of how to navigate the dashboard" style={{display:'inline-flex',alignItems:'center',gap:7,padding:'13px 18px',borderRadius:13,fontSize:14,fontWeight:600,background:'rgba(255,255,255,.12)',color:'#fff',border:'1px solid rgba(255,255,255,.22)',cursor:'pointer',fontFamily:'inherit',whiteSpace:'nowrap'}}>🧭 Dashboard Tour</button>}
             {isManual && isAdmin && <button onClick={()=>onAddArticle&&onAddArticle()} title="Add a new article" style={{display:'inline-flex',alignItems:'center',gap:7,padding:'13px 18px',borderRadius:13,fontSize:14,fontWeight:600,background:accent,color:'#fff',border:'none',cursor:'pointer',boxShadow:`0 8px 22px -10px ${accent}`,fontFamily:'inherit',whiteSpace:'nowrap'}}>➕ Add Article</button>}
           </div>
         </div>
@@ -2694,11 +2695,62 @@ function renderKbBody(text){
   });
   flush(); return out;
 }
+// Interactive, step-by-step walkthrough of how a SALES REP gets around the
+// dashboard. Launched from the Knowledge Base. No real screenshots — self-
+// contained cards so it never goes stale on a UI tweak.
+function DashboardTour({onClose}){
+  const steps=[
+    {icon:'👋',title:'Welcome to your dashboard',body:<>This quick tour shows how to get around and work your leads. It's written for <b>sales reps</b>, so it covers just what you use. Move with <b>Next / Back</b>, jump with the dots, or close anytime.</>},
+    {icon:'🧭',title:'The sidebar is your map',body:<>Everything lives in the <b>left sidebar</b>, grouped into <b>Main</b> (your day-to-day pages), <b>Lead Filters</b> (leads by status), <b>Lead Pools</b> (fresh leads to claim) and <b>Campaigns</b>. Tap <b>«</b> at the top to shrink it to icons for more room.</>},
+    {icon:'📊',title:'Home &amp; your own dashboard',body:<><b>Home</b> shows the team board. Click <b>your own name</b> there (or your <b>avatar → My Dashboard</b>) to open <b>your</b> dashboard — your KPIs, your leads and your daily numbers. At the top there's a mini <b>☁ Close search</b> to check if a creator is already in Close.</>},
+    {icon:'⚡',title:'Lead Pools — claim fresh leads',body:<>Under <b>Lead Pools</b> you'll find <b>High Ticket</b>, <b>MSN</b> and <b>VIRALS</b> — pools of freshly-scraped, unclaimed creators split for the team. Open a pool, tick the ones you want, and hit <b>Claim</b> — they become yours and drop into your queue.</>},
+    {icon:'🏷️',title:'Work a lead: qualify → contact',body:<>Once a lead is yours: review it and tag it <b>Potential</b> if it's a good fit, or <b>NQ</b> if not. When you reach out it moves to <b>Contacted</b>. The row actions let you push a lead to <b>Close</b> / <b>SmartReach</b>.</>},
+    {icon:'🔎',title:'Lead Filters — by status',body:<>The <b>Lead Filters</b> section lists your leads by stage — <b>Pending Qualification</b>, <b>NQ</b>, <b>Awaiting Potential</b>, <b>Contacted</b>, <b>For Recycle</b>, <b>Already Partner</b> — each with a live count. <b>For Recycle</b> is shared: grab a cooled-off lead before someone else does.</>},
+    {icon:'◎',title:'Scraper — find leads yourself',body:<>The <b>Scraper</b> searches YouTube for creators by keyword, platform, follower range and language. Results land in your queue to qualify. Your Scraper only shows the leads <b>you</b> scraped.</>},
+    {icon:'◉',title:'Lead Management',body:<><b>Lead Management</b> is your working list of leads not yet sorted into a status tab — assign, qualify or tidy them here. Use the rep chips at the top to filter to just yours.</>},
+    {icon:'🔔',title:'The top bar',body:<>Top-right: <b>🔍 Search (Ctrl/⌘ K)</b> jumps to any lead or page · the <b>🔔 bell</b> shows replies and lead conflicts · the <b>‹ back arrow</b> returns to your previous view · your <b>avatar</b> opens profile, password and dark mode.</>},
+    {icon:'✅',title:"You're all set!",body:<>Your daily flow: <b>claim from a Pool → qualify (Potential / NQ) → contact → push to Close</b>. Check <b>History</b> to see what changed, and you can reopen this tour anytime from the <b>Knowledge Base</b>. Good luck! 🚀</>},
+  ];
+  const [i,setI]=useState(0);
+  const step=steps[i]; const first=i===0; const last=i===steps.length-1;
+  const next=()=>{ if(last) onClose(); else setI(i+1); };
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:600,width:'92vw',display:'flex',flexDirection:'column',overflow:'hidden',padding:0}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'15px 20px',borderBottom:'1px solid var(--border)'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <span style={{fontSize:18}}>🧭</span>
+            <span style={{fontWeight:800,fontSize:15}}>Dashboard Tour</span>
+            <span style={{fontSize:12,color:'var(--text-dim)'}}>· step {i+1} of {steps.length}</span>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:15,padding:'4px 8px'}}>✕</button>
+        </div>
+        <div style={{padding:'30px 26px 20px',textAlign:'center',minHeight:210,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
+          <div style={{fontSize:46,marginBottom:14}}>{step.icon}</div>
+          <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:21,fontWeight:800,marginBottom:12,letterSpacing:'-.01em'}}>{step.title}</div>
+          <div style={{fontSize:14,lineHeight:1.65,color:'var(--text-dim)',maxWidth:470}}>{step.body}</div>
+        </div>
+        <div style={{display:'flex',justifyContent:'center',gap:7,padding:'2px 0 16px'}}>
+          {steps.map((_,k)=><span key={k} onClick={()=>setI(k)} title={`Step ${k+1}`} style={{width:k===i?22:8,height:8,borderRadius:999,background:k===i?'var(--accent)':'var(--border)',cursor:'pointer',transition:'all .2s'}}/>)}
+        </div>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'13px 20px',borderTop:'1px solid var(--border)',background:'var(--bg)'}}>
+          <button className="btn btn-outline btn-sm" onClick={onClose}>Skip</button>
+          <div style={{display:'flex',gap:8}}>
+            {!first && <button className="btn btn-outline btn-sm" onClick={()=>setI(i-1)}>‹ Back</button>}
+            <button className="btn btn-primary btn-sm" onClick={next}>{last?'Done ✓':'Next ›'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function KnowledgeBaseView({articles,tools:toolsProp,isAdmin,onSave,onDelete,onDeleteTool,dark}){
   const tools=toolsProp||(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[]);
   const [view,setView]=useState('tools');           // 'tools' | 'manual'
   const [selectedId,setSelectedId]=useState(null);
   const [editing,setEditing]=useState(null);        // null | 'new' | article object
+  const [tourOpen,setTourOpen]=useState(false);
   const selected = selectedId ? (articles||[]).find(a=>a.id===selectedId) : null;
   return <>
     <KbLaunchpad
@@ -2707,6 +2759,7 @@ function KnowledgeBaseView({articles,tools:toolsProp,isAdmin,onSave,onDelete,onD
       selected={selected}
       onSelect={id=>setSelectedId(id)}
       onBack={()=>setSelectedId(null)}
+      onTour={()=>setTourOpen(true)}
       isAdmin={isAdmin}
       onAddArticle={()=>setEditing('new')}
       onEditArticle={a=>setEditing(a)}
@@ -2719,6 +2772,7 @@ function KnowledgeBaseView({articles,tools:toolsProp,isAdmin,onSave,onDelete,onD
       onSave={a=>{ onSave(a); setEditing(null); if(editing==='new') setSelectedId(a.id); }}
       onClose={()=>setEditing(null)}
     />}
+    {tourOpen && <DashboardTour onClose={()=>setTourOpen(false)}/>}
   </>;
 }
 
