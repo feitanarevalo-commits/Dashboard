@@ -166,16 +166,24 @@ function leadOrigin(lead){
 }
 // Convenience: a Fresh lead is one not yet on Close.
 function isFresh(lead){ return leadOrigin(lead)==='Fresh'; }
-// Where a lead ENTERED the system: a Google-Sheet / agency IMPORT vs sourced in the
-// DASHBOARD (scraper or manual add). Uses the explicit `source` field first, then
-// falls back to the lead's first 'scraped' history event for older records that
-// pre-date the source tag. Returns 'import' | 'dashboard' | 'other'.
+// Where a lead ENTERED the system:
+//   'import'  — Google-Sheet / agency import (source:'import')
+//   'pool'    — a Lead Pool (HighTicket/MSN/VIRALS) filled by the automated scraper;
+//               `l.pool` persists even after a rep claims it, so it's the reliable mark
+//   'scraper' — the in-dashboard Scraper tool (source:'scraper') or a manual add
+//   'other'   — no provenance (e.g. loaded straight from Close, very old records)
+// Falls back to the lead's first 'scraped' history event for records that pre-date the tags.
 function leadSource(l){
   if(!l) return 'other';
   if(l.source==='import') return 'import';
-  if(l.source==='scraper'||l.source==='manual') return 'dashboard';
+  if(l.pool==='highticket'||l.pool==='msn'||l.pool==='virals') return 'pool';
+  if(l.source==='scraper'||l.source==='manual') return 'scraper';
   const sc=(l.history||[]).find(e=>e && e.type==='scraped');
-  if(sc) return String(sc.via||'').toLowerCase().includes('import') ? 'import' : 'dashboard';
+  if(sc){ const v=String(sc.via||'').toLowerCase();
+    if(v.includes('import')) return 'import';
+    if(v.includes('pool')) return 'pool';
+    return 'scraper';
+  }
   return 'other';
 }
 // Was this lead FRESH WHEN WE FOUND IT — i.e. did the rep actually source it?
@@ -2911,16 +2919,18 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
     const d=String(l.dateAssigned||l.addedAt||'').slice(0,10);
     return d>=cur.from && d<=cur.to;
   });
-  const srcImport=srcWinLeads.filter(l=>leadSource(l)==='import').length;
-  const srcDash=srcWinLeads.filter(l=>leadSource(l)==='dashboard').length;
-  const srcOther=srcWinLeads.filter(l=>leadSource(l)==='other').length;
-  const srcAll=srcImport+srcDash+srcOther;
-  // All-time totals (every current lead the viewer can see), for the big picture.
   const srcScope = lockedRep ? leads.filter(l=>l.assignedTo===lockedRep) : leads;
-  const atImport=srcScope.filter(l=>leadSource(l)==='import').length;
-  const atDash=srcScope.filter(l=>leadSource(l)==='dashboard').length;
-  const atOther=srcScope.filter(l=>leadSource(l)==='other').length;
-  const atAll=atImport+atDash+atOther;
+  const srcCount=(list,k)=>list.filter(l=>leadSource(l)===k).length;
+  // Three headline categories the user cares about + a muted 'other' residual.
+  const srcCats=[
+    {key:'import', label:'📄 Sheet import', color:'#3B82F6', w:srcCount(srcWinLeads,'import'),  a:srcCount(srcScope,'import')},
+    {key:'pool',   label:'🗂 Lead pools',   color:'#8B5CF6', w:srcCount(srcWinLeads,'pool'),    a:srcCount(srcScope,'pool')},
+    {key:'scraper',label:'🔎 Scraper',      color:'#14B8A6', w:srcCount(srcWinLeads,'scraper'), a:srcCount(srcScope,'scraper')},
+  ];
+  const srcOther=srcCount(srcWinLeads,'other');
+  const atOther=srcCount(srcScope,'other');
+  const srcAll=srcCats.reduce((s,c)=>s+c.w,0)+srcOther;
+  const atAll=srcCats.reduce((s,c)=>s+c.a,0)+atOther;
 
   return (
     <div className="home-content" style={{fontFamily:SG,color:'var(--text)',padding:'22px 24px 60px'}}>
@@ -2985,7 +2995,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
           </div>
         </div>
 
-        {/* ── Lead sources: sheet import vs dashboard-scraped ── */}
+        {/* ── Lead sources: sheet import · lead pools · scraper ── */}
         {atAll>0 && (
           <div style={{...card,padding:'16px 18px',marginBottom:16}}>
             <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',gap:16,flexWrap:'wrap'}}>
@@ -2993,31 +3003,27 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                 <div style={{fontSize:11,fontWeight:800,letterSpacing:'.06em',color:'var(--text-dim)'}}>LEAD SOURCES · {periodWord}</div>
                 <div style={{fontSize:11.5,color:'var(--text-light)',marginTop:2}}>{srcAll>0 ? `where the ${fmt(srcAll)} lead${srcAll!==1?'s':''} added ${periodWord} came from` : `No new leads added ${periodWord}`}</div>
               </div>
-              {srcAll>0 && <div style={{display:'flex',gap:26,flexWrap:'wrap'}}>
-                <div style={{textAlign:'right'}}>
-                  <div style={{fontSize:28,fontWeight:800,fontFamily:MONO,lineHeight:1,color:'#3B82F6'}}>{fmt(srcImport)}</div>
-                  <div style={{fontSize:11,fontWeight:700,color:'var(--text-dim)',marginTop:4}}>📄 Sheet import <span style={{color:'var(--text-light)',fontWeight:600}}>· {Math.round(srcImport/srcAll*100)}%</span></div>
-                </div>
-                <div style={{textAlign:'right'}}>
-                  <div style={{fontSize:28,fontWeight:800,fontFamily:MONO,lineHeight:1,color:'#8B5CF6'}}>{fmt(srcDash)}</div>
-                  <div style={{fontSize:11,fontWeight:700,color:'var(--text-dim)',marginTop:4}}>🖥 Dashboard <span style={{color:'var(--text-light)',fontWeight:600}}>· {Math.round(srcDash/srcAll*100)}%</span></div>
-                </div>
-                {srcOther>0 && <div style={{textAlign:'right'}} title="Leads whose source predates provenance tracking (e.g. loaded from Close)">
-                  <div style={{fontSize:28,fontWeight:800,fontFamily:MONO,lineHeight:1,color:'var(--text-dim)'}}>{fmt(srcOther)}</div>
+              {srcAll>0 && <div style={{display:'flex',gap:22,flexWrap:'wrap'}}>
+                {srcCats.map(c=>(
+                  <div key={c.key} style={{textAlign:'right'}}>
+                    <div style={{fontSize:26,fontWeight:800,fontFamily:MONO,lineHeight:1,color:c.color}}>{fmt(c.w)}</div>
+                    <div style={{fontSize:11,fontWeight:700,color:'var(--text-dim)',marginTop:4,whiteSpace:'nowrap'}}>{c.label} <span style={{color:'var(--text-light)',fontWeight:600}}>· {Math.round(c.w/srcAll*100)}%</span></div>
+                  </div>
+                ))}
+                {srcOther>0 && <div style={{textAlign:'right'}} title="Leads with no provenance signal (e.g. loaded straight from Close)">
+                  <div style={{fontSize:26,fontWeight:800,fontFamily:MONO,lineHeight:1,color:'var(--text-dim)'}}>{fmt(srcOther)}</div>
                   <div style={{fontSize:11,fontWeight:700,color:'var(--text-light)',marginTop:4}}>Other</div>
                 </div>}
               </div>}
             </div>
             {srcAll>0 && <div style={{display:'flex',height:8,borderRadius:999,overflow:'hidden',background:'var(--bg)',gap:2,marginTop:14}}>
-              <div style={{background:'#3B82F6',width:pct(srcImport,srcAll)+'%'}} title={`Sheet import: ${srcImport}`}/>
-              <div style={{background:'#8B5CF6',width:pct(srcDash,srcAll)+'%'}} title={`Dashboard: ${srcDash}`}/>
+              {srcCats.map(c=><div key={c.key} style={{background:c.color,width:pct(c.w,srcAll)+'%'}} title={`${c.label}: ${c.w}`}/>)}
               <div style={{background:'var(--border)',width:pct(srcOther,srcAll)+'%'}} title={`Other: ${srcOther}`}/>
             </div>}
             {/* all-time total across every current lead */}
             <div style={{marginTop:srcAll>0?14:10,paddingTop:12,borderTop:'1px solid var(--border)',fontSize:11.5,color:'var(--text-light)',display:'flex',gap:16,flexWrap:'wrap',alignItems:'center'}}>
               <span style={{fontWeight:800,letterSpacing:'.05em',color:'var(--text-dim)',fontSize:10.5}}>ALL-TIME</span>
-              <span><b style={{color:'#3B82F6'}}>{fmt(atImport)}</b> sheet import</span>
-              <span><b style={{color:'#8B5CF6'}}>{fmt(atDash)}</b> dashboard</span>
+              {srcCats.map(c=><span key={c.key}><b style={{color:c.color}}>{fmt(c.a)}</b> {c.label.replace(/^[^ ]+ /,'')}</span>)}
               {atOther>0 && <span><b style={{color:'var(--text-dim)'}}>{fmt(atOther)}</b> other</span>}
               <span style={{marginLeft:'auto',color:'var(--text-light)'}}>{fmt(atAll)} total leads</span>
             </div>
