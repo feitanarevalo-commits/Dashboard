@@ -339,8 +339,12 @@
       if(!file) return;
       if(!/^(video|audio)\//.test(file.type||'')){ statusEl.textContent='Please choose a video or audio file.'; statusEl.classList.add('err'); return; }
       statusEl.classList.remove('err');
-      const safe = (file.name||'video').replace(/[^A-Za-z0-9._-]+/g,'_').slice(0,80);
-      const path = `uploads/${Date.now()}-${Math.random().toString(36).slice(2,8)}-${safe}`;
+      // Guarantee the object URL ends in a real lowercase media extension (Supadata detects the file by it).
+      const MIME_EXT = {'video/mp4':'mp4','video/quicktime':'mov','video/webm':'webm','video/x-matroska':'mkv','video/mpeg':'mpeg','video/3gpp':'3gp','audio/mpeg':'mp3','audio/mp4':'m4a','audio/wav':'wav','audio/x-m4a':'m4a','audio/webm':'weba','audio/ogg':'ogg'};
+      const nameExt = (/\.([A-Za-z0-9]{1,5})$/.exec(file.name||'')||[])[1];
+      const ext = ((nameExt || MIME_EXT[(file.type||'').toLowerCase()] || 'mp4')).toLowerCase();
+      const base = ((file.name||'video').replace(/\.[^.]+$/,'').replace(/[^A-Za-z0-9_-]+/g,'_').slice(0,50)) || 'video';
+      const path = `uploads/${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}.${ext}`;
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${SUPA}/storage/v1/object/clip-sources/${path}`);
       xhr.setRequestHeader('apikey', SUPA_KEY);
