@@ -2657,8 +2657,24 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
               <Row c={CO.bad} term="fresh" def="Good leads not yet added to Close (our CRM) — still need to be pushed over. This is a to-do status (it disappears once pushed), unlike “sourced” which is a permanent fact about how the lead was found."/>
             </Group>
 
+            <Group icon="🔎" title="Scraper page — toolbar" intro="The controls across the top of the Scraper (and most lead tables).">
+              <Row c={accent} term="▶ Run Scraper" def="Sends your search words off to go find new matching creators on YouTube. Results drop into the list below."/>
+              <Row c={CO.dim} term="Search query" def="The words the scraper looks for (a niche, keyword, or topic). Type here, then press Run Scraper."/>
+              <Row c={CO.dim} term="Platform · Followers · Language · Status · Reps" def="Filters that shrink the list — show only a certain platform, follower size, language, status tag, or the leads owned by one rep."/>
+              <Row c={accent} term="“165 leads”" def="How many rows the list is showing right now (after any filters)."/>
+              <Row c={CO.dim} term="↓ CSV · PDF" def="Download the current list as a spreadsheet (CSV) or a PDF."/>
+              <Row c={CO.dim} term="☑ Select all" def="Tick every row at once, so you can claim, assign, or delete them in bulk."/>
+            </Group>
+
+            <Group icon="⚙️" title="Row buttons (Actions column)" intro="The little icons at the end of each lead's row.">
+              <Row c={CO.dim} term="✏ / 👁  Open" def="Open the lead — edit its details (✏) or view its full profile (👁)."/>
+              <Row c={CO.violet} term="📝 Note" def="Add or read a private note on that lead. The button turns purple with a dot when a note already exists."/>
+              <Row c={CO.blue} term="🕘 History" def="See who scraped and qualified the lead, and every change made to it over time."/>
+              <Row c={CO.bad} term="🗑 Delete" def="Remove the lead from the dashboard and the shared database. It asks you to confirm first, and can't be undone."/>
+            </Group>
+
             <div style={{background:S.noteBg,border:`1px solid ${S.noteBorder}`,borderRadius:14,padding:'14px 18px',fontSize:12.5,lineHeight:1.55,color:S.noteText,breakInside:'avoid'}}>
-              💡 Tip: on the dashboard itself, you can hover your mouse over almost any label to see a short note like these. This page just gathers them all in one spot.
+              💡 Tip: on the dashboard itself, you can hover your mouse over almost any label or button to see a short note like these. This page just gathers them all in one spot.
             </div>
 
           </div>
