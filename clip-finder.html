@@ -133,6 +133,11 @@
     <div class="panel">
       <label class="lbl" for="ytUrl">Video link <span style="color:var(--faint);font-weight:500">— YouTube (finds highlights) or a direct .mp4 URL (finds highlights AND can compile them into a reel)</span></label>
       <input type="text" id="ytUrl" placeholder="https://www.youtube.com/watch?v=...  or  https://.../video.mp4" style="height:48px;font-size:15px">
+      <div style="margin-top:10px">
+        <input type="file" id="fileInput" accept="video/*,audio/*" style="display:none">
+        <button class="btn" id="uploadBtn" type="button"><svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;stroke:currentColor;fill:none"><path d="M12 16V4M6 10l6-6 6 6"/><path d="M4 20h16"/></svg> Upload from your computer</button>
+        <span class="ghost" style="margin-left:8px; color:var(--faint); font-size:12.5px">a local video → uploads, transcribes, finds highlights, and can be compiled into a reel</span>
+      </div>
       <div class="divider">or paste a transcript</div>
       <textarea id="transcript" placeholder="0:00  Welcome back to the show...&#10;0:15  The biggest mistake I made was hiring too fast...&#10;0:45  Here's the one metric I wish I tracked earlier..."></textarea>
       <div class="opts">
@@ -188,6 +193,8 @@
   <script>
     const FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/clip-finder';
     const REEL_FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/render-compilation';
+    const SUPA = 'https://wokrdfqzwrausazzoedi.supabase.co';
+    const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indva3JkZnF6d3JhdXNhenpvZWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTE5NDAsImV4cCI6MjA5Nzk2Nzk0MH0.YE0CvsTs3XlEJ0n0mBgdKVFy5Nwpys2C0wO96F8F0ho';
     const $ = s => document.querySelector(s);
     const results = $('#results'), statusEl = $('#status');
     let lastClips = [], lastSourceUrl = '', lastVid = '', lastVideoLen = 1;
@@ -327,6 +334,30 @@
       }catch(e){ statusEl.textContent = 'Error: ' + e.message; statusEl.classList.add('err'); }
       finally{ btn.disabled = false; }
     }
+    // Upload a local video → Supabase Storage → use its public URL as the source (renderable + real frames).
+    function uploadFile(file){
+      if(!file) return;
+      if(!/^(video|audio)\//.test(file.type||'')){ statusEl.textContent='Please choose a video or audio file.'; statusEl.classList.add('err'); return; }
+      statusEl.classList.remove('err');
+      const safe = (file.name||'video').replace(/[^A-Za-z0-9._-]+/g,'_').slice(0,80);
+      const path = `uploads/${Date.now()}-${Math.random().toString(36).slice(2,8)}-${safe}`;
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${SUPA}/storage/v1/object/clip-sources/${path}`);
+      xhr.setRequestHeader('apikey', SUPA_KEY);
+      xhr.setRequestHeader('Authorization', 'Bearer '+SUPA_KEY);
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      xhr.setRequestHeader('x-upsert', 'true');
+      xhr.upload.onprogress = (e) => { if(e.lengthComputable){ const pct=Math.round(e.loaded/e.total*100); statusEl.innerHTML = `<span class="spinner"></span> Uploading “${esc(file.name)}”… ${pct}%`; } };
+      xhr.onload = () => {
+        if(xhr.status>=200 && xhr.status<300){ const pub = `${SUPA}/storage/v1/object/public/clip-sources/${path}`; $('#ytUrl').value = pub; statusEl.textContent='Uploaded — finding highlights…'; run(); }
+        else { statusEl.textContent = 'Upload failed: '+xhr.status+' '+String(xhr.responseText||'').slice(0,140); statusEl.classList.add('err'); }
+      };
+      xhr.onerror = () => { statusEl.textContent = 'Upload failed (network/CORS).'; statusEl.classList.add('err'); };
+      statusEl.innerHTML = `<span class="spinner"></span> Uploading “${esc(file.name)}”…`;
+      xhr.send(file);
+    }
+    $('#uploadBtn').onclick = () => $('#fileInput').click();
+    $('#fileInput').onchange = (e) => { const f=e.target.files && e.target.files[0]; if(f) uploadFile(f); e.target.value=''; };
     $('#reelBtn').onclick = compileReel;
     $('#runBtn').onclick = run;
     $('#transcript').addEventListener('keydown', e => { if((e.metaKey||e.ctrlKey) && e.key==='Enter') run(); });
