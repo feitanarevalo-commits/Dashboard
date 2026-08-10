@@ -2076,7 +2076,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                     </td>
                   )}
                   <td className="no-print">
-                    <div style={{display:'flex',gap:5}}>
+                    <div data-tour="row-actions" style={{display:'flex',gap:5}}>
                       <button className="btn-icon" onClick={()=>onRowOpen?onRowOpen(lead):setEditLead(lead)} title={onRowOpen?'View profile':'Edit lead'}>{onRowOpen?'👁':'✏'}</button>
                       {onEdit && <button className="btn-icon note-ind-btn" onClick={()=>setNoteLead(lead)} style={lead.note?{color:'var(--accent)',borderColor:'var(--accent-light)',background:'var(--accent-light)'}:{}} title={lead.note?('Note: '+String(lead.note).slice(0,100)+(String(lead.note).length>100?'…':'')):'Add a note'}>📝{lead.note && <span className="note-dot"/>}</button>}
                       <button className="btn-icon" onClick={()=>setHistLead(lead)} title={humanScraper(lead)?`History — scraped by ${humanScraper(lead)}`:'History — who scraped & qualified this lead'}>🕘</button>
@@ -2821,11 +2821,13 @@ function renderKbBody(text){
 // Real guided tour: spotlights actual dashboard elements (tagged with data-tour)
 // one at a time with an anchored tooltip. Sales-rep POV. Runs at App level so it
 // can dim the whole screen and sit above everything.
-function GuidedTour({onClose}){
+function GuidedTour({onClose,onNav}){
   const steps=[
     {key:'sidebar', title:'Your navigation', body:<>Everything lives in this <b>sidebar</b> — grouped into Main, Lead Filters, Lead Pools and Campaigns. Let's walk through the parts you'll use daily.</>},
     {key:'nav-home', title:'Home', body:<><b>Home</b> is the team board. Click <b>your own name</b> there (or your avatar → <b>My Dashboard</b>) to open YOUR dashboard — your KPIs and leads.</>},
     {key:'nav-scraper', title:'Scraper', body:<>Search YouTube for new creators by keyword, platform, follower range and language. Results land in your queue and only show what <b>you</b> scraped.</>},
+    {key:'scraper-run', tab:'scraper', title:'Run the Scraper', body:<>Type what you're after in the <b>search box</b>, set the <b>platform / followers / language</b> filters, then hit <b>▶ Run Scraper</b> to pull in fresh creators. Export the list any time with <b>↓ CSV</b> or <b>PDF</b>.</>},
+    {key:'row-actions', tab:'scraper', title:'Row buttons', body:<>Every lead row ends with quick actions: <b>✏ open / edit</b>, <b>📝 note</b> (turns purple when a note exists), <b>🕘 history</b> (who scraped &amp; qualified it), and <b>🗑 delete</b>.</>},
     {key:'nav-lead-mgmt', title:'Lead Management', body:<>Your working list of leads not yet sorted into a status tab. Filter to yourself with the rep chips, then qualify or tidy.</>},
     {key:'grp-filters', title:'Lead Filters — your status tags', body:<>Your leads by stage: <b>Pending Qualification</b>, <b>NQ</b>, <b>Awaiting Potential</b>, <b>Contacted</b>, <b>For Recycle</b>, <b>Already Partner</b> — each with a live count. <b>For Recycle</b> is shared: grab a cooled-off lead first.</>},
     {key:'grp-pools', title:'Lead Pools', body:<><b>High Ticket</b>, <b>MSN</b> and <b>VIRALS</b> — pools of freshly-scraped, unclaimed creators split for the team. Open one, tick creators, and <b>Claim</b> — they become yours.</>},
@@ -2842,6 +2844,9 @@ function GuidedTour({onClose}){
   const step=steps[idx]; const first=idx===0; const last=idx===steps.length-1;
   useEffect(()=>{
     let dead=false;
+    // Some steps live on another page (e.g. the Scraper). Switch to it first,
+    // then give the view a beat to mount before we measure the target.
+    if(step.tab && onNav) onNav(step.tab);
     const measure=()=>{ if(dead) return;
       if(!step.key){ setRect(null); return; }
       const el=document.querySelector(`[data-tour="${step.key}"]`);
@@ -2855,7 +2860,7 @@ function GuidedTour({onClose}){
       if(first && step.key){ const el=document.querySelector(`[data-tour="${step.key}"]`); if(el){ try{ el.scrollIntoView({block:'center',inline:'nearest'}); }catch(e){} } first=false; }
       measure();
     };
-    const t=setTimeout(run,70);
+    const t=setTimeout(run, step.tab?340:70);
     window.addEventListener('resize',measure);
     window.addEventListener('scroll',measure,true);
     return ()=>{ dead=true; clearTimeout(t); window.removeEventListener('resize',measure); window.removeEventListener('scroll',measure,true); };
@@ -5558,7 +5563,7 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
   }
 
   const runBtn=(
-    <button className="btn btn-primary btn-sm" onClick={scrape} disabled={loading} title="Run the scraper for the selected filters">
+    <button className="btn btn-primary btn-sm" data-tour="scraper-run" onClick={scrape} disabled={loading} title="Run the scraper for the selected filters">
       {loading?'⏳ Scraping…':'▶ Run Scraper'}
     </button>
   );
@@ -9779,7 +9784,7 @@ function App() {
         onKeepTag={importWarnKeepTag} onRemove={importWarnRemove}
         onKeepAll={()=>{ addToast(`${importWarn.length} recently-contacted lead(s) kept as-is`,'info'); setImportWarn(null); }}
         onClose={()=>setImportWarn(null)}/>}
-      {tourOpen && <GuidedTour onClose={()=>setTourOpen(false)}/>}
+      {tourOpen && <GuidedTour onClose={()=>setTourOpen(false)} onNav={t=>{ setShowRepSelect(false); setTab(t); }}/>}
     </div>
     </PresenceContext.Provider>
     </AdminContext.Provider>
