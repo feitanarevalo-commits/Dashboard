@@ -2619,46 +2619,46 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
         <div style={{maxWidth:1040,margin:'0 auto',padding:'28px 40px 80px'}}>
           <div style={{columnWidth:470,columnGap:18}}>
 
-            <Group icon="🟢" title="Who's online" intro="Live presence at the top of Home — who's in the dashboard right now and how recently they touched it.">
-              <Row c={CO.pActive} term="Active" def="Interacted with the dashboard in the last 3 minutes — actively working."/>
-              <Row c={CO.pIdle} term="Idle" sub="3m+" def="No activity for 3–10 minutes. Tab's likely open but they've stepped away from it."/>
-              <Row c={CO.pAway} term="Away" sub="10m+" def="No activity for 10 minutes or more. Signed in but not currently at the keyboard."/>
-              <Row c={CO.dim} term="“active 24m ago”" def="Time since that person's last recorded action, so you know how stale their status is."/>
+            <Group icon="🟢" title="Who's online" intro="Shows who's in the dashboard right now, and whether they're actually working or just left it open.">
+              <Row c={CO.pActive} term="Active" def="Using the dashboard right now (clicked something in the last 3 minutes)."/>
+              <Row c={CO.pIdle} term="Idle" sub="3m+" def="Hasn't clicked anything for 3 to 10 minutes — probably stepped away for a bit."/>
+              <Row c={CO.pAway} term="Away" sub="10m+" def="No clicks for over 10 minutes. Still logged in, but not at their desk."/>
+              <Row c={CO.dim} term="“active 24m ago”" def="How long ago that person last did something."/>
             </Group>
 
-            <Group icon="🗓" title="KPI window" intro="Every number below the header is scoped to the window you pick here — change it and the whole board re-counts.">
-              <Row c={accent} term="Daily · Weekly · Monthly" def="The time window all metrics are measured over (a single day, the last 7 days, or the last 30)."/>
-              <Row c={CO.dim} term="‹ ›  date  ·  Today" def="Step the window back and forward; “Today” jumps back to the current day."/>
-              <Row c={accent} term="MSN · MCN · VIRALS (VVV)" def="The three campaigns each rep is measured across — each gets its own breakdown card."/>
+            <Group icon="🗓" title="Date & campaign picker" intro="Controls at the top that decide what the whole page is counting.">
+              <Row c={accent} term="Daily · Weekly · Monthly" def="Pick how much time you're looking at — one day, the last 7 days, or the last 30. Every number on the page changes to match."/>
+              <Row c={CO.dim} term="‹ ›  date  ·  Today" def="Move to a different day. “Today” jumps back to now."/>
+              <Row c={accent} term="MSN · MCN · VIRALS (VVV)" def="The three campaigns. Each rep gets one card per campaign so you can see them separately."/>
             </Group>
 
-            <Group icon="📥" title="Lead Sources" intro="Where the leads added in this window actually came from. The % is that source's share of the window; the ALL-TIME row is the same split across every lead ever.">
-              <Row c={CO.blue} term="📄 Sheet import" def="Leads brought in from a Google Sheet or bulk upload."/>
-              <Row c={CO.violet} term="🗂 Lead pools" def="Leads claimed from a shared pool (High Ticket / MSN / VIRALS)."/>
-              <Row c={CO.teal} term="🔎 Scraper" def="Leads discovered with the in-app YouTube scraper (or the AI Scraper)."/>
-              <Row c={CO.dim} term="Other" def="Anything that doesn't match the three above — the residual/manual adds."/>
+            <Group icon="📥" title="Lead Sources" intro="Where the new leads came from. The % is each source's share for the days you picked; the ALL-TIME row is the same split for every lead ever.">
+              <Row c={CO.blue} term="📄 Sheet import" def="Leads we uploaded from a spreadsheet."/>
+              <Row c={CO.violet} term="🗂 Lead pools" def="Leads a rep grabbed from a shared pile that anyone on the team can claim from."/>
+              <Row c={CO.teal} term="🔎 Scraper" def="Leads found by searching YouTube inside the dashboard."/>
+              <Row c={CO.dim} term="Other" def="Everything else — usually leads someone added by hand."/>
             </Group>
 
-            <Group icon="🏷️" title="Potentials Tagged" intro="The big dark card — a rep's headline output for the window and the live state of their queue.">
-              <Row c={CO.good} term="POTENTIALS TAGGED" def="Leads the rep tagged Potential in this window. Counted from the tag event, so it stays counted even after the lead moves on."/>
-              <Row c={CO.good} term="+N vs prev" def="Change against the previous comparable window (yesterday / last week / last month). Green up, red down."/>
-              <Row c={CO.good} term="Contacted · Pending · To work" def="The split bar: of what's live, how much is already contacted, still awaiting qualification, or queued to work."/>
-              <Row c={CO.dim} term="Assigned · Imported · Sourced · Fresh" def="The four footer stats — same definitions as the per-campaign chips below."/>
-              <Row c={CO.dim} term="“39 tagged from 55 assigned · holding 84 Potential now”" def="Plain-English recap: tagged this window ÷ intake this window, and how many Potentials they're sitting on right now."/>
+            <Group icon="🏷️" title="Potentials Tagged" intro="The big dark card. Sums up how a rep did in the time you picked, plus what's still on their plate.">
+              <Row c={CO.good} term="POTENTIALS TAGGED" def="How many leads the rep marked as “Potential” (a good lead worth chasing) in this time."/>
+              <Row c={CO.good} term="+N vs prev" def="How that compares to the time before. Green means more than last time, red means fewer."/>
+              <Row c={CO.good} term="Contacted · Pending · To work" def="A quick bar of their live leads: how many they've already messaged, still need to check, and still need to work."/>
+              <Row c={CO.dim} term="Assigned · Imported · Sourced · Fresh" def="Four extra counts — same meaning as the campaign list below."/>
+              <Row c={CO.dim} term="“39 tagged from 55 assigned · holding 84 Potential now”" def="A one-line recap: how many good leads they tagged, out of how many they were given, and how many good leads they're sitting on right now."/>
             </Group>
 
-            <Group icon="📊" title="Per-campaign breakdown" intro="The MSN / MCN / VIRALS cards. Each line is one metric for that rep in that campaign, over the selected window. (Hover any label on the dashboard to see this same note.)">
-              <Row c={CO.dim} term="assigned" def="Everything that landed on the rep in this window, qualified or not — the raw intake, including untouched bulk-sheet imports."/>
-              <Row c={CO.blue} term="imported" def="Potential leads that came from an existing / imported list rather than being sourced by the rep."/>
-              <Row c={CO.good} term="contacted" def="Leads contacted in this window (by their last-contact date)."/>
-              <Row c={CO.warn} term="pending" def="Of the inflow, the leads still awaiting qualification."/>
-              <Row c={CO.dim} term="to work" def="Currently Potential / High-Ticket and not yet contacted — the live queue to action."/>
-              <Row c={CO.violet} term="sourced" def="Potential leads the rep sourced fresh — judged at discovery, so it stays counted even after the lead is pushed to Close."/>
-              <Row c={CO.bad} term="fresh" def="Potential leads not yet on Close — the still-to-push queue. Empties as leads get pushed."/>
+            <Group icon="📊" title="Each campaign's numbers" intro="The MSN / MCN / VIRALS cards. Every line counts one thing for that rep, in that campaign, during the time you picked.">
+              <Row c={CO.dim} term="assigned" def="All the leads given to this rep — good or bad, including spreadsheet uploads nobody has looked at yet."/>
+              <Row c={CO.blue} term="imported" def="Good leads that came from a list we already had (the rep didn't find them)."/>
+              <Row c={CO.good} term="contacted" def="Leads the rep has reached out to."/>
+              <Row c={CO.warn} term="pending" def="Leads still waiting to be checked — nobody has decided yet if they're good or not."/>
+              <Row c={CO.dim} term="to work" def="Good leads the rep hasn't contacted yet — basically their to-do list."/>
+              <Row c={CO.violet} term="sourced" def="Good leads the rep found themselves."/>
+              <Row c={CO.bad} term="fresh" def="Good leads not yet added to Close (our CRM) — still need to be pushed over."/>
             </Group>
 
             <div style={{background:S.noteBg,border:`1px solid ${S.noteBorder}`,borderRadius:14,padding:'14px 18px',fontSize:12.5,lineHeight:1.55,color:S.noteText,breakInside:'avoid'}}>
-              💡 On the live board you can hover almost any label for its definition. This page is the full key in one place — and the 🧭 Dashboard Tour (on the Tools or Manual tab) walks you through the navigation.
+              💡 Tip: on the dashboard itself, you can hover your mouse over almost any label to see a short note like these. This page just gathers them all in one spot.
             </div>
 
           </div>
