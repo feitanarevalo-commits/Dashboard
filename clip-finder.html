@@ -193,6 +193,7 @@
   <script>
     const FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/clip-finder';
     const REEL_FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/render-compilation';
+    const TRANSCRIBE_FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/transcribe-eleven';
     const SUPA = 'https://wokrdfqzwrausazzoedi.supabase.co';
     const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indva3JkZnF6d3JhdXNhenpvZWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTE5NDAsImV4cCI6MjA5Nzk2Nzk0MH0.YE0CvsTs3XlEJ0n0mBgdKVFy5Nwpys2C0wO96F8F0ho';
     const $ = s => document.querySelector(s);
@@ -281,17 +282,32 @@
       statusEl.classList.remove('err');
       const vid = ytId(url);
       const btn = $('#runBtn'); btn.disabled = true;
-      const payload = { numClips:+$('#numClips').value||5, minDuration:+$('#minDuration').value||20, maxDuration:+$('#maxDuration').value||75, model:$('#model').value, lang:$('#lang').value||'en' };
-      if(url){ payload.youtubeUrl = url; statusEl.innerHTML = `<span class="spinner"></span> Transcribing the video and finding highlights… (longer videos take a bit)`; }
-      else { payload.transcript = transcript; statusEl.innerHTML = `<span class="spinner"></span> Claude is reading the transcript and picking the best moments…`; }
+      const isDirect = url && !vid;  // a direct / uploaded media URL (not YouTube) -> ElevenLabs ASR
+      const opts = { numClips:+$('#numClips').value||5, minDuration:+$('#minDuration').value||20, maxDuration:+$('#maxDuration').value||75, model:$('#model').value, lang:$('#lang').value||'en' };
       results.innerHTML = Array.from({length:3}).map(()=>'<div class="skel"></div>').join('');
       const t0 = performance.now();
       try{
+        let payload, viaLabel = '';
+        if(isDirect){
+          statusEl.innerHTML = `<span class="spinner"></span> Transcribing the video with ElevenLabs… (longer videos take a bit)`;
+          const tr = await fetch(TRANSCRIBE_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url, lang: opts.lang }) });
+          const tj = await tr.json();
+          if(!tj.ok){ throw new Error(tj.error || 'Transcription failed.'); }
+          payload = { ...opts, transcript: tj.segments };
+          viaLabel = ' · ElevenLabs';
+          statusEl.innerHTML = `<span class="spinner"></span> Claude is picking the best moments…`;
+        } else if(url){
+          payload = { ...opts, youtubeUrl: url };
+          statusEl.innerHTML = `<span class="spinner"></span> Transcribing the video and finding highlights… (longer videos take a bit)`;
+        } else {
+          payload = { ...opts, transcript };
+          statusEl.innerHTML = `<span class="spinner"></span> Claude is reading the transcript and picking the best moments…`;
+        }
         const r = await fetch(FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
         const j = await r.json();
         if(!j.ok){ throw new Error(j.error || ('HTTP '+r.status)); }
         const secs = ((performance.now()-t0)/1000).toFixed(1);
-        statusEl.textContent = `Found ${j.count} clip${j.count===1?'':'s'} in ${secs}s · ${j.model}${j.via==='supadata'?' · auto-transcribed':''}`;
+        statusEl.textContent = `Found ${j.count} clip${j.count===1?'':'s'} in ${secs}s · ${j.model}${viaLabel || (j.via==='supadata'?' · auto-transcribed':'')}`;
         lastClips = j.clips || []; lastSourceUrl = url; lastVid = vid; lastVideoLen = Math.max(1, ...lastClips.map(c=>c.end||0));
         render(j.clips, vid);
         // Offer to compile the highlights into a reel — only possible when the source is a fetchable video (not YouTube).
