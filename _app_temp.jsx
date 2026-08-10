@@ -2653,8 +2653,8 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
               <Row c={CO.good} term="contacted" def="Leads the rep has reached out to."/>
               <Row c={CO.warn} term="pending" def="Leads still waiting to be checked — nobody has decided yet if they're good or not."/>
               <Row c={CO.dim} term="to work" def="Good leads the rep hasn't contacted yet — basically their to-do list."/>
-              <Row c={CO.violet} term="sourced" def="Good leads the rep dug up brand-new — not handed to them on a list. The opposite of “imported”: imported = from a list we already had, sourced = the rep found it fresh."/>
-              <Row c={CO.bad} term="fresh" def="Good leads not yet added to Close (our CRM) — still need to be pushed over."/>
+              <Row c={CO.violet} term="sourced" def="Good leads the rep dug up brand-new — not handed to them on a list. It's the opposite of “imported” (imported = from a list we already had; sourced = the rep found it). This says HOW they got the lead — different from “fresh” below, which is about whether it's on Close yet."/>
+              <Row c={CO.bad} term="fresh" def="Good leads not yet added to Close (our CRM) — still need to be pushed over. This is a to-do status (it disappears once pushed), unlike “sourced” which is a permanent fact about how the lead was found."/>
             </Group>
 
             <div style={{background:S.noteBg,border:`1px solid ${S.noteBorder}`,borderRadius:14,padding:'14px 18px',fontSize:12.5,lineHeight:1.55,color:S.noteText,breakInside:'avoid'}}>
