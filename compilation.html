@@ -219,7 +219,7 @@
             break;
           }
           if(pj.status==='failed'){ throw new Error('Render failed: '+(pj.error||'unknown')); }
-          if(secs>600){ throw new Error('Render timed out.'); }
+          if(secs>1500){ throw new Error('Render timed out.'); }
         }
       }catch(e){ setStatus('Error: '+e.message, true); }
       finally{ $('#renderBtn').disabled = false; $('#buildBtn').disabled = false; }

@@ -326,10 +326,11 @@
           const pj = await pr.json();
           if(!pj.ok) throw new Error(pj.error || 'Poll failed.');
           const secs = Math.round((performance.now()-t0)/1000);
-          statusEl.innerHTML = `<span class="spinner"></span> Rendering reel… (${pj.status}, ${secs}s)`;
+          const hint = (pj.status==='fetching' && secs>60) ? ' — downloading your source video; large/high-res files are slow, a 1080p export is much faster' : '';
+          statusEl.innerHTML = `<span class="spinner"></span> Rendering reel… (${pj.status}, ${secs}s)${hint}`;
           if(pj.status==='done' && pj.url){ statusEl.textContent = `Reel ready in ${secs}s.`; $('#reelVideo').src = pj.url; $('#reelDownload').href = pj.url; $('#reelOpen').href = pj.url; $('#reelResult').classList.remove('hidden'); $('#reelResult').scrollIntoView({behavior:'smooth'}); break; }
           if(pj.status==='failed') throw new Error('Render failed: ' + (pj.error||'unknown'));
-          if(secs>600) throw new Error('Render timed out.');
+          if(secs>1500) throw new Error('Render timed out (source too large/slow to fetch — upload a 1080p export).');
         }
       }catch(e){ statusEl.textContent = 'Error: ' + e.message; statusEl.classList.add('err'); }
       finally{ btn.disabled = false; }
