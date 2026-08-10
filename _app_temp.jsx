@@ -2528,6 +2528,7 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
   };
   const [query,setQuery]=useState(''); const [cat,setCat]=useState('All');
   const isManual = view==='manual';
+  const isLegend = view==='legend';
   const SG="'Space Grotesk',sans-serif";
   const scrollRef=useRef(null);
   // Reset filter + scroll when switching modes or opening/closing an article.
@@ -2555,6 +2556,111 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
         <div style={{maxWidth:840,margin:'-28px auto 80px',padding:'0 40px',position:'relative'}}>
           <div className="kb-article" style={{background:S.card,borderRadius:18,border:`1px solid ${S.cardBorder}`,padding:'44px 52px',boxShadow:dark?'0 18px 36px -18px rgba(0,0,0,.5)':'0 18px 36px -18px rgba(20,18,40,.18)','--accent':accent,'--border':S.cardBorder,'--bg':dark?'#1c2230':'#f7f7fd','--text':S.title,'--text-dim':S.textDim}}>
             {renderKbBody(selected.body)}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Legend view: what every metric on the dashboard means ──
+  if(isLegend){
+    // Rows mirror the LIVE definitions in HomeView (chipsOf / srcCats /
+    // presenceStatus / the Potentials-Tagged hero). Keep in sync if those move.
+    const Swatch=c=>(<span style={{flex:'0 0 auto',width:11,height:11,borderRadius:4,background:c,marginTop:5}}/>);
+    const Row=({c,term,sub,def})=>(
+      <div style={{display:'flex',gap:12,padding:'13px 0',borderTop:`1px solid ${S.cardBorderSoft}`}}>
+        {Swatch(c)}
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:'flex',alignItems:'baseline',gap:8,flexWrap:'wrap'}}>
+            <span style={{fontFamily:SG,fontWeight:700,fontSize:14,color:S.title}}>{term}</span>
+            {sub && <span style={{fontSize:11.5,fontWeight:600,color:S.textFaint}}>{sub}</span>}
+          </div>
+          <div style={{fontSize:13,lineHeight:1.55,color:S.textDim,marginTop:3}}>{def}</div>
+        </div>
+      </div>
+    );
+    const Group=({icon,title,intro,children})=>(
+      <div style={{background:S.card,border:`1px solid ${S.cardBorder}`,borderRadius:18,padding:'22px 24px',breakInside:'avoid',marginBottom:18}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:intro?6:2}}>
+          <span style={{fontSize:18}}>{icon}</span>
+          <span style={{fontFamily:SG,fontWeight:700,fontSize:17,color:S.title,letterSpacing:'-.01em'}}>{title}</span>
+        </div>
+        {intro && <div style={{fontSize:13,lineHeight:1.55,color:S.textDim,marginBottom:6}}>{intro}</div>}
+        {children}
+      </div>
+    );
+    // colors pulled from HomeView so the legend matches the live dots exactly
+    const CO={blue:'#3B82F6',violet:'#8B5CF6',teal:'#14B8A6',good:'#22A559',warn:'#E8912D',bad:'#E0552F',dim:S.textFaint,
+      pActive:'#22A559',pIdle:'#E6B800',pAway:'#E8912D'};
+    return (
+      <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",color:S.pageText,background:S.pageBg}}>
+        <div style={{position:'relative',overflow:'hidden',background:'#15131f',color:'#fff',padding:'40px 0 48px'}}>
+          <div style={{position:'absolute',width:560,height:380,borderRadius:'50%',top:-160,right:-80,background:`radial-gradient(circle, ${accent} 0%, transparent 70%)`,filter:'blur(80px)',opacity:.5,pointerEvents:'none'}}/>
+          <div style={{position:'relative',maxWidth:1040,margin:'0 auto',padding:'0 40px'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:34}}>
+              <div style={{display:'flex',alignItems:'center',gap:11}}>
+                <div style={{width:30,height:30,borderRadius:9,background:accent,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                </div>
+                <span style={{fontFamily:SG,fontWeight:700,fontSize:17,color:'#fff'}}>Knowledge</span>
+                <span style={{fontSize:11,fontWeight:700,letterSpacing:'.04em',color:accentLight,background:accentRing,padding:'3px 9px',borderRadius:999}}>ENFINITY</span>
+              </div>
+              <div style={{display:'inline-flex',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.14)',borderRadius:10,padding:3,gap:2}}>
+                <span onClick={()=>onView('tools')} style={{padding:'7px 14px',borderRadius:7,fontSize:13,fontWeight:600,background:'transparent',color:'rgba(255,255,255,.75)',cursor:'pointer',userSelect:'none'}}>🚀 Tools</span>
+                <span onClick={()=>onView('manual')} style={{padding:'7px 14px',borderRadius:7,fontSize:13,fontWeight:600,background:'transparent',color:'rgba(255,255,255,.75)',cursor:'pointer',userSelect:'none'}}>📖 Manual</span>
+                <span style={{padding:'7px 14px',borderRadius:7,fontSize:13,fontWeight:600,background:accent,color:'#fff',cursor:'pointer',userSelect:'none'}}>📊 Legend</span>
+              </div>
+            </div>
+            <div style={{fontSize:11,fontWeight:700,letterSpacing:'.12em',color:accentLight,marginBottom:12}}>DASHBOARD LEGEND</div>
+            <h1 style={{fontFamily:SG,fontWeight:700,fontSize:40,lineHeight:1.05,letterSpacing:'-.025em',margin:'0 0 14px',maxWidth:640}}>What every number on the board means.</h1>
+            <p style={{fontSize:16,lineHeight:1.55,color:'rgba(255,255,255,.6)',margin:0,maxWidth:560}}>A plain-language key to the Home dashboard — presence, the KPI window, lead sources, the Potentials-Tagged card, and every per-campaign metric.</p>
+          </div>
+        </div>
+        <div style={{maxWidth:1040,margin:'0 auto',padding:'28px 40px 80px'}}>
+          <div style={{columnWidth:470,columnGap:18}}>
+
+            <Group icon="🟢" title="Who's online" intro="Live presence at the top of Home — who's in the dashboard right now and how recently they touched it.">
+              <Row c={CO.pActive} term="Active" def="Interacted with the dashboard in the last 3 minutes — actively working."/>
+              <Row c={CO.pIdle} term="Idle" sub="3m+" def="No activity for 3–10 minutes. Tab's likely open but they've stepped away from it."/>
+              <Row c={CO.pAway} term="Away" sub="10m+" def="No activity for 10 minutes or more. Signed in but not currently at the keyboard."/>
+              <Row c={CO.dim} term="“active 24m ago”" def="Time since that person's last recorded action, so you know how stale their status is."/>
+            </Group>
+
+            <Group icon="🗓" title="KPI window" intro="Every number below the header is scoped to the window you pick here — change it and the whole board re-counts.">
+              <Row c={accent} term="Daily · Weekly · Monthly" def="The time window all metrics are measured over (a single day, the last 7 days, or the last 30)."/>
+              <Row c={CO.dim} term="‹ ›  date  ·  Today" def="Step the window back and forward; “Today” jumps back to the current day."/>
+              <Row c={accent} term="MSN · MCN · VIRALS (VVV)" def="The three campaigns each rep is measured across — each gets its own breakdown card."/>
+            </Group>
+
+            <Group icon="📥" title="Lead Sources" intro="Where the leads added in this window actually came from. The % is that source's share of the window; the ALL-TIME row is the same split across every lead ever.">
+              <Row c={CO.blue} term="📄 Sheet import" def="Leads brought in from a Google Sheet or bulk upload."/>
+              <Row c={CO.violet} term="🗂 Lead pools" def="Leads claimed from a shared pool (High Ticket / MSN / VIRALS)."/>
+              <Row c={CO.teal} term="🔎 Scraper" def="Leads discovered with the in-app YouTube scraper (or the AI Scraper)."/>
+              <Row c={CO.dim} term="Other" def="Anything that doesn't match the three above — the residual/manual adds."/>
+            </Group>
+
+            <Group icon="🏷️" title="Potentials Tagged" intro="The big dark card — a rep's headline output for the window and the live state of their queue.">
+              <Row c={CO.good} term="POTENTIALS TAGGED" def="Leads the rep tagged Potential in this window. Counted from the tag event, so it stays counted even after the lead moves on."/>
+              <Row c={CO.good} term="+N vs prev" def="Change against the previous comparable window (yesterday / last week / last month). Green up, red down."/>
+              <Row c={CO.good} term="Contacted · Pending · To work" def="The split bar: of what's live, how much is already contacted, still awaiting qualification, or queued to work."/>
+              <Row c={CO.dim} term="Assigned · Imported · Sourced · Fresh" def="The four footer stats — same definitions as the per-campaign chips below."/>
+              <Row c={CO.dim} term="“39 tagged from 55 assigned · holding 84 Potential now”" def="Plain-English recap: tagged this window ÷ intake this window, and how many Potentials they're sitting on right now."/>
+            </Group>
+
+            <Group icon="📊" title="Per-campaign breakdown" intro="The MSN / MCN / VIRALS cards. Each line is one metric for that rep in that campaign, over the selected window. (Hover any label on the dashboard to see this same note.)">
+              <Row c={CO.dim} term="assigned" def="Everything that landed on the rep in this window, qualified or not — the raw intake, including untouched bulk-sheet imports."/>
+              <Row c={CO.blue} term="imported" def="Potential leads that came from an existing / imported list rather than being sourced by the rep."/>
+              <Row c={CO.good} term="contacted" def="Leads contacted in this window (by their last-contact date)."/>
+              <Row c={CO.warn} term="pending" def="Of the inflow, the leads still awaiting qualification."/>
+              <Row c={CO.dim} term="to work" def="Currently Potential / High-Ticket and not yet contacted — the live queue to action."/>
+              <Row c={CO.violet} term="sourced" def="Potential leads the rep sourced fresh — judged at discovery, so it stays counted even after the lead is pushed to Close."/>
+              <Row c={CO.bad} term="fresh" def="Potential leads not yet on Close — the still-to-push queue. Empties as leads get pushed."/>
+            </Group>
+
+            <div style={{background:S.noteBg,border:`1px solid ${S.noteBorder}`,borderRadius:14,padding:'14px 18px',fontSize:12.5,lineHeight:1.55,color:S.noteText,breakInside:'avoid'}}>
+              💡 On the live board you can hover almost any label for its definition. This page is the full key in one place — and the 🧭 Dashboard Tour (on the Tools or Manual tab) walks you through the navigation.
+            </div>
+
           </div>
         </div>
       </div>
@@ -2590,8 +2696,9 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
               <span style={{fontSize:11,fontWeight:700,letterSpacing:'.04em',color:accentLight,background:accentRing,padding:'3px 9px',borderRadius:999}}>ENFINITY</span>
             </div>
             <div style={{display:'inline-flex',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.14)',borderRadius:10,padding:3,gap:2}}>
-              <span onClick={()=>onView('tools')} style={{padding:'7px 14px',borderRadius:7,fontSize:13,fontWeight:600,background:!isManual?accent:'transparent',color:!isManual?'#fff':'rgba(255,255,255,.75)',cursor:'pointer',userSelect:'none',transition:'all .15s'}}>🚀 Tools</span>
+              <span onClick={()=>onView('tools')} style={{padding:'7px 14px',borderRadius:7,fontSize:13,fontWeight:600,background:(!isManual&&!isLegend)?accent:'transparent',color:(!isManual&&!isLegend)?'#fff':'rgba(255,255,255,.75)',cursor:'pointer',userSelect:'none',transition:'all .15s'}}>🚀 Tools</span>
               <span onClick={()=>onView('manual')} style={{padding:'7px 14px',borderRadius:7,fontSize:13,fontWeight:600,background:isManual?accent:'transparent',color:isManual?'#fff':'rgba(255,255,255,.75)',cursor:'pointer',userSelect:'none',transition:'all .15s'}}>📖 Manual</span>
+              <span onClick={()=>onView('legend')} style={{padding:'7px 14px',borderRadius:7,fontSize:13,fontWeight:600,background:isLegend?accent:'transparent',color:isLegend?'#fff':'rgba(255,255,255,.75)',cursor:'pointer',userSelect:'none',transition:'all .15s'}}>📊 Legend</span>
             </div>
           </div>
           <div style={{fontSize:11,fontWeight:700,letterSpacing:'.12em',color:accentLight,marginBottom:12}}>{heroEyebrow}</div>
