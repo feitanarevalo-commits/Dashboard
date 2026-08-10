@@ -202,11 +202,12 @@
         const sub = await fetch(`${API}/render-compilation`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ compilationTitle:$('#compTitle').value.trim(), aspect:$('#aspect').value, transition:$('#optTransition').value, fill:$('#optFill').checked, intro:$('#optIntro').checked, clipCards:$('#optCards').checked, clips: lineup.map(c=>({url:c.url, title:c.title})) }) });
         const sj = await sub.json();
         if(!sj.ok || !sj.renderId) throw new Error(sj.error||'Render did not start.');
-        const rid = sj.renderId; const t0 = Date.now();
+        const rid = sj.renderId; const t0 = Date.now(); let pollFails = 0;
         while(true){
           await new Promise(r=>setTimeout(r,5000));
-          const pr = await fetch(`${API}/render-compilation`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ renderId: rid }) });
-          const pj = await pr.json();
+          let pj;
+          try { const pr = await fetch(`${API}/render-compilation`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ renderId: rid }) }); pj = await pr.json(); pollFails = 0; }
+          catch(_e){ if(++pollFails >= 8){ throw new Error('Lost connection while rendering — it may still be processing. Wait a moment and re-render.'); } continue; }
           if(!pj.ok) throw new Error(pj.error||'Poll failed.');
           const secs = Math.round((Date.now()-t0)/1000);
           setStatus(`<span class="spinner"></span> Rendering… (${pj.status}, ${secs}s)`);

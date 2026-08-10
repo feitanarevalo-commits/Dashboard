@@ -335,11 +335,12 @@
         const sub = await fetch(REEL_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sourceUrl:lastSourceUrl, segments, aspect:'16:9', transition:'smooth' }) });
         const sj = await sub.json();
         if(!sj.ok || !sj.renderId) throw new Error(sj.error || 'Render did not start.');
-        const rid = sj.renderId;
+        const rid = sj.renderId; let pollFails = 0;
         while(true){
           await new Promise(r=>setTimeout(r,5000));
-          const pr = await fetch(REEL_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ renderId: rid }) });
-          const pj = await pr.json();
+          let pj;
+          try { const pr = await fetch(REEL_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ renderId: rid }) }); pj = await pr.json(); pollFails = 0; }
+          catch(_e){ if(++pollFails >= 8){ throw new Error('Lost connection while rendering — it may still be processing. Wait a moment and re-render, or check the download link shortly.'); } continue; }
           if(!pj.ok) throw new Error(pj.error || 'Poll failed.');
           const secs = Math.round((performance.now()-t0)/1000);
           const hint = (pj.status==='fetching' && secs>60) ? ' — downloading your source video; large/high-res files are slow, a 1080p export is much faster' : '';
