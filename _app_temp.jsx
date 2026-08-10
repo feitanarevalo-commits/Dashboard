@@ -2695,62 +2695,83 @@ function renderKbBody(text){
   });
   flush(); return out;
 }
-// Interactive, step-by-step walkthrough of how a SALES REP gets around the
-// dashboard. Launched from the Knowledge Base. No real screenshots — self-
-// contained cards so it never goes stale on a UI tweak.
-function DashboardTour({onClose}){
+// Real guided tour: spotlights actual dashboard elements (tagged with data-tour)
+// one at a time with an anchored tooltip. Sales-rep POV. Runs at App level so it
+// can dim the whole screen and sit above everything.
+function GuidedTour({onClose}){
   const steps=[
-    {icon:'👋',title:'Welcome to your dashboard',body:<>This quick tour shows how to get around and work your leads. It's written for <b>sales reps</b>, so it covers just what you use. Move with <b>Next / Back</b>, jump with the dots, or close anytime.</>},
-    {icon:'🧭',title:'The sidebar is your map',body:<>Everything lives in the <b>left sidebar</b>, grouped into <b>Main</b> (your day-to-day pages), <b>Lead Filters</b> (leads by status), <b>Lead Pools</b> (fresh leads to claim) and <b>Campaigns</b>. Tap <b>«</b> at the top to shrink it to icons for more room.</>},
-    {icon:'📊',title:'Home &amp; your own dashboard',body:<><b>Home</b> shows the team board. Click <b>your own name</b> there (or your <b>avatar → My Dashboard</b>) to open <b>your</b> dashboard — your KPIs, your leads and your daily numbers. At the top there's a mini <b>☁ Close search</b> to check if a creator is already in Close.</>},
-    {icon:'⚡',title:'Lead Pools — claim fresh leads',body:<>Under <b>Lead Pools</b> you'll find <b>High Ticket</b>, <b>MSN</b> and <b>VIRALS</b> — pools of freshly-scraped, unclaimed creators split for the team. Open a pool, tick the ones you want, and hit <b>Claim</b> — they become yours and drop into your queue.</>},
-    {icon:'🏷️',title:'Work a lead: qualify → contact',body:<>Once a lead is yours: review it and tag it <b>Potential</b> if it's a good fit, or <b>NQ</b> if not. When you reach out it moves to <b>Contacted</b>. The row actions let you push a lead to <b>Close</b> / <b>SmartReach</b>.</>},
-    {icon:'🔎',title:'Lead Filters — by status',body:<>The <b>Lead Filters</b> section lists your leads by stage — <b>Pending Qualification</b>, <b>NQ</b>, <b>Awaiting Potential</b>, <b>Contacted</b>, <b>For Recycle</b>, <b>Already Partner</b> — each with a live count. <b>For Recycle</b> is shared: grab a cooled-off lead before someone else does.</>},
-    {icon:'◎',title:'Scraper — find leads yourself',body:<>The <b>Scraper</b> searches YouTube for creators by keyword, platform, follower range and language. Results land in your queue to qualify. Your Scraper only shows the leads <b>you</b> scraped.</>},
-    {icon:'◉',title:'Lead Management',body:<><b>Lead Management</b> is your working list of leads not yet sorted into a status tab — assign, qualify or tidy them here. Use the rep chips at the top to filter to just yours.</>},
-    {icon:'🔔',title:'The top bar',body:<>Top-right: <b>🔍 Search (Ctrl/⌘ K)</b> jumps to any lead or page · the <b>🔔 bell</b> shows replies and lead conflicts · the <b>‹ back arrow</b> returns to your previous view · your <b>avatar</b> opens profile, password and dark mode.</>},
-    {icon:'✅',title:"You're all set!",body:<>Your daily flow: <b>claim from a Pool → qualify (Potential / NQ) → contact → push to Close</b>. Check <b>History</b> to see what changed, and you can reopen this tour anytime from the <b>Knowledge Base</b>. Good luck! 🚀</>},
+    {key:'sidebar', title:'Your navigation', body:<>Everything lives in this <b>sidebar</b> — grouped into Main, Lead Filters, Lead Pools and Campaigns. Let's walk through the parts you'll use daily.</>},
+    {key:'nav-home', title:'Home', body:<><b>Home</b> is the team board. Click <b>your own name</b> there (or your avatar → <b>My Dashboard</b>) to open YOUR dashboard — your KPIs and leads.</>},
+    {key:'nav-scraper', title:'Scraper', body:<>Search YouTube for new creators by keyword, platform, follower range and language. Results land in your queue and only show what <b>you</b> scraped.</>},
+    {key:'nav-lead-mgmt', title:'Lead Management', body:<>Your working list of leads not yet sorted into a status tab. Filter to yourself with the rep chips, then qualify or tidy.</>},
+    {key:'grp-filters', title:'Lead Filters — your status tags', body:<>Your leads by stage: <b>Pending Qualification</b>, <b>NQ</b>, <b>Awaiting Potential</b>, <b>Contacted</b>, <b>For Recycle</b>, <b>Already Partner</b> — each with a live count. <b>For Recycle</b> is shared: grab a cooled-off lead first.</>},
+    {key:'grp-pools', title:'Lead Pools', body:<><b>High Ticket</b>, <b>MSN</b> and <b>VIRALS</b> — pools of freshly-scraped, unclaimed creators split for the team. Open one, tick creators, and <b>Claim</b> — they become yours.</>},
+    {key:'grp-campaigns', title:'Campaigns', body:<>Jump straight to leads in a specific campaign — each chip shows your count.</>},
+    {key:'nav-knowledge', title:'Knowledge Base', body:<>The Sales Manual, the Tools launchpad — and this tour. Come back whenever you need a refresher.</>},
+    {key:'tb-back', title:'Back button', body:<>Steps back to your previous view — like a browser back button, for the dashboard.</>},
+    {key:'tb-search', title:'Search (Ctrl / ⌘ K)', body:<>Instantly jump to any lead or page — the fastest way to find a creator by name, email or URL.</>},
+    {key:'tb-bell', title:'Alerts', body:<>Replies from creators and lead conflicts (someone else working your channel) show up here.</>},
+    {key:'tb-profile', title:'Your profile', body:<>Open your profile, change your password, jump to your dashboard, toggle dark mode, or log out.</>},
+    {key:null, title:"You're all set! 🚀", body:<>Daily flow: <b>claim from a Pool → qualify (Potential / NQ) → contact → push to Close</b>. Reopen this tour anytime from the <b>Knowledge Base</b>.</>},
   ];
-  const [i,setI]=useState(0);
-  const step=steps[i]; const first=i===0; const last=i===steps.length-1;
-  const next=()=>{ if(last) onClose(); else setI(i+1); };
-  return (
-    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="modal" style={{maxWidth:600,width:'92vw',display:'flex',flexDirection:'column',overflow:'hidden',padding:0}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'15px 20px',borderBottom:'1px solid var(--border)'}}>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <span style={{fontSize:18}}>🧭</span>
-            <span style={{fontWeight:800,fontSize:15}}>Dashboard Tour</span>
-            <span style={{fontSize:12,color:'var(--text-dim)'}}>· step {i+1} of {steps.length}</span>
-          </div>
-          <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:15,padding:'4px 8px'}}>✕</button>
-        </div>
-        <div style={{padding:'30px 26px 20px',textAlign:'center',minHeight:210,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
-          <div style={{fontSize:46,marginBottom:14}}>{step.icon}</div>
-          <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:21,fontWeight:800,marginBottom:12,letterSpacing:'-.01em'}}>{step.title}</div>
-          <div style={{fontSize:14,lineHeight:1.65,color:'var(--text-dim)',maxWidth:470}}>{step.body}</div>
-        </div>
-        <div style={{display:'flex',justifyContent:'center',gap:7,padding:'2px 0 16px'}}>
-          {steps.map((_,k)=><span key={k} onClick={()=>setI(k)} title={`Step ${k+1}`} style={{width:k===i?22:8,height:8,borderRadius:999,background:k===i?'var(--accent)':'var(--border)',cursor:'pointer',transition:'all .2s'}}/>)}
-        </div>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'13px 20px',borderTop:'1px solid var(--border)',background:'var(--bg)'}}>
-          <button className="btn btn-outline btn-sm" onClick={onClose}>Skip</button>
-          <div style={{display:'flex',gap:8}}>
-            {!first && <button className="btn btn-outline btn-sm" onClick={()=>setI(i-1)}>‹ Back</button>}
-            <button className="btn btn-primary btn-sm" onClick={next}>{last?'Done ✓':'Next ›'}</button>
-          </div>
+  const [idx,setIdx]=useState(0);
+  const [rect,setRect]=useState(null);
+  const step=steps[idx]; const first=idx===0; const last=idx===steps.length-1;
+  useEffect(()=>{
+    let dead=false;
+    const measure=()=>{ if(dead) return;
+      if(!step.key){ setRect(null); return; }
+      const el=document.querySelector(`[data-tour="${step.key}"]`);
+      if(el){ const r=el.getBoundingClientRect(); setRect({top:r.top,left:r.left,width:r.width,height:r.height}); }
+      else setRect(null);
+    };
+    // First measure scrolls the target into view, then re-measures so the
+    // spotlight lands on its final position; later measures just re-align.
+    let first=true;
+    const run=()=>{ if(dead) return;
+      if(first && step.key){ const el=document.querySelector(`[data-tour="${step.key}"]`); if(el){ try{ el.scrollIntoView({block:'center',inline:'nearest'}); }catch(e){} } first=false; }
+      measure();
+    };
+    const t=setTimeout(run,70);
+    window.addEventListener('resize',measure);
+    window.addEventListener('scroll',measure,true);
+    return ()=>{ dead=true; clearTimeout(t); window.removeEventListener('resize',measure); window.removeEventListener('scroll',measure,true); };
+  },[idx]);
+  const next=()=>{ if(last) onClose(); else setIdx(idx+1); };
+  const pos=(()=>{ if(!rect) return null; const TW=330,m=14,vw=window.innerWidth,vh=window.innerHeight; let left,top;
+    if(rect.left < vw*0.34){ left=Math.min(rect.left+rect.width+m, vw-TW-12); top=Math.max(12,Math.min(rect.top, vh-250)); }
+    else { left=Math.min(Math.max(12, rect.left+rect.width/2-TW/2), vw-TW-12); top=rect.top+rect.height+m; if(top+240>vh) top=Math.max(12, rect.top-240); }
+    return {left,top,width:TW};
+  })();
+  const tipStyle = pos ? {top:pos.top,left:pos.left,width:pos.width} : {top:'50%',left:'50%',transform:'translate(-50%,-50%)',width:360};
+  return (<>
+    <div style={{position:'fixed',inset:0,zIndex:99998}}/>{/* blocks app clicks during the tour */}
+    {rect
+      ? <div style={{position:'fixed',top:rect.top-6,left:rect.left-6,width:rect.width+12,height:rect.height+12,borderRadius:12,boxShadow:'0 0 0 9999px rgba(10,10,18,.62)',border:'2px solid var(--accent)',zIndex:99999,pointerEvents:'none',transition:'top .22s,left .22s,width .22s,height .22s'}}/>
+      : <div style={{position:'fixed',inset:0,background:'rgba(10,10,18,.62)',zIndex:99999}}/>}
+    <div style={{position:'fixed',zIndex:100000,...tipStyle,background:'var(--card)',border:'1px solid var(--border)',borderRadius:16,boxShadow:'0 24px 60px -12px rgba(0,0,0,.5)',padding:18}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+        <span style={{fontSize:11,fontWeight:800,letterSpacing:'.06em',color:'var(--accent)'}}>🧭 TOUR · {idx+1}/{steps.length}</span>
+        <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:12.5,padding:'2px 8px'}}>Skip ✕</button>
+      </div>
+      <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:16.5,fontWeight:800,marginBottom:7,letterSpacing:'-.01em'}}>{step.title}</div>
+      <div style={{fontSize:13,lineHeight:1.6,color:'var(--text-dim)'}}>{step.body}</div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:16,gap:10}}>
+        <div style={{display:'flex',gap:5,flexWrap:'wrap',maxWidth:160}}>{steps.map((_,k)=><span key={k} onClick={()=>setIdx(k)} style={{width:k===idx?16:6,height:6,borderRadius:999,background:k===idx?'var(--accent)':'var(--border)',cursor:'pointer'}}/>)}</div>
+        <div style={{display:'flex',gap:7}}>
+          {!first && <button className="btn btn-outline btn-sm" onClick={()=>setIdx(idx-1)}>‹ Back</button>}
+          <button className="btn btn-primary btn-sm" onClick={next}>{last?'Done ✓':'Next ›'}</button>
         </div>
       </div>
     </div>
-  );
+  </>);
 }
 
-function KnowledgeBaseView({articles,tools:toolsProp,isAdmin,onSave,onDelete,onDeleteTool,dark}){
+function KnowledgeBaseView({articles,tools:toolsProp,isAdmin,onSave,onDelete,onDeleteTool,onStartTour,dark}){
   const tools=toolsProp||(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[]);
   const [view,setView]=useState('tools');           // 'tools' | 'manual'
   const [selectedId,setSelectedId]=useState(null);
   const [editing,setEditing]=useState(null);        // null | 'new' | article object
-  const [tourOpen,setTourOpen]=useState(false);
   const selected = selectedId ? (articles||[]).find(a=>a.id===selectedId) : null;
   return <>
     <KbLaunchpad
@@ -2759,7 +2780,7 @@ function KnowledgeBaseView({articles,tools:toolsProp,isAdmin,onSave,onDelete,onD
       selected={selected}
       onSelect={id=>setSelectedId(id)}
       onBack={()=>setSelectedId(null)}
-      onTour={()=>setTourOpen(true)}
+      onTour={onStartTour}
       isAdmin={isAdmin}
       onAddArticle={()=>setEditing('new')}
       onEditArticle={a=>setEditing(a)}
@@ -2772,7 +2793,6 @@ function KnowledgeBaseView({articles,tools:toolsProp,isAdmin,onSave,onDelete,onD
       onSave={a=>{ onSave(a); setEditing(null); if(editing==='new') setSelectedId(a.id); }}
       onClose={()=>setEditing(null)}
     />}
-    {tourOpen && <DashboardTour onClose={()=>setTourOpen(false)}/>}
   </>;
 }
 
@@ -7687,6 +7707,7 @@ function App() {
   const lastNav=useRef({tab,activeRep,showRepSelect});
   const backingRef=useRef(false);
   const [canBack,setCanBack]=useState(false);
+  const [tourOpen,setTourOpen]=useState(false);
   useEffect(()=>{
     const cur={tab,activeRep,showRepSelect};
     const p=lastNav.current;
@@ -9308,7 +9329,7 @@ function App() {
     if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead} isLeadgen={!!(currentUser&&currentUser.role==='leadgen')}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
-    if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} tools={config.kbTools||(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[])} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle} onDeleteTool={deleteKbTool} dark={darkMode}/>;
+    if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} tools={config.kbTools||(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[])} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle} onDeleteTool={deleteKbTool} onStartTour={()=>{ setTab('knowledge'); setShowRepSelect(false); setTourOpen(true); }} dark={darkMode}/>;
     if(tab==='attendance') return isAdmin ? <AttendanceView sessions={sessions} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory} isAdmin={isAdmin} onOpenRestorePoints={isAdmin?(()=>setTab('restore')):null}/>;
@@ -9421,14 +9442,14 @@ function App() {
             <div className="tagline">Lead Management</div>
           </div>
         </div>
-        <button className="topbar-icon-btn" onClick={goBack} disabled={!canBack}
+        <button className="topbar-icon-btn" data-tour="tb-back" onClick={goBack} disabled={!canBack}
           title="Back to your previous view" aria-label="Back"
           style={{marginLeft:10,opacity:canBack?1:.35,cursor:canBack?'pointer':'default'}}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         <div style={{flex:1}}/>
         <div className="topbar-right">
-          <button className="topbar-icon-btn" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
+          <button className="topbar-icon-btn" data-tour="tb-search" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </button>
           {(()=>{
@@ -9439,7 +9460,7 @@ function App() {
             const unread = myReplies.filter(r=>!seen.has(r.id)).length
                          + dupAlerts.filter(a=>!dseen.has(a.id)).length;
             return (
-              <div className="bell-wrap">
+              <div className="bell-wrap" data-tour="tb-bell">
                 <button className="btn btn-outline btn-sm bell-btn" title="Replies, interest & lead conflicts"
                   onClick={()=>{ if(!showBell){ markRepliesSeen(currentUser.name, myReplies.map(r=>r.id)); markDupSeen(currentUser.name, dupAlerts.map(a=>a.id)); } setShowBell(s=>!s); }}>
                   🔔{unread>0 && <span className="bell-badge">{unread>9?'9+':unread}</span>}
@@ -9494,7 +9515,7 @@ function App() {
               </div>
             );
           })()}
-          <div className="profile-pill-wrap">
+          <div className="profile-pill-wrap" data-tour="tb-profile">
             <div className="topbar-user-pill" role="button" tabIndex={0} style={{cursor:'pointer'}}
               title="Open my dashboard"
               onClick={()=>{setShowRepSelect(false);setActiveRep(currentUser.name);setTab('rep-home');}}
@@ -9536,20 +9557,20 @@ function App() {
       <div className="app-body">
         {/* SIDEBAR */}
         {navCollapsed && <div className="sidebar-spacer"/>}
-        <nav className={`sidebar${navCollapsed?' collapsed':''}`}>
+        <nav className={`sidebar${navCollapsed?' collapsed':''}`} data-tour="sidebar">
           <div className="sidebar-collapse-toggle" onClick={()=>setNavCollapsed(c=>!c)} title={navCollapsed?'Pin sidebar open':'Collapse to icons'}>
             <span className="sct-icon">{navCollapsed?'»':'«'}</span><span className="sct-label">Collapse</span>
           </div>
           <div className="sidebar-section-label">Main</div>
           {NAV_MAIN.filter(n=>(n.id==='attendance'||n.id==='archive'||n.id==='restore'||n.id==='errors'||n.id==='ai-scraper')?isAdmin:((n.id==='leaves'||n.id==='knowledge')?config.tabs[n.id]!==false:config.tabs[n.id])).map(n=>(
-            <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
+            <div key={n.id} data-tour={'nav-'+n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
               {n.id==='errors' && errUnseen>0 && <span className="nav-badge red">{errUnseen>99?'99+':errUnseen}</span>}
               {n.id==='ai-scraper' && <span className="nav-badge amber">BETA</span>}
             </div>
           ))}
           <div className="nav-divider"/>
-          <div className="sidebar-section-label">Lead Filters</div>
+          <div className="sidebar-section-label" data-tour="grp-filters">Lead Filters</div>
           {NAV_FILTER.filter(n=>config.tabs[n.id]).map(n=>(
             <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
@@ -9558,7 +9579,7 @@ function App() {
           ))}
           {config.tabs.pools!==false && <>
             <div className="nav-divider"/>
-            <div className="sidebar-section-label">Lead Pools</div>
+            <div className="sidebar-section-label" data-tour="grp-pools">Lead Pools</div>
             {visiblePools.map(p=>{
               const cnt=poolTabLeads(p.id).length;
               return(
@@ -9571,7 +9592,7 @@ function App() {
           </>}
           {(config.campaigns||[]).length>0 && <>
             <div className="nav-divider"/>
-            <div className="sidebar-section-label">Campaigns</div>
+            <div className="sidebar-section-label" data-tour="grp-campaigns">Campaigns</div>
             {(config.campaigns||[]).map(c=>{
               const id=c.id.toLowerCase();
               // Scoped like every other lead tab: a rep's badge counts THEIR
@@ -9635,6 +9656,7 @@ function App() {
         onKeepTag={importWarnKeepTag} onRemove={importWarnRemove}
         onKeepAll={()=>{ addToast(`${importWarn.length} recently-contacted lead(s) kept as-is`,'info'); setImportWarn(null); }}
         onClose={()=>setImportWarn(null)}/>}
+      {tourOpen && <GuidedTour onClose={()=>setTourOpen(false)}/>}
     </div>
     </PresenceContext.Provider>
     </AdminContext.Provider>
