@@ -223,6 +223,7 @@
     const FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/clip-finder';
     const REEL_FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/render-compilation';
     const TRANSCRIBE_FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/transcribe';
+    const TRANSCRIBE_ASYNC_FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/transcribe-async';
     const VISION_FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/vision-scenes';
     const SUPA = 'https://wokrdfqzwrausazzoedi.supabase.co';
     const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indva3JkZnF6d3JhdXNhenpvZWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTE5NDAsImV4cCI6MjA5Nzk2Nzk0MH0.YE0CvsTs3XlEJ0n0mBgdKVFy5Nwpys2C0wO96F8F0ho';
@@ -432,12 +433,26 @@
       try{
         let payload, viaLabel = '';
         if(isDirect){
-          statusEl.innerHTML = `<span class="spinner"></span> Transcribing the video… (longer videos take a bit)`;
-          const tr = await fetch(TRANSCRIBE_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url, lang: opts.lang }) });
-          let tj = null; try { tj = await tr.json(); } catch(_e){ tj = null; }
-          if(!tj || !tj.ok){ throw new Error((tj && tj.error) || (tr.status>=500 ? `Transcription timed out (HTTP ${tr.status}) — the video is likely too long/large to transcribe in one pass. Try a shorter or 1080p export.` : `Transcription failed (HTTP ${tr.status}).`)); }
-          payload = { ...opts, transcript: tj.segments };
-          viaLabel = tj.provider ? ` · ${tj.provider}` : ' · transcribed';
+          statusEl.innerHTML = `<span class="spinner"></span> Transcribing the video…`;
+          const sub = await fetch(TRANSCRIBE_ASYNC_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url, lang: opts.lang }) });
+          const sj = await sub.json();
+          if(!sj.ok || !sj.jobId) throw new Error(sj.error || 'Could not start transcription.');
+          const jid = sj.jobId; let segments = null, tFails = 0;
+          while(true){
+            await new Promise(r=>setTimeout(r,3000));
+            let pj;
+            try { const pr = await fetch(TRANSCRIBE_ASYNC_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ jobId: jid }) }); pj = await pr.json(); tFails=0; }
+            catch(_e){ if(++tFails>=8) throw new Error('Lost connection during transcription.'); continue; }
+            if(!pj.ok) throw new Error(pj.error || 'Transcription poll failed.');
+            if(pj.status==='done'){ segments = pj.segments; break; }
+            if(pj.status==='error') throw new Error(pj.error || 'Transcription failed.');
+            const tsec = Math.round((performance.now()-t0)/1000);
+            statusEl.innerHTML = `<span class="spinner"></span> Transcribing the video… (${tsec}s${tsec>90?', long videos take a few minutes':''})`;
+            if(tsec>1500) throw new Error('Transcription is taking too long — try a shorter or 1080p export.');
+          }
+          if(!segments || !segments.length) throw new Error('No speech detected in the video.');
+          payload = { ...opts, transcript: segments };
+          viaLabel = ' · deepgram';
           statusEl.innerHTML = `<span class="spinner"></span> Claude is picking the best moments…`;
         } else if(url){
           payload = { ...opts, youtubeUrl: url };
