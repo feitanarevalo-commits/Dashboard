@@ -75,7 +75,16 @@
     .spinner{width:16px;height:16px;border:2px solid var(--line-hi);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;flex:none}
     @keyframes spin{100%{transform:rotate(360deg)}}
     .hidden{display:none !important}
-    .cthumb{width:132px; aspect-ratio:16/9; object-fit:cover; background:#0c0b13; border:1px solid var(--line); border-radius:9px; flex:none; align-self:flex-start}
+    .cthumb{width:132px; aspect-ratio:16/9; object-fit:cover; background:#0c0b13; border:1px solid var(--line); border-radius:9px; flex:none; align-self:flex-start; cursor:pointer}
+    .tag.prev,.tag.dl{cursor:pointer}
+    .tag.prev:hover,.tag.dl:hover{border-color:var(--accent); background:var(--accent-soft); color:var(--accent-2)}
+    .tag.dl[data-busy]{color:var(--warn); border-color:var(--warn)}
+    .pmodal{position:fixed; inset:0; z-index:90; background:rgba(0,0,0,.82); display:grid; place-items:center; padding:20px}
+    .pmodal[hidden]{display:none}
+    .pmodal-inner{position:relative; width:100%; max-width:860px}
+    .pmodal-inner video,.pmodal-inner iframe{width:100%; aspect-ratio:16/9; border:0; border-radius:12px; background:#000; display:block}
+    .pmodal-cap{color:#cfcfe0; font:600 13px 'Plus Jakarta Sans',sans-serif; margin:10px 2px 0; display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+    .pmodal-x{position:absolute; top:-40px; right:0; width:34px; height:34px; border:0; border-radius:9px; background:var(--card); color:var(--text); cursor:pointer; font-size:16px}
     @media(max-width:560px){ .cthumb{width:100px} }
 
     .grid{display:flex; flex-direction:column; gap:12px}
@@ -142,8 +151,9 @@
       <textarea id="transcript" placeholder="0:00  Welcome back to the show...&#10;0:15  The biggest mistake I made was hiring too fast...&#10;0:45  Here's the one metric I wish I tracked earlier..."></textarea>
       <div class="opts">
         <div class="opt"><label>Clips</label><input type="number" id="numClips" value="5" min="1" max="20"></div>
-        <div class="opt"><label>Min sec</label><input type="number" id="minDuration" value="20" min="5" max="180"></div>
-        <div class="opt"><label>Max sec</label><input type="number" id="maxDuration" value="75" min="10" max="240"></div>
+        <div class="opt"><label>Min length</label><input type="number" id="minDuration" value="20" min="1" max="600"></div>
+        <div class="opt"><label>Max length</label><input type="number" id="maxDuration" value="75" min="1" max="600"></div>
+        <div class="opt"><label>Unit</label><select id="durUnit"><option value="1">Seconds</option><option value="60">Minutes</option></select></div>
         <div class="opt"><label>Lang</label>
           <select id="lang" title="Preferred transcript language">
             <option value="en">English</option>
@@ -193,6 +203,13 @@
     </div>
   </div>
   <div class="toast" id="toast"></div>
+  <div class="pmodal" id="pmodal" hidden>
+    <div class="pmodal-inner">
+      <button class="pmodal-x" id="pmodalX" title="Close (Esc)">✕</button>
+      <div id="pmodalBody"></div>
+      <div class="pmodal-cap" id="pmodalCap"></div>
+    </div>
+  </div>
 
   <script>
     const FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/clip-finder';
@@ -265,7 +282,9 @@
             <h3 class="ctitle">${esc(c.title)}</h3>
             <div class="meta">
               <span class="tag time">${c.startClock||fmtClock(c.start)} – ${c.endClock||fmtClock(c.end)}</span>
-              <span class="tag">${dur}s</span>
+              <span class="tag">${dur>=60?Math.floor(dur/60)+'m '+Math.round(dur%60)+'s':dur+'s'}</span>
+              <span class="tag prev" data-s="${c.start}" data-e="${c.end}" data-t="${esc(c.title)}"><svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg> Preview</span>
+              ${(lastSourceUrl && !lastVid) ? `<span class="tag dl" data-s="${c.start}" data-e="${c.end}" data-t="${esc(c.title)}"><svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7 10l5 5 5-5"/><path d="M4 20h16"/></svg> Download</span>` : ''}
               ${watch}
               <span class="tag copy" data-copy="${esc((c.startClock||fmtClock(c.start))+' - '+(c.endClock||fmtClock(c.end)))}"><svg viewBox="0 0 24 24" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg> Copy time</span>
             </div>
@@ -277,7 +296,55 @@
       }).join('');
       results.querySelectorAll('.tag.copy').forEach(el => el.onclick = () => { navigator.clipboard.writeText(el.dataset.copy); el.classList.add('copied'); toast('Timestamp copied'); setTimeout(()=>el.classList.remove('copied'),1200); });
       results.querySelectorAll('.quote-toggle').forEach(el => el.onclick = () => { const q=document.getElementById(el.dataset.q); q.classList.toggle('open'); el.textContent = q.classList.contains('open')?'Hide transcript ▴':'Show full transcript ▾'; });
+      results.querySelectorAll('.tag.prev').forEach(el => el.onclick = () => openPreview(+el.dataset.s, +el.dataset.e, el.dataset.t));
+      results.querySelectorAll('.cthumb').forEach(el => el.onclick = () => { const p = el.closest('.clip')?.querySelector('.tag.prev'); if(p) openPreview(+p.dataset.s, +p.dataset.e, p.dataset.t); });
+      results.querySelectorAll('.tag.dl').forEach(el => el.onclick = () => downloadClip(+el.dataset.s, +el.dataset.e, el.dataset.t, el));
     }
+
+    // Inline preview: YouTube -> embed with start/end; direct/uploaded video -> media-fragment #t=start,end.
+    function openPreview(start, end, title){
+      const body = $('#pmodalBody');
+      if(lastVid){ body.innerHTML = `<iframe src="https://www.youtube.com/embed/${lastVid}?start=${Math.floor(start)}&end=${Math.max(Math.ceil(end), Math.floor(start)+1)}&autoplay=1&rel=0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>`; }
+      else if(lastSourceUrl && /^https?:\/\//.test(lastSourceUrl)){ body.innerHTML = `<video src="${esc(lastSourceUrl)}#t=${Math.max(0,start)},${end}" controls autoplay playsinline></video>`; }
+      else { toast('Preview needs a video source (paste a link or upload).'); return; }
+      $('#pmodalCap').innerHTML = `<span>${esc(title||'')}</span><span style="color:var(--faint)">${fmtClock(start)}–${fmtClock(end)}</span>`;
+      $('#pmodal').hidden = false;
+    }
+    function closePreview(){ $('#pmodal').hidden = true; $('#pmodalBody').innerHTML=''; }
+    $('#pmodalX').onclick = closePreview;
+    $('#pmodal').onclick = (e) => { if(e.target.id==='pmodal') closePreview(); };
+    document.addEventListener('keydown', e => { if(e.key==='Escape') closePreview(); });
+
+    // Download one clip: render just that segment from the source (direct/uploaded only) and save the mp4.
+    async function downloadClip(start, end, title, el){
+      if(el.getAttribute('data-busy')) return;
+      const orig = el.innerHTML; el.setAttribute('data-busy','1');
+      const t0 = Date.now();
+      try{
+        const sub = await fetch(REEL_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sourceUrl:lastSourceUrl, segments:[{ start, end, title }], aspect:'16:9', transition:'none' }) });
+        const sj = await sub.json();
+        if(!sj.ok || !sj.renderId) throw new Error(sj.error || 'Render did not start.');
+        const rid = sj.renderId; let fails = 0;
+        while(true){
+          await new Promise(r=>setTimeout(r,4000));
+          let pj;
+          try { const pr = await fetch(REEL_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ renderId: rid }) }); pj = await pr.json(); fails=0; }
+          catch(_e){ if(++fails>=8) throw new Error('Lost connection.'); continue; }
+          if(!pj.ok) throw new Error(pj.error || 'Poll failed.');
+          const secs = Math.round((Date.now()-t0)/1000);
+          el.innerHTML = `⏳ ${pj.status==='fetching'?'fetching':'rendering'} ${secs}s`;
+          if(pj.status==='done' && pj.url){
+            el.innerHTML = '⏬ saving…';
+            const blob = await (await fetch(pj.url)).blob();
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (title||'clip').replace(/[^A-Za-z0-9_-]+/g,'_').slice(0,50)+'.mp4'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+            el.innerHTML = '✓ downloaded'; toast('Clip downloaded'); setTimeout(()=>{ el.innerHTML = orig; el.removeAttribute('data-busy'); }, 2500); break;
+          }
+          if(pj.status==='failed') throw new Error('Render failed: ' + (pj.error||'unknown'));
+          if(secs>1500) throw new Error('Timed out (source too large — upload a 1080p export).');
+        }
+      }catch(e){ el.innerHTML = orig; el.removeAttribute('data-busy'); toast('Download failed: ' + e.message); }
+    }
+    $('#durUnit').onchange = () => { if($('#durUnit').value==='60'){ $('#minDuration').value=1; $('#maxDuration').value=3; } else { $('#minDuration').value=20; $('#maxDuration').value=75; } };
 
     async function run(){
       const url = $('#ytUrl').value.trim();
@@ -287,7 +354,8 @@
       const vid = ytId(url);
       const btn = $('#runBtn'); btn.disabled = true;
       const isDirect = url && !vid;  // a direct / uploaded media URL (not YouTube) -> ElevenLabs ASR
-      const opts = { numClips:+$('#numClips').value||5, minDuration:+$('#minDuration').value||20, maxDuration:+$('#maxDuration').value||75, model:$('#model').value, lang:$('#lang').value||'en', focus:$('#focus').value.trim() };
+      const u = +$('#durUnit').value||1;
+      const opts = { numClips:+$('#numClips').value||5, minDuration:(+$('#minDuration').value||20)*u, maxDuration:(+$('#maxDuration').value||75)*u, model:$('#model').value, lang:$('#lang').value||'en', focus:$('#focus').value.trim() };
       results.innerHTML = Array.from({length:3}).map(()=>'<div class="skel"></div>').join('');
       const t0 = performance.now();
       try{
