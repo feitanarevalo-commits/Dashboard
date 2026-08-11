@@ -434,8 +434,8 @@
         if(isDirect){
           statusEl.innerHTML = `<span class="spinner"></span> Transcribing the video… (longer videos take a bit)`;
           const tr = await fetch(TRANSCRIBE_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url, lang: opts.lang }) });
-          const tj = await tr.json();
-          if(!tj.ok){ throw new Error(tj.error || 'Transcription failed.'); }
+          let tj = null; try { tj = await tr.json(); } catch(_e){ tj = null; }
+          if(!tj || !tj.ok){ throw new Error((tj && tj.error) || (tr.status>=500 ? `Transcription timed out (HTTP ${tr.status}) — the video is likely too long/large to transcribe in one pass. Try a shorter or 1080p export.` : `Transcription failed (HTTP ${tr.status}).`)); }
           payload = { ...opts, transcript: tj.segments };
           viaLabel = tj.provider ? ` · ${tj.provider}` : ' · transcribed';
           statusEl.innerHTML = `<span class="spinner"></span> Claude is picking the best moments…`;
