@@ -179,6 +179,14 @@
       <div style="margin-top:12px">
         <label class="lbl" for="focus">Focus <span style="color:var(--faint);font-weight:500">— optional: only return clips about a topic (e.g. “food”, “pricing”, “the founder’s story”)</span></label>
         <input type="text" id="focus" placeholder="Leave blank to get all the best highlights" style="width:100%;font:500 14px 'Plus Jakarta Sans',sans-serif;color:var(--text);background:var(--bg2);border:1px solid var(--line);border-radius:11px;padding:11px 13px;outline:none">
+        <div style="margin-top:8px; display:flex; align-items:center; gap:9px; flex-wrap:wrap">
+          <label style="font:600 12px 'Plus Jakarta Sans',sans-serif; color:var(--muted)">Match by</label>
+          <select id="matchBy" style="height:36px; padding:0 30px 0 10px; font-size:13px; color:var(--text); background:var(--bg2); border:1px solid var(--line); border-radius:9px; appearance:none; background-image:url(&quot;data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239c99a8' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>&quot;); background-repeat:no-repeat; background-position:right 10px center; cursor:pointer">
+            <option value="transcript">What's said (transcript)</option>
+            <option value="vision">What's on screen (Vision)</option>
+          </select>
+          <span class="ghost" style="color:var(--faint); font-size:12px">Vision = the AI looks at the video frames; needs an uploaded / direct video + a focus.</span>
+        </div>
       </div>
       <div class="runrow">
         <button class="btn primary" id="runBtn"><svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg> Find clips</button>
@@ -215,6 +223,7 @@
     const FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/clip-finder';
     const REEL_FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/render-compilation';
     const TRANSCRIBE_FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/transcribe';
+    const VISION_FN = 'https://wokrdfqzwrausazzoedi.supabase.co/functions/v1/vision-scenes';
     const SUPA = 'https://wokrdfqzwrausazzoedi.supabase.co';
     const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indva3JkZnF6d3JhdXNhenpvZWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTE5NDAsImV4cCI6MjA5Nzk2Nzk0MH0.YE0CvsTs3XlEJ0n0mBgdKVFy5Nwpys2C0wO96F8F0ho';
     const $ = s => document.querySelector(s);
@@ -346,6 +355,62 @@
     }
     $('#durUnit').onchange = () => { if($('#durUnit').value==='60'){ $('#minDuration').value=1; $('#maxDuration').value=3; } else { $('#minDuration').value=20; $('#maxDuration').value=75; } };
 
+    // Grab ~N frames evenly across a direct/uploaded video, as small base64 JPEGs (for Vision focus).
+    function sampleFrames(url, maxFrames, width, onProgress){
+      return new Promise((resolve, reject) => {
+        const v = document.createElement('video');
+        v.crossOrigin='anonymous'; v.muted=true; v.playsInline=true; v.preload='auto';
+        v.style.cssText='position:fixed;left:-99999px;top:0;width:2px;height:2px;opacity:0';
+        document.body.appendChild(v);
+        let done=false; const cleanup=()=>{ try{v.pause();}catch(_){} try{v.removeAttribute('src'); v.load();}catch(_){} v.remove(); };
+        const fail=(e)=>{ if(done) return; done=true; cleanup(); reject(e); };
+        v.onerror = () => fail(new Error('Could not load the video for frame scanning.'));
+        v.onloadedmetadata = async () => {
+          try{
+            const dur = v.duration; if(!dur || !isFinite(dur)) throw new Error('Could not read the video duration.');
+            const n = Math.max(4, Math.min(maxFrames, Math.round(dur/2)));
+            const step = dur/n; const canvas=document.createElement('canvas'); const ctx=canvas.getContext('2d'); const frames=[];
+            for(let i=0;i<n;i++){
+              const t = Math.min(dur-0.05, i*step + step*0.5);
+              await new Promise((res,rej)=>{ const to=setTimeout(()=>rej(new Error('Frame seek timed out.')),9000); const on=()=>{ v.removeEventListener('seeked',on); clearTimeout(to); res(); }; v.addEventListener('seeked',on); v.currentTime=t; });
+              await new Promise(r=>requestAnimationFrame(()=>r()));
+              const vw=v.videoWidth||16, vh=v.videoHeight||9; canvas.width=width; canvas.height=Math.max(1,Math.round(width*vh/vw));
+              ctx.drawImage(v,0,0,canvas.width,canvas.height);
+              let dataUrl; try{ dataUrl=canvas.toDataURL('image/jpeg',0.5); }catch(_e){ throw new Error('This video blocks cross-origin frame reads, so Vision can’t scan it.'); }
+              frames.push({ t:Math.round(t*10)/10, img:dataUrl.split(',')[1] });
+              if(onProgress) onProgress(i+1, n);
+            }
+            done=true; cleanup(); resolve(frames);
+          }catch(e){ fail(e); }
+        };
+        v.src = url;
+      });
+    }
+
+    // Vision focus: sample frames -> Claude looks at them -> scenes matching the visual focus.
+    async function runVision(url, vid){
+      const btn = $('#runBtn'); btn.disabled = true;
+      const u = +$('#durUnit').value||1;
+      const numClips=+$('#numClips').value||8, minDuration=(+$('#minDuration').value||8)*u, maxDuration=(+$('#maxDuration').value||180)*u, model=$('#model').value, focus=$('#focus').value.trim();
+      results.innerHTML = Array.from({length:3}).map(()=>'<div class="skel"></div>').join('');
+      statusEl.classList.remove('err');
+      const t0 = performance.now();
+      try{
+        const frames = await sampleFrames(url, 40, 320, (i,n)=>{ statusEl.innerHTML = `<span class="spinner"></span> Scanning the video frames… (${i}/${n})`; });
+        statusEl.innerHTML = `<span class="spinner"></span> Claude is looking at ${frames.length} frames for “${esc(focus)}”…`;
+        const r = await fetch(VISION_FN, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ frames, focus, numClips, minDuration, maxDuration, model }) });
+        const j = await r.json();
+        if(!j.ok) throw new Error(j.error || ('HTTP '+r.status));
+        const secs = ((performance.now()-t0)/1000).toFixed(1);
+        statusEl.textContent = `Found ${j.count} clip${j.count===1?'':'s'} in ${secs}s · ${j.model} · vision (${j.framesAnalysed} frames)`;
+        lastClips = j.clips||[]; lastSourceUrl = url; lastVid = vid; lastVideoLen = Math.max(1, ...lastClips.map(c=>c.end||0));
+        render(j.clips, vid);
+        $('#reelResult').classList.add('hidden');
+        if(lastClips.length){ $('#reelBar').classList.remove('hidden'); $('#reelBtn').disabled=false; $('#reelNote').textContent=''; } else { $('#reelBar').classList.add('hidden'); }
+      }catch(e){ results.innerHTML=''; statusEl.textContent='Error: '+e.message; statusEl.classList.add('err'); }
+      finally{ btn.disabled=false; }
+    }
+
     async function run(){
       const url = $('#ytUrl').value.trim();
       const transcript = $('#transcript').value.trim();
@@ -353,7 +418,13 @@
       statusEl.classList.remove('err');
       const vid = ytId(url);
       const btn = $('#runBtn'); btn.disabled = true;
-      const isDirect = url && !vid;  // a direct / uploaded media URL (not YouTube) -> ElevenLabs ASR
+      const isDirect = url && !vid;  // a direct / uploaded media URL (not YouTube)
+      if($('#matchBy').value === 'vision'){
+        btn.disabled = false;
+        if(!isDirect){ statusEl.textContent='Vision needs an uploaded or direct video URL (not a YouTube link or pasted transcript).'; statusEl.classList.add('err'); return; }
+        if(!$('#focus').value.trim()){ statusEl.textContent='Add a Focus describing what to look for on screen (e.g. “mountains”).'; statusEl.classList.add('err'); $('#focus').focus(); return; }
+        return runVision(url, vid);
+      }
       const u = +$('#durUnit').value||1;
       const opts = { numClips:+$('#numClips').value||5, minDuration:(+$('#minDuration').value||20)*u, maxDuration:(+$('#maxDuration').value||75)*u, model:$('#model').value, lang:$('#lang').value||'en', focus:$('#focus').value.trim() };
       results.innerHTML = Array.from({length:3}).map(()=>'<div class="skel"></div>').join('');
