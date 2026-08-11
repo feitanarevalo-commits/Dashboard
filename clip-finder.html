@@ -166,6 +166,10 @@
           </select>
         </div>
       </div>
+      <div style="margin-top:12px">
+        <label class="lbl" for="focus">Focus <span style="color:var(--faint);font-weight:500">— optional: only return clips about a topic (e.g. “food”, “pricing”, “the founder’s story”)</span></label>
+        <input type="text" id="focus" placeholder="Leave blank to get all the best highlights" style="width:100%;font:500 14px 'Plus Jakarta Sans',sans-serif;color:var(--text);background:var(--bg2);border:1px solid var(--line);border-radius:11px;padding:11px 13px;outline:none">
+      </div>
       <div class="runrow">
         <button class="btn primary" id="runBtn"><svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg> Find clips</button>
         <button class="btn" id="exampleBtn">Load example</button>
@@ -228,7 +232,7 @@
 2:30  When I realized, I called them and admitted it immediately. That honesty is why they signed a two year deal the next week. Transparency wins.`;
 
     $('#exampleBtn').onclick = () => { $('#transcript').value = EXAMPLE; $('#numClips').value = 3; toast('Example transcript loaded'); };
-    $('#clearBtn').onclick = () => { $('#transcript').value=''; $('#ytUrl').value=''; results.innerHTML=''; statusEl.textContent=''; statusEl.classList.remove('err'); lastClips=[]; lastSourceUrl=''; $('#reelBar').classList.add('hidden'); $('#reelResult').classList.add('hidden'); };
+    $('#clearBtn').onclick = () => { $('#transcript').value=''; $('#ytUrl').value=''; $('#focus').value=''; results.innerHTML=''; statusEl.textContent=''; statusEl.classList.remove('err'); lastClips=[]; lastSourceUrl=''; $('#reelBar').classList.add('hidden'); $('#reelResult').classList.add('hidden'); };
 
     function scoreClass(n){ return n>=85?'good':n>=70?'mid':'low'; }
 
@@ -247,7 +251,7 @@
     }
 
     function render(clips, vid){
-      if(!clips.length){ results.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><h3>No strong clips found</h3><p>Try a longer transcript, or lower the minimum duration.</p></div>`; return; }
+      if(!clips.length){ const f=$('#focus').value.trim(); results.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><h3>No ${f?`“${esc(f)}” `:''}clips found</h3><p>${f?'Nothing in this video matched that focus — try a broader topic, or clear the Focus field for all highlights.':'Try a longer transcript, or lower the minimum duration.'}</p></div>`; return; }
       results.innerHTML = clips.map(c => {
         const dur = c.duration!=null ? c.duration : Math.round((c.end-c.start)*10)/10;
         const watch = vid ? `<a class="tag watch" target="_blank" rel="noopener" href="https://youtu.be/${vid}?t=${Math.floor(c.start)}"><svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg> Watch at ${fmtClock(c.start)}</a>` : '';
@@ -283,7 +287,7 @@
       const vid = ytId(url);
       const btn = $('#runBtn'); btn.disabled = true;
       const isDirect = url && !vid;  // a direct / uploaded media URL (not YouTube) -> ElevenLabs ASR
-      const opts = { numClips:+$('#numClips').value||5, minDuration:+$('#minDuration').value||20, maxDuration:+$('#maxDuration').value||75, model:$('#model').value, lang:$('#lang').value||'en' };
+      const opts = { numClips:+$('#numClips').value||5, minDuration:+$('#minDuration').value||20, maxDuration:+$('#maxDuration').value||75, model:$('#model').value, lang:$('#lang').value||'en', focus:$('#focus').value.trim() };
       results.innerHTML = Array.from({length:3}).map(()=>'<div class="skel"></div>').join('');
       const t0 = performance.now();
       try{
