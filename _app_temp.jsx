@@ -2980,6 +2980,9 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const [period,setPeriod]=useState('daily');
   const [dayOffset,setDayOffset]=useState(0);      // ≤0 days from today
   const [repMetric,setRepMetric]=useState('potentialNow');   // drives the rep bars
+  // Which of the 4 live campaign metrics to show (Potential/Contacted/Imported/Fresh).
+  const [metricsShown,setMetricsShown]=useState({potentialNow:true,contactedNow:true,impNow:true,freshNow:true});
+  const [metricMenuOpen,setMetricMenuOpen]=useState(false);
   const [sortMode,setSortMode]=useState('team');
   const [detail,setDetail]=useState('');   // rep whose performance report is open
   const [heatSeries,setHeatSeries]=useState('contacted');   // sparkline + heatmap series
@@ -3011,7 +3014,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   // including untouched bulk-sheet imports). `imported`/`fresh`/`sourced` count
   // QUALIFIED leads only — a rep who imports 2,000 raw rows from a sheet hasn't
   // sourced 2,000 fresh leads, and the board used to read as if they had.
-  const EMPTY=()=>({assigned:0,imported:0,potentials:0,potentialNow:0,contacted:0,contactedNow:0,pending:0,fresh:0,toWork:0,sourced:0});
+  const EMPTY=()=>({assigned:0,imported:0,potentials:0,potentialNow:0,contacted:0,contactedNow:0,pending:0,fresh:0,toWork:0,sourced:0,impNow:0,freshNow:0});
   function buildStats(w){
     const inW=d=>{ const s=String(d||'').slice(0,10); return !!s && s>=w.from && s<=w.to; };
     const byRep={}, byCamp={}, team=EMPTY();
@@ -3052,6 +3055,11 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
       if((l.tags||[]).includes('Potential')){
         if(rep){ bucket(rep,null).potentialNow++; camps.forEach(c=>bucket(rep,c).potentialNow++); }
         camps.forEach(c=>byCamp[c].potentialNow++); team.potentialNow++;
+        // Split those live Potentials by Close status: Fresh = not yet on Close
+        // (still to push), Imported = already on Close. impNow + freshNow === potentialNow.
+        const nowFld = isFreshOrigin ? 'freshNow' : 'impNow';
+        if(rep){ bucket(rep,null)[nowFld]++; camps.forEach(c=>bucket(rep,c)[nowFld]++); }
+        camps.forEach(c=>byCamp[c][nowFld]++); team[nowFld]++;
       }
       // Contacted leads the rep is HOLDING right now (tagged Contacted), independent
       // of the window — the headline "Contacted" metric. `contacted` above stays the
@@ -3121,6 +3129,18 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const pct=(n,d)=>d>0?Math.round((n/d)*100):0;
   const fmt=n=>Number(n||0).toLocaleString();
   const deltaOf=(a,b)=>{ const d=a-b; return {v:d, label:(d>0?'+':'')+d, fg:d>0?C.good:(d<0?C.bad:'var(--text-light)')}; };
+
+  // The 4 live "holding right now" metrics for the campaign cards + rep grid.
+  // These match what a rep sees in their own tabs; impNow+freshNow === potentialNow.
+  const CARD_METRICS=[
+    {id:'potentialNow', label:'Potential', short:'POT',   fg:C.good,   tip:'Leads tagged Potential and held right now — matches the reps’ Potential tab. Not limited to the date window.'},
+    {id:'contactedNow', label:'Contacted', short:'CONT',  fg:C.blue,   tip:'Leads tagged Contacted and held right now — matches the reps’ Contacted tab. Not limited to the date window.'},
+    {id:'impNow',       label:'Imported',  short:'IMP',   fg:C.violet, tip:'Of the Potentials held right now, how many are already on Close (came from an imported list).'},
+    {id:'freshNow',     label:'Fresh',     short:'FRESH', fg:C.bad,    tip:'Of the Potentials held right now, how many are not yet on Close — the still-to-push queue.'},
+  ];
+  const shownMetrics=CARD_METRICS.filter(m=>metricsShown[m.id]);
+  const shown=shownMetrics.length?shownMetrics:CARD_METRICS;   // never render an empty card
+  const repGtc='46px 1fr '+shown.map(()=>'34px').join(' ');    // rep mini-grid columns follow the shown metrics
 
   const periodTag = period==='daily'
     ? (dayOffset===0?'TODAY':anchor.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}).toUpperCase())
@@ -3253,6 +3273,26 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                 <button key={p.id} onClick={()=>setPeriod(p.id)} style={pill(period===p.id)}>{p.label}</button>
               ))}
             </div>
+            {/* Metrics dropdown — choose which of the 4 live metrics the campaign cards + rep grid show */}
+            <div style={{position:'relative'}}>
+              <button onClick={()=>setMetricMenuOpen(o=>!o)} title="Choose which metrics to show on the campaign cards and rep grid"
+                style={{...pill(false),border:'1px solid var(--border)',display:'inline-flex',alignItems:'center',gap:7}}>
+                📊 Metrics · {shown.length}/4 <span style={{fontSize:9}}>▾</span>
+              </button>
+              {metricMenuOpen && <>
+                <div onClick={()=>setMetricMenuOpen(false)} style={{position:'fixed',inset:0,zIndex:40}}/>
+                <div style={{position:'absolute',top:'calc(100% + 6px)',right:0,zIndex:41,background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,boxShadow:'0 12px 30px -8px rgba(0,0,0,.35)',padding:8,minWidth:186}}>
+                  <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:'var(--text-light)',padding:'4px 8px 6px'}}>SHOW METRICS</div>
+                  {CARD_METRICS.map(m=>{ const on=!!metricsShown[m.id]; return (
+                    <label key={m.id} style={{display:'flex',alignItems:'center',gap:9,padding:'7px 8px',borderRadius:8,cursor:'pointer',fontSize:12.5,fontWeight:600}}>
+                      <input type="checkbox" checked={on} onChange={()=>setMetricsShown(s=>({...s,[m.id]:!s[m.id]}))} style={{accentColor:m.fg,cursor:'pointer'}}/>
+                      <span style={{width:8,height:8,borderRadius:999,background:m.fg}}/>
+                      <span>{m.label}</span>
+                    </label>
+                  );})}
+                </div>
+              </>}
+            </div>
           </div>
         </div>
 
@@ -3380,13 +3420,13 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                       <div style={{background:'var(--border)',width:pct(o.toWork,base)+'%'}}/>
                     </div>
                     <div style={{display:'flex',flexDirection:'column',marginTop:10}}>
-                      {chipsOf(o).map(ch=>(
-                        <div key={ch.label} title={ch.tip||''} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'5px 0',borderTop:'1px solid var(--border)'}}>
+                      {shown.map(m=>(
+                        <div key={m.id} title={m.tip||''} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'5px 0',borderTop:'1px solid var(--border)'}}>
                           <span style={{display:'flex',alignItems:'center',gap:7}}>
-                            <span style={{width:6,height:6,borderRadius:999,background:ch.fg}}/>
-                            <span style={{fontSize:10.5,fontWeight:600,color:'var(--text-dim)'}}>{ch.label}</span>
+                            <span style={{width:6,height:6,borderRadius:999,background:m.fg}}/>
+                            <span style={{fontSize:10.5,fontWeight:600,color:'var(--text-dim)'}}>{m.label}</span>
                           </span>
-                          <span style={{fontSize:12.5,fontWeight:700,fontFamily:MONO,color:ch.fg}}>{fmt(ch.value)}</span>
+                          <span style={{fontSize:12.5,fontWeight:700,fontFamily:MONO,color:m.fg}}>{fmt(o[m.id])}</span>
                         </div>
                       ))}
                     </div>
@@ -3465,36 +3505,30 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                 <div style={{display:'flex',flexDirection:'column',gap:7,margin:'16px 0 14px'}}>
                   {/* CONT is the leads this rep actually contacted in that campaign
                       for the selected day — the day's worked potentials. */}
-                  <div style={{display:'grid',gridTemplateColumns:'46px 1fr 34px 30px 34px 32px',gap:6,fontSize:8,fontWeight:700,letterSpacing:'.08em',color:'var(--text-light)'}}>
+                  <div style={{display:'grid',gridTemplateColumns:repGtc,gap:6,fontSize:8,fontWeight:700,letterSpacing:'.08em',color:'var(--text-light)'}}>
                     <span/><span/>
-                    <span style={{textAlign:'right'}} title="Contacted in this window">CONT</span>
-                    <span style={{textAlign:'right'}} title="Potential leads held in this campaign right now">POT</span>
-                    <span style={{textAlign:'right'}} title="Of the POTENTIAL leads: how many came from an imported list">IMP</span>
-                    <span style={{textAlign:'right'}} title="Of the POTENTIAL leads: how many were sourced fresh">FRESH</span>
+                    {shown.map(m=><span key={m.id} style={{textAlign:'right'}} title={m.tip}>{m.short}</span>)}
                   </div>
                   {r.camps.map(c=>{
                     const v=c.o[repMetric];
                     return (
-                      <div key={c.id} style={{display:'grid',gridTemplateColumns:'46px 1fr 34px 30px 34px 32px',gap:6,alignItems:'center'}}
-                        title={`${c.label} · holding ${fmt(c.o.potentialNow)} Potential now · tagged ${fmt(c.o.potentials)} ${periodWord} · contacted ${fmt(c.o.contacted)} · assigned ${fmt(c.o.assigned)} · of those potentials: ${fmt(c.o.imported)} imported / ${fmt(c.o.fresh)} fresh`}>
+                      <div key={c.id} style={{display:'grid',gridTemplateColumns:repGtc,gap:6,alignItems:'center'}}
+                        title={`${c.label} · holding ${fmt(c.o.potentialNow)} Potential now (${fmt(c.o.impNow)} imported / ${fmt(c.o.freshNow)} fresh) · contacted ${fmt(c.o.contactedNow)} now · tagged ${fmt(c.o.potentials)} ${periodWord}`}>
                         <span style={{fontSize:9.5,fontWeight:800,letterSpacing:'.05em',color:c.color,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.label}</span>
                         <span style={{height:6,borderRadius:999,background:'var(--bg)',overflow:'hidden',display:'block'}}>
                           <span style={{display:'block',height:'100%',borderRadius:999,background:c.color,width:Math.max(2,pct(v,r.maxCamp))+'%'}}/>
                         </span>
-                        <span style={{textAlign:'right',fontSize:11.5,fontWeight:700,fontFamily:MONO,color:c.o.contacted?C.good:'var(--text-light)'}}>{fmt(c.o.contacted)}</span>
-                        <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:c.o.potentialNow?'var(--text)':'var(--text-light)'}}>{fmt(c.o.potentialNow)}</span>
-                        <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:C.blue}}>{fmt(c.o.imported)}</span>
-                        <span style={{textAlign:'right',fontSize:11.5,fontFamily:MONO,color:c.o.fresh?C.bad:'var(--text-light)'}}>{fmt(c.o.fresh)}</span>
+                        {shown.map(m=><span key={m.id} style={{textAlign:'right',fontSize:11.5,fontWeight:700,fontFamily:MONO,color:c.o[m.id]?m.fg:'var(--text-light)'}}>{fmt(c.o[m.id])}</span>)}
                       </div>
                     );
                   })}
                 </div>
 
-                <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:6,paddingTop:12,borderTop:'1px solid var(--border)'}}>
-                  {chipsOf(r.a).map(ch=>(
-                    <div key={ch.label} title={ch.tip||''} style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:6,padding:'4px 9px',borderRadius:9,background:'var(--bg)'}}>
-                      <span style={{fontSize:9.5,fontWeight:600,color:'var(--text-dim)'}}>{ch.label}</span>
-                      <span style={{fontSize:10.5,fontWeight:700,fontFamily:MONO,color:ch.fg}}>{fmt(ch.value)}</span>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:6,paddingTop:12,borderTop:'1px solid var(--border)'}}>
+                  {shown.map(m=>(
+                    <div key={m.id} title={m.tip||''} style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:6,padding:'4px 9px',borderRadius:9,background:'var(--bg)'}}>
+                      <span style={{fontSize:9.5,fontWeight:600,color:'var(--text-dim)'}}>{m.label}</span>
+                      <span style={{fontSize:10.5,fontWeight:700,fontFamily:MONO,color:m.fg}}>{fmt(r.a[m.id])}</span>
                     </div>
                   ))}
                 </div>
@@ -3509,7 +3543,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
         </div>
 
         <div style={{marginTop:20,fontSize:10.5,fontFamily:MONO,color:'var(--text-light)'}}>
-          {cur.from===cur.to?cur.from:`${cur.from} → ${cur.to}`} · POTENTIALS = held right now, not limited to this window · assigned = everything that landed on the rep · imported / fresh = the origin split of their POTENTIAL leads only · potentials tagged / contacted = inside the window
+          {cur.from===cur.to?cur.from:`${cur.from} → ${cur.to}`} · Potential / Contacted / Imported / Fresh = what each rep is HOLDING right now (matches their tabs), not limited to this window · Imported + Fresh = Potential, split by Close status · the big campaign number (“potentials tagged”) is still activity inside the window
         </div>
       </div>
 
