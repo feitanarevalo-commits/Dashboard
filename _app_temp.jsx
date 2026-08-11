@@ -5787,6 +5787,7 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
 function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onClearAll,onAutoAssignJC,onVerifyUrls,addToast,config,jcPlan=null}) {
   const [repView,setRepView]=useState('');
   const [jcPrev,setJcPrev]=useState(false);
+  const [jcShowLeads,setJcShowLeads]=useState({});   // per-rep expanded lead list in the preview
   const feats=config.features||{};
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
@@ -5814,7 +5815,7 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
         </button>
         {onAutoAssignJC && (()=>{ const jcN=leads.filter(l=>l.assignedTo==='JC' && (l.tags||[]).includes('Potential')).length; return (<>
           <button className="btn btn-sm btn-primary" style={{marginLeft:8}} disabled={!jcN}
-            title="Distribute JC's Potential leads — High-Ticket → Rein · MSN/other → Chase/Rein/Mikka · VIRALS → Chase/Mikka (fresh & imported balanced)"
+            title="Distribute JC's Potential leads — all High-Ticket + 20 MSN → Rein · the rest (remaining MSN + VIRALS) → Chase / Mikka (fresh & imported balanced)"
             onClick={onAutoAssignJC}>⚡ Auto-assign JC's leads{jcN?` (${jcN})`:''}</button>
           {jcPlan && <button className="btn btn-sm btn-outline" onClick={()=>setJcPrev(v=>!v)}
             title="See exactly how JC's leads would be split — before assigning">{jcPrev?'▾':'▸'} 🔍 Preview split</button>}
@@ -5828,28 +5829,56 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
           title="Permanently delete every lead">🗑 Clear ALL leads</button>}
       </div>
       {jcPreviewPlan && (
-        <div style={{background:'var(--bg)',borderBottom:'1px solid var(--border)',padding:'13px 20px',fontSize:12.5,flexShrink:0}} className="no-print">
+        <div style={{background:'var(--bg)',borderBottom:'1px solid var(--border)',padding:'13px 20px',fontSize:12.5,flexShrink:0,maxHeight:'46vh',overflowY:'auto'}} className="no-print">
           {jcPreviewPlan.targets.length===0
             ? <span style={{color:'var(--text-dim)'}}>⚠ JC has <b>no Potential-tagged leads</b> to distribute yet — tag his leads Potential first, and this preview will fill in.</span>
-            : <div style={{display:'flex',flexDirection:'column',gap:9}}>
-                <div style={{fontWeight:800,fontSize:13}}>Preview — <span style={{color:'var(--accent)'}}>{jcPreviewPlan.moved.length}</span> of JC's {jcPreviewPlan.targets.length} Potential lead{jcPreviewPlan.targets.length!==1?'s':''} would be assigned:</div>
-                <div style={{display:'flex',gap:22,flexWrap:'wrap'}}>
-                  <span>🎯 <b>{jcPreviewPlan.ht.length}</b> High-Ticket → <b>{jcPreviewPlan.HT_REP||'—'}</b></span>
-                  <span>📊 <b>{jcPreviewPlan.msn.length}</b> MSN/other → <b>{jcPreviewPlan.MSN_REPS.join(' / ')||'—'}</b></span>
-                  <span>🔥 <b>{jcPreviewPlan.virals.length}</b> VIRALS → <b>{jcPreviewPlan.VIRALS_REPS.join(' / ')||'—'}</b></span>
+            : (()=>{ const P=jcPreviewPlan; const CATC={HT:'#E0A400',MSN:'var(--accent)',VIRALS:'#E0552F'};
+                const order=['Rein','Chase','Mikka'].filter(r=>P.perRep[r]).concat(Object.keys(P.perRep).filter(r=>!['Rein','Chase','Mikka'].includes(r)).sort());
+                return (
+              <div style={{display:'flex',flexDirection:'column',gap:11}}>
+                <div style={{fontWeight:800,fontSize:13}}>Preview — <span style={{color:'var(--accent)'}}>{P.moved.length}</span> of JC's {P.targets.length} Potential lead{P.targets.length!==1?'s':''} would be assigned:</div>
+                <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12}}>
+                  <span>🎯 <b>{P.ht.length}</b> High-Ticket → <b>{P.HT_REP||'—'}</b></span>
+                  <span>📊 <b>{P.reinMsn.length}</b> MSN → <b>{P.HT_REP||'—'}</b> <span style={{color:'var(--text-light)'}}>(cap {P.MSN_TO_REIN})</span></span>
+                  <span>📊 <b>{P.msnRest.length}</b> MSN + 🔥 <b>{P.virals.length}</b> VIRALS → <b>{P.REST_REPS.join(' / ')||'—'}</b></span>
                 </div>
-                <div style={{display:'flex',gap:14,flexWrap:'wrap',alignItems:'center',paddingTop:8,borderTop:'1px solid var(--border)'}}>
-                  <span style={{fontWeight:700,color:'var(--text-dim)'}}>Each rep receives:</span>
-                  {Object.keys(jcPreviewPlan.tally).length===0
-                    ? <span style={{color:'var(--text-dim)'}}>nobody — no eligible target reps</span>
-                    : Object.keys(jcPreviewPlan.tally).sort().map(r=>(
-                        <span key={r} style={{display:'inline-flex',alignItems:'center',gap:6,padding:'3px 10px',borderRadius:999,background:'var(--card)',border:'1px solid var(--border)'}}>
-                          <b>{r}</b> <span style={{color:'var(--accent)',fontWeight:800}}>+{jcPreviewPlan.tally[r]}</span>
-                        </span>
-                      ))}
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:10}}>
+                  {order.length===0
+                    ? <span style={{color:'var(--text-dim)'}}>Nobody — no eligible target reps (Rein / Chase / Mikka).</span>
+                    : order.map(r=>{ const b=P.perRep[r]; const open=!!jcShowLeads[r]; return (
+                      <div key={r} style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,padding:'11px 13px'}}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                          <span style={{fontWeight:800,fontSize:13}}>{r}</span>
+                          <span style={{color:'var(--accent)',fontWeight:800,fontSize:15}}>+{b.total}</span>
+                        </div>
+                        <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:8}}>
+                          {['HT','MSN','VIRALS'].filter(c=>b[c]>0).map(c=>(
+                            <span key={c} style={{display:'inline-flex',alignItems:'center',gap:5,padding:'2px 8px',borderRadius:999,background:'var(--bg)',border:'1px solid var(--border)',fontSize:11}}>
+                              <span style={{width:7,height:7,borderRadius:999,background:CATC[c]}}/><b>{b[c]}</b>&nbsp;{c}
+                            </span>
+                          ))}
+                        </div>
+                        <button className="btn btn-ghost btn-xs" style={{marginTop:8,padding:'2px 6px',fontSize:11}} onClick={()=>setJcShowLeads(s=>({...s,[r]:!s[r]}))}>
+                          {open?'▾ hide':'▸ show'} {b.total} lead{b.total!==1?'s':''}
+                        </button>
+                        {open && (
+                          <div style={{marginTop:8,maxHeight:180,overflowY:'auto',display:'flex',flexDirection:'column',gap:4,borderTop:'1px solid var(--border)',paddingTop:8}}>
+                            {b.leads.map(l=>(
+                              <div key={l.id} style={{display:'flex',alignItems:'center',gap:7,fontSize:11.5}}>
+                                <span style={{width:6,height:6,borderRadius:999,background:CATC[l.cat],flexShrink:0}}/>
+                                <span style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.name}>{l.name}</span>
+                                <span style={{fontSize:9.5,fontWeight:700,color:'var(--text-light)'}}>{l.cat}</span>
+                                <span style={{fontSize:9.5,color:l.origin==='Fresh'?'#E0552F':'var(--accent)'}}>{l.origin==='Fresh'?'Fresh':'Imp'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );})}
                 </div>
-                <div style={{fontSize:11,color:'var(--text-light)'}}>Fresh &amp; imported are balanced within each split. Nothing moves until you click “Auto-assign JC's leads”.</div>
-              </div>}
+                <div style={{fontSize:11,color:'var(--text-light)'}}>All HT + first {P.MSN_TO_REIN} MSN → Rein; the rest splits Chase / Mikka. Fresh &amp; imported are balanced within each split. Nothing moves until you click “Auto-assign JC's leads”.</div>
+              </div>
+            );})()}
         </div>
       )}
       <LeadsTable leads={display} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onArchive={onArchive} onBulkAssign={onBulkAssign} showAssigned showCampaign showOrigin config={config} feats={feats} campColorMap={campColorMap} filename="lead_management" printTitle="Lead Management Report"/>
@@ -8375,15 +8404,16 @@ function App() {
   function jcPotentialLeads(){ return leads.filter(l=>l.assignedTo==='JC' && (l.tags||[]).includes('Potential')); }
   // Pure dry-run of the JC distribution — used BOTH for the preview (before you
   // click) and the real assignment, so the two can never disagree.
+  const JC_MSN_TO_REIN = 20;   // Rein's fixed MSN allocation on top of all High-Ticket
   function jcAssignPlan(){
     const valid=new Set((config.salesReps||[]).concat((config.users||[]).map(u=>u.name)));
-    const pick=arr=>arr.filter(r=>valid.has(r));
-    const HT_REP = valid.has('Rein') ? 'Rein' : null;
-    const MSN_REPS = pick(['Chase','Rein','Mikka']);      // MSN + general potentials
-    const VIRALS_REPS = pick(['Chase','Mikka']);
+    const has=r=>valid.has(r);
+    const HT_REP = has('Rein') ? 'Rein' : null;
+    const REST_REPS = ['Chase','Mikka'].filter(has);      // the rest splits between these two
     const targets = jcPotentialLeads();
     const isHT = l => l.pool==='highticket' || (l.tags||[]).includes('HT') || parseFollowers(l.followers)>=500000;
     const isVirals = l => l.pool==='virals' || (l.campaigns||[]).some(c=>/viral/i.test(String(c)));
+    const catOf = l => isHT(l)?'HT':(isVirals(l)?'VIRALS':'MSN');
     const ht = targets.filter(isHT);
     const rest = targets.filter(l=>!isHT(l));
     const virals = rest.filter(isVirals);
@@ -8396,20 +8426,44 @@ function App() {
       let a=0; fr.forEach(l=>inc(reps[a++%reps.length],l));
       let b=0; im.forEach(l=>inc(reps[b++%reps.length],l));
     };
+    // 1) All High-Ticket → Rein.
     ht.forEach(l=>inc(HT_REP,l));
-    spread(msn, MSN_REPS);
-    spread(virals, VIRALS_REPS);
+    // 2) The first JC_MSN_TO_REIN MSN → Rein, kept origin-balanced so Rein's share
+    //    isn't all one type; the remaining MSN fall through to Chase/Mikka.
+    let reinMsn=[], msnRest=msn;
+    if(HT_REP && msn.length){
+      const fr=msn.filter(l=>leadOrigin(l)==='Fresh'), im=msn.filter(l=>leadOrigin(l)!=='Fresh');
+      const want=Math.min(JC_MSN_TO_REIN, msn.length); let fi=0,ii=0;
+      while(reinMsn.length<want){
+        if(fi<fr.length && reinMsn.length<want) reinMsn.push(fr[fi++]);
+        if(ii<im.length && reinMsn.length<want) reinMsn.push(im[ii++]);
+        if(fi>=fr.length && ii>=im.length) break;
+      }
+      const taken=new Set(reinMsn.map(l=>l.id));
+      msnRest=msn.filter(l=>!taken.has(l.id));
+      reinMsn.forEach(l=>inc('Rein',l));
+    }
+    // 3) Remaining MSN + all VIRALS → split between Chase and Mikka.
+    spread(msnRest, REST_REPS);
+    spread(virals, REST_REPS);
     const moved = targets.filter(l=>map[l.id]);
-    return {targets, ht, msn, virals, map, tally, moved, HT_REP, MSN_REPS, VIRALS_REPS};
+    // Per-rep breakdown for the preview: counts by category + the actual leads.
+    const perRep={};
+    targets.forEach(l=>{ const r=map[l.id]; if(!r) return; const cat=catOf(l);
+      const b=perRep[r]||(perRep[r]={HT:0,MSN:0,VIRALS:0,total:0,leads:[]});
+      b[cat]++; b.total++; b.leads.push({id:l.id, name:l.channelName||l.name||l.url||'(unnamed)', cat, origin:leadOrigin(l)});
+    });
+    return {targets, ht, msn, virals, reinMsn, msnRest, map, tally, moved, perRep, HT_REP, REST_REPS, MSN_TO_REIN:JC_MSN_TO_REIN};
   }
   function autoAssignJC(){
-    const {targets, ht, msn, virals, map, tally, moved, HT_REP, MSN_REPS, VIRALS_REPS}=jcAssignPlan();
+    const {targets, ht, reinMsn, msnRest, virals, map, tally, moved, HT_REP, REST_REPS, MSN_TO_REIN}=jcAssignPlan();
     if(!targets.length){ addToast("No Potential-tagged leads under JC to distribute — tag his leads Potential first.",'info'); return; }
     if(!moved.length){ addToast('No target reps (Rein / Chase / Mikka) available to distribute to','info'); return; }
     const summary = `Distribute ${moved.length} of JC's Potential lead(s)?\n\n`
       + `• ${ht.filter(l=>map[l.id]).length} High-Ticket → ${HT_REP||'(Rein not available)'}\n`
-      + `• ${msn.filter(l=>map[l.id]).length} MSN/other → ${MSN_REPS.join(' / ')||'(none)'}\n`
-      + `• ${virals.filter(l=>map[l.id]).length} VIRALS → ${VIRALS_REPS.join(' / ')||'(none)'}\n\n`
+      + `• ${reinMsn.filter(l=>map[l.id]).length} MSN → ${HT_REP||'(Rein n/a)'} (cap ${MSN_TO_REIN})\n`
+      + `• ${msnRest.filter(l=>map[l.id]).length} MSN → ${REST_REPS.join(' / ')||'(none)'}\n`
+      + `• ${virals.filter(l=>map[l.id]).length} VIRALS → ${REST_REPS.join(' / ')||'(none)'}\n\n`
       + `Fresh & imported are balanced within each split.\nResult: ${Object.keys(tally).sort().map(r=>`${r} +${tally[r]}`).join(' · ')}`;
     if(!window.confirm(summary)) return;
     // Credit JC (the lead-gen who qualified it) via qualifiedBy so his KPI survives
@@ -8421,7 +8475,7 @@ function App() {
     setLeads(ls=>ls.map(l=> map[l.id] ? {...l,assignedTo:map[l.id],dateAssigned:today,qualifiedBy:l.qualifiedBy||l.assignedTo,handedOffAt:today,
       history:pushHist(l,[histEvent(me,'assigned',{from:l.assignedTo||'',to:map[l.id],via:'auto-assign JC'})])} : l));
     addToast(`Distributed JC's Potential leads → ${Object.keys(tally).sort().map(r=>`${r} ${tally[r]}`).join(' · ')}`,'success');
-    logH('⚡',`Auto-assigned ${moved.length} JC Potential leads — HT→Rein · MSN→Chase/Rein/Mikka · VIRALS→Chase/Mikka`,{type:'revert',before,after});
+    logH('⚡',`Auto-assigned ${moved.length} JC Potential leads — HT + ${MSN_TO_REIN} MSN → Rein · rest MSN + VIRALS → Chase/Mikka`,{type:'revert',before,after});
   }
   function bulkDelete(ids){
     if(!ids||!ids.length) return;
