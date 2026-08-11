@@ -5813,7 +5813,7 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
         <button className={`btn btn-sm ${repView==='unassigned'?'btn-danger':'btn-outline'}`} onClick={()=>setRepView(v=>v==='unassigned'?'':'unassigned')} style={repView==='unassigned'?{}:{borderColor:'var(--warn)',color:'var(--warn)'}}>
           Unassigned ({unassigned.length})
         </button>
-        {onAutoAssignJC && (()=>{ const jcN=leads.filter(l=>l.assignedTo==='JC' && (l.tags||[]).includes('Potential')).length; return (<>
+        {onAutoAssignJC && (()=>{ const jcN=leads.filter(l=>l.assignedTo==='JC' && ((l.tags||[]).includes('Potential')||(l.tags||[]).includes('HT'))).length; return (<>
           <button className="btn btn-sm btn-primary" style={{marginLeft:8}} disabled={!jcN}
             title="Distribute JC's Potential leads — all High-Ticket + 20 MSN → Rein · the rest (remaining MSN + VIRALS) → Chase / Mikka (fresh & imported balanced)"
             onClick={onAutoAssignJC}>⚡ Auto-assign JC's leads{jcN?` (${jcN})`:''}</button>
@@ -5831,12 +5831,12 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
       {jcPreviewPlan && (
         <div style={{background:'var(--bg)',borderBottom:'1px solid var(--border)',padding:'13px 20px',fontSize:12.5,flexShrink:0,maxHeight:'46vh',overflowY:'auto'}} className="no-print">
           {jcPreviewPlan.targets.length===0
-            ? <span style={{color:'var(--text-dim)'}}>⚠ JC has <b>no Potential-tagged leads</b> to distribute yet — tag his leads Potential first, and this preview will fill in.</span>
+            ? <span style={{color:'var(--text-dim)'}}>⚠ JC has <b>no Potential or HT leads</b> to distribute yet — tag his leads Potential/HT first, and this preview will fill in.</span>
             : (()=>{ const P=jcPreviewPlan; const CATC={HT:'#E0A400',MSN:'var(--accent)',VIRALS:'#E0552F'};
                 const order=['Rein','Chase','Mikka'].filter(r=>P.perRep[r]).concat(Object.keys(P.perRep).filter(r=>!['Rein','Chase','Mikka'].includes(r)).sort());
                 return (
               <div style={{display:'flex',flexDirection:'column',gap:11}}>
-                <div style={{fontWeight:800,fontSize:13}}>Preview — <span style={{color:'var(--accent)'}}>{P.moved.length}</span> of JC's {P.targets.length} Potential lead{P.targets.length!==1?'s':''} would be assigned:</div>
+                <div style={{fontWeight:800,fontSize:13}}>Preview — <span style={{color:'var(--accent)'}}>{P.moved.length}</span> of JC's {P.targets.length} workable lead{P.targets.length!==1?'s':''} <span style={{fontWeight:600,color:'var(--text-light)'}}>(Potential + HT)</span> would be assigned:</div>
                 <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12}}>
                   <span>🎯 <b>{P.ht.length}</b> High-Ticket → <b>{P.HT_REP||'—'}</b></span>
                   <span>📊 <b>{P.reinMsn.length}</b> MSN → <b>{P.HT_REP||'—'}</b> <span style={{color:'var(--text-light)'}}>(cap {P.MSN_TO_REIN})</span></span>
@@ -8401,7 +8401,10 @@ function App() {
   //   • VIRALS → split evenly across Chase / Mikka
   // Fresh and imported are round-robined SEPARATELY within each split so every rep
   // gets an even mix of both. Only Potential-tagged JC leads are moved.
-  function jcPotentialLeads(){ return leads.filter(l=>l.assignedTo==='JC' && (l.tags||[]).includes('Potential')); }
+  // JC's distributable (workable) leads = Potential OR High-Ticket. HT is its own
+  // tag, separate from Potential (JC's 140 = 100 Potential + 40 HT), so both must
+  // be included or the HT leads never route to Rein.
+  function jcPotentialLeads(){ return leads.filter(l=>l.assignedTo==='JC' && ((l.tags||[]).includes('Potential')||(l.tags||[]).includes('HT'))); }
   // Pure dry-run of the JC distribution — used BOTH for the preview (before you
   // click) and the real assignment, so the two can never disagree.
   const JC_MSN_TO_REIN = 20;   // Rein's fixed MSN allocation on top of all High-Ticket
@@ -8411,7 +8414,9 @@ function App() {
     const HT_REP = has('Rein') ? 'Rein' : null;
     const REST_REPS = ['Chase','Mikka'].filter(has);      // the rest splits between these two
     const targets = jcPotentialLeads();
-    const isHT = l => l.pool==='highticket' || (l.tags||[]).includes('HT') || parseFollowers(l.followers)>=500000;
+    // Match the dashboard's High-Ticket count exactly: the 'HT' tag (with the
+    // High-Ticket pool as a fallback). NOT follower-based — that over-counted.
+    const isHT = l => (l.tags||[]).includes('HT') || l.pool==='highticket';
     const isVirals = l => l.pool==='virals' || (l.campaigns||[]).some(c=>/viral/i.test(String(c)));
     const catOf = l => isHT(l)?'HT':(isVirals(l)?'VIRALS':'MSN');
     const ht = targets.filter(isHT);
@@ -8457,7 +8462,7 @@ function App() {
   }
   function autoAssignJC(){
     const {targets, ht, reinMsn, msnRest, virals, map, tally, moved, HT_REP, REST_REPS, MSN_TO_REIN}=jcAssignPlan();
-    if(!targets.length){ addToast("No Potential-tagged leads under JC to distribute — tag his leads Potential first.",'info'); return; }
+    if(!targets.length){ addToast("No Potential or HT leads under JC to distribute — tag his leads Potential/HT first.",'info'); return; }
     if(!moved.length){ addToast('No target reps (Rein / Chase / Mikka) available to distribute to','info'); return; }
     const summary = `Distribute ${moved.length} of JC's Potential lead(s)?\n\n`
       + `• ${ht.filter(l=>map[l.id]).length} High-Ticket → ${HT_REP||'(Rein not available)'}\n`
