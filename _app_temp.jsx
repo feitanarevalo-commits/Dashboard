@@ -4171,6 +4171,27 @@ const EMOJI_AVATARS={
 };
 const isEmojiAvatar=v=>typeof v==='string' && v.indexOf('emoji:')===0;
 const emojiAvatarChar=v=>isEmojiAvatar(v) ? v.slice(6) : '';
+// Illustrated character avatars. Two flavours:
+//  • Bundled ("lib:av-NN") — pre-rendered SVGs served from /avatars/ (offline, no
+//    external calls). BUNDLED_AVATARS lists the files that ship in the repo.
+//  • Generated ("dicebear:<style>:<seed>") — rendered live by DiceBear's free CDN
+//    (allowed by the img-src 'https:' CSP). Only used if a rep picks "generate mine".
+const BUNDLED_AVATARS=Array.from({length:36},(_,i)=>'av-'+String(i+1).padStart(2,'0'));
+const DICEBEAR_STYLES=[
+  {id:'adventurer',label:'Adventurer'},{id:'notionists',label:'Notionists'},{id:'micah',label:'Micah'},
+  {id:'personas',label:'Personas'},{id:'big-smile',label:'Big Smile'},{id:'lorelei',label:'Lorelei'},
+  {id:'avataaars',label:'Avataaars'},{id:'fun-emoji',label:'Fun Emoji'},
+];
+const dicebearUrl=(style,seed)=>'https://api.dicebear.com/9.x/'+encodeURIComponent(style)+'/svg?seed='+encodeURIComponent(seed||'');
+// Resolve any avatar-carrying `photo` value to an <img> src, or null when it's a
+// non-image avatar (animated / emoji / initial). Uploaded photos pass through.
+function avatarImgSrc(photo){
+  if(!photo||typeof photo!=='string') return null;
+  if(isAnimAvatar(photo)||isEmojiAvatar(photo)) return null;
+  if(photo.indexOf('lib:')===0) return '/avatars/'+photo.slice(4)+'.svg';
+  if(photo.indexOf('dicebear:')===0){ const rest=photo.slice(9); const i=rest.indexOf(':'); return dicebearUrl(i<0?rest:rest.slice(0,i), i<0?'':rest.slice(i+1)); }
+  return photo;
+}
 function AnimatedAvatar({styleId,size=36}){
   const W='rgba(255,255,255,.95)';
   const svg=(children)=>(<svg width={size} height={size} viewBox="0 0 100 100" style={{display:'block'}} aria-hidden="true">{children}</svg>);
@@ -4209,14 +4230,14 @@ function RepAvatar({rep,config,size=36,online=false,bgOverride=null}) {
   const photo=getProfile(rep).photo || (config.repPhotos||{})[rep] || '';
   const anim=isAnimAvatar(photo);
   const emojiAv=isEmojiAvatar(photo);
-  const realPhoto=photo && !anim && !emojiAv;
+  const imgSrc=avatarImgSrc(photo);   // uploaded photo, bundled 'lib:' or generated 'dicebear:' → a URL; else null
   const fontSize=emoji?Math.round(size*.48):Math.round(size*.38);
   const dotSize=Math.max(6,Math.round(size*.28));
   const borderColor=bgOverride||'var(--bg)';
   return(
-    <div className="rep-avatar" style={{width:size,height:size,background:realPhoto?'transparent':color,color:'white',fontSize,flexShrink:0}}>
-      {realPhoto
-        ? <img src={photo} alt={rep}/>
+    <div className="rep-avatar" style={{width:size,height:size,background:imgSrc?'transparent':color,color:'white',fontSize,flexShrink:0}}>
+      {imgSrc
+        ? <img src={imgSrc} alt={rep}/>
         : anim
           ? <AnimatedAvatar styleId={animAvatarId(photo)} size={size}/>
           : emojiAv
@@ -7275,10 +7296,12 @@ function LoginScreen({config,onLogin}) {
         {list.map(u=>(
           <div key={u.name} className="lg-card" tabIndex={0} role="button"
             onClick={()=>pick(u)} onKeyDown={e=>{if(e.key==='Enter')pick(u);}}>
-            <div className="lg-avatar" style={{background:(getProfile(u.name).photo&&!isAnimAvatar(getProfile(u.name).photo)&&!isEmojiAvatar(getProfile(u.name).photo))?'transparent':colorFor(u),boxShadow:`0 6px 16px -6px ${colorFor(u)}`}}>
-              {isAnimAvatar(getProfile(u.name).photo) ? <AnimatedAvatar styleId={animAvatarId(getProfile(u.name).photo)} size={54}/>
-                : isEmojiAvatar(getProfile(u.name).photo) ? <span style={{fontSize:30,lineHeight:1}}>{emojiAvatarChar(getProfile(u.name).photo)}</span>
-                : getProfile(u.name).photo ? <img src={getProfile(u.name).photo} alt={u.name}/> : initial(u)}
+            <div className="lg-avatar" style={{background:avatarImgSrc(getProfile(u.name).photo)?'transparent':colorFor(u),boxShadow:`0 6px 16px -6px ${colorFor(u)}`}}>
+              {(()=>{ const p=getProfile(u.name).photo; const src=avatarImgSrc(p);
+                return src ? <img src={src} alt={u.name}/>
+                  : isAnimAvatar(p) ? <AnimatedAvatar styleId={animAvatarId(p)} size={54}/>
+                  : isEmojiAvatar(p) ? <span style={{fontSize:30,lineHeight:1}}>{emojiAvatarChar(p)}</span>
+                  : initial(u); })()}
             </div>
             <div className="lg-card-name">{u.name}</div>
           </div>
@@ -7345,10 +7368,12 @@ function LoginScreen({config,onLogin}) {
               </div>
             ) : (
               <form onSubmit={submit}>
-                <div className="lg-m-avatar" style={{background:(getProfile(selected.name).photo&&!isAnimAvatar(getProfile(selected.name).photo)&&!isEmojiAvatar(getProfile(selected.name).photo))?'transparent':colorFor(selected)}}>
-                  {isAnimAvatar(getProfile(selected.name).photo) ? <AnimatedAvatar styleId={animAvatarId(getProfile(selected.name).photo)} size={64}/>
-                    : isEmojiAvatar(getProfile(selected.name).photo) ? <span style={{fontSize:38,lineHeight:1}}>{emojiAvatarChar(getProfile(selected.name).photo)}</span>
-                    : getProfile(selected.name).photo ? <img src={getProfile(selected.name).photo} alt={selected.name}/> : initial(selected)}
+                <div className="lg-m-avatar" style={{background:avatarImgSrc(getProfile(selected.name).photo)?'transparent':colorFor(selected)}}>
+                  {(()=>{ const p=getProfile(selected.name).photo; const src=avatarImgSrc(p);
+                    return src ? <img src={src} alt={selected.name}/>
+                      : isAnimAvatar(p) ? <AnimatedAvatar styleId={animAvatarId(p)} size={64}/>
+                      : isEmojiAvatar(p) ? <span style={{fontSize:38,lineHeight:1}}>{emojiAvatarChar(p)}</span>
+                      : initial(selected); })()}
                 </div>
                 <div className="lg-m-as">Signing in as</div>
                 <div className="lg-m-name">{selected.name}</div>
@@ -7501,6 +7526,9 @@ function ProfileModal({user,config,onClose,addToast}) {
   const ex=getProfile(name);
   const color=(config.repColors||{})[name]||'#6366F1';
   const [photo,setPhoto]=useState(ex.photo||'');
+  // Seed for the "generate your own" character avatars — starts from the current
+  // one if it's a dicebear avatar, else the rep's name. Shuffle picks a new face.
+  const [dbSeed,setDbSeed]=useState(()=>{ const p=ex.photo||''; if(p.indexOf('dicebear:')===0){ const r=p.slice(9); const i=r.indexOf(':'); return i<0?name:r.slice(i+1); } return name; });
   const [title,setTitle]=useState(ex.title||'');
   const [email,setEmail]=useState(ex.email||'');
   const [birthday,setBirthday]=useState(ex.birthday||'');
@@ -7553,10 +7581,11 @@ function ProfileModal({user,config,onClose,addToast}) {
         </div>
         <form onSubmit={save} style={{display:'flex',flexDirection:'column',gap:14}}>
           <div style={{display:'flex',alignItems:'center',gap:16}}>
-            <div className="rep-avatar" style={{width:72,height:72,background:(photo&&!isAnimAvatar(photo)&&!isEmojiAvatar(photo))?'transparent':color,color:'#fff',fontSize:28,flexShrink:0}}>
-              {isAnimAvatar(photo) ? <AnimatedAvatar styleId={animAvatarId(photo)} size={72}/>
+            <div className="rep-avatar" style={{width:72,height:72,background:avatarImgSrc(photo)?'transparent':color,color:'#fff',fontSize:28,flexShrink:0}}>
+              {(()=>{ const src=avatarImgSrc(photo); return src ? <img src={src} alt={name}/>
+                : isAnimAvatar(photo) ? <AnimatedAvatar styleId={animAvatarId(photo)} size={72}/>
                 : isEmojiAvatar(photo) ? <span style={{fontSize:42,lineHeight:1}}>{emojiAvatarChar(photo)}</span>
-                : photo ? <img src={photo} alt={name}/> : name[0].toUpperCase()}
+                : name[0].toUpperCase(); })()}
             </div>
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
               <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={onFile}/>
@@ -7592,6 +7621,35 @@ function ProfileModal({user,config,onClose,addToast}) {
                 </div>
               ))}
             </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">…or a character avatar <span style={{fontWeight:400,color:'var(--text-light)'}}>— illustrated, offline</span></label>
+            <div style={{display:'flex',flexWrap:'wrap',gap:7,maxHeight:190,overflowY:'auto',border:'1px solid var(--border)',borderRadius:10,padding:'8px 10px'}}>
+              {BUNDLED_AVATARS.map(id=>{ const on=photo===('lib:'+id); return (
+                <button key={id} type="button" onClick={()=>setPhoto(on?'':'lib:'+id)} title="Character avatar"
+                  style={{width:46,height:46,padding:0,borderRadius:'50%',overflow:'hidden',cursor:'pointer',background:'var(--bg)',border:`2px solid ${on?color:'var(--border)'}`,flexShrink:0}}>
+                  <img src={'/avatars/'+id+'.svg'} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+                </button>
+              );})}
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+              <span>…or generate your own <span style={{fontWeight:400,color:'var(--text-light)'}}>— a unique face</span></span>
+              <button type="button" className="btn btn-ghost btn-xs" style={{fontSize:11}} onClick={()=>setDbSeed(name+'-'+Math.random().toString(36).slice(2,8))}>🎲 New look</button>
+            </label>
+            <div style={{display:'flex',flexWrap:'wrap',gap:9}}>
+              {DICEBEAR_STYLES.map(st=>{ const val='dicebear:'+st.id+':'+dbSeed; const on=photo===val; return (
+                <button key={st.id} type="button" title={st.label} onClick={()=>setPhoto(on?'':val)}
+                  style={{display:'flex',flexDirection:'column',alignItems:'center',gap:3,padding:'5px 4px 3px',border:`2px solid ${on?color:'var(--border)'}`,borderRadius:12,background:on?'var(--bg)':'transparent',cursor:'pointer',width:60}}>
+                  <div style={{width:44,height:44,borderRadius:'50%',overflow:'hidden',background:'var(--bg)'}}>
+                    <img src={dicebearUrl(st.id,dbSeed)} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+                  </div>
+                  <span style={{fontSize:9,fontWeight:600,color:on?color:'var(--text-dim)',whiteSpace:'nowrap'}}>{st.label}</span>
+                </button>
+              );})}
+            </div>
+            <div style={{fontSize:11,color:'var(--text-light)',marginTop:6}}>Generated avatars load from DiceBear (dicebear.com, CC BY 4.0). The bundled ones above work offline.</div>
           </div>
           <div className="form-group"><label className="form-label">Title</label>
             <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Senior Sales Rep" autoFocus/></div>
