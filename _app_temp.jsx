@@ -577,6 +577,15 @@ function presenceStatus(u){
   return                      {key:'active', label:'Active', color:'#22A559',idleMs};
 }
 function fmtAgo(ms){ const m=Math.floor(ms/60000); if(m<1)return'just now'; if(m<60)return m+'m ago'; const h=Math.floor(m/60); return h+'h ago'; }
+// Names on an APPROVED leave that covers the given day (default today). Used to
+// skip reps who are out of office in auto-distribution. Dates are 'YYYY-MM-DD'
+// strings, so lexical comparison is date comparison.
+function repsOnLeave(leaves, ymd){
+  const day = ymd || ymdLocal(new Date());
+  const s = new Set();
+  (leaves||[]).forEach(l=>{ if(l && l.status==='Approved' && l.name && String(l.start_date||'')<=day && day<=String(l.end_date||'')) s.add(l.name); });
+  return s;
+}
 
 // ─── PERMISSIONS ──────────────────────────────────────────
 function userRole(name, config){
@@ -5859,9 +5868,14 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
                 return (
               <div style={{display:'flex',flexDirection:'column',gap:11}}>
                 <div style={{fontWeight:800,fontSize:13}}>Preview — <span style={{color:'var(--accent)'}}>{P.moved.length}</span> of JC's {P.targets.length} workable lead{P.targets.length!==1?'s':''} <span style={{fontWeight:600,color:'var(--text-light)'}}>(Potential + HT)</span> would be assigned:</div>
+                {P.excludedOnLeave && P.excludedOnLeave.length>0 && (
+                  <div style={{display:'inline-flex',alignItems:'center',gap:7,alignSelf:'flex-start',padding:'5px 11px',borderRadius:8,background:'#FFF4E5',color:'#8a5a00',fontSize:12,fontWeight:600}}>
+                    ⛱ On leave today — skipped: {P.excludedOnLeave.join(', ')} <span style={{fontWeight:500,color:'#a97b2e'}}>(their share went to whoever's available)</span>
+                  </div>
+                )}
                 <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12}}>
-                  <span>🎯 <b>{P.ht.length}</b> High-Ticket → <b>{P.HT_REP||'—'}</b></span>
-                  <span>📊 <b>{P.reinMsn.length}</b> MSN → <b>{P.HT_REP||'—'}</b> <span style={{color:'var(--text-light)'}}>(cap {P.MSN_TO_REIN})</span></span>
+                  <span>🎯 <b>{P.ht.length}</b> High-Ticket → <b>{P.HT_REP||P.REST_REPS.join(' / ')||'—'}</b></span>
+                  {P.HT_REP && <span>📊 <b>{P.reinMsn.length}</b> MSN → <b>{P.HT_REP}</b> <span style={{color:'var(--text-light)'}}>(cap {P.MSN_TO_REIN})</span></span>}
                   <span>📊 <b>{P.msnRest.length}</b> MSN + 🔥 <b>{P.virals.length}</b> VIRALS → <b>{P.REST_REPS.join(' / ')||'—'}</b></span>
                 </div>
                 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:10}}>
@@ -8437,9 +8451,13 @@ function App() {
   const JC_MSN_TO_REIN = 20;   // Rein's fixed MSN allocation on top of all High-Ticket
   function jcAssignPlan(){
     const valid=new Set((config.salesReps||[]).concat((config.users||[]).map(u=>u.name)));
-    const has=r=>valid.has(r);
-    const HT_REP = has('Rein') ? 'Rein' : null;
-    const REST_REPS = ['Chase','Mikka'].filter(has);      // the rest splits between these two
+    // Skip anyone on an approved leave that covers today — don't hand leads to a
+    // rep who's out of office. Their share falls through to whoever's available.
+    const onLeave = repsOnLeave(leaves);
+    const avail = r => valid.has(r) && !onLeave.has(r);
+    const HT_REP = avail('Rein') ? 'Rein' : null;
+    const REST_REPS = ['Chase','Mikka'].filter(avail);    // the rest splits between whoever's available
+    const excludedOnLeave = ['Rein','Chase','Mikka'].filter(r=>valid.has(r) && onLeave.has(r));
     const targets = jcPotentialLeads();
     // Match the dashboard's High-Ticket count exactly: the 'HT' tag (with the
     // High-Ticket pool as a fallback). NOT follower-based — that over-counted.
@@ -8458,8 +8476,9 @@ function App() {
       let a=0; fr.forEach(l=>inc(reps[a++%reps.length],l));
       let b=0; im.forEach(l=>inc(reps[b++%reps.length],l));
     };
-    // 1) All High-Ticket → Rein.
-    ht.forEach(l=>inc(HT_REP,l));
+    // 1) All High-Ticket → Rein — unless Rein is on leave, then split among the
+    //    available rest reps so the HT leads still get worked.
+    if(HT_REP) ht.forEach(l=>inc(HT_REP,l)); else spread(ht, REST_REPS);
     // 2) The first JC_MSN_TO_REIN MSN → Rein, kept origin-balanced so Rein's share
     //    isn't all one type; the remaining MSN fall through to Chase/Mikka.
     let reinMsn=[], msnRest=msn;
@@ -8485,15 +8504,17 @@ function App() {
       const b=perRep[r]||(perRep[r]={HT:0,MSN:0,VIRALS:0,total:0,leads:[]});
       b[cat]++; b.total++; b.leads.push({id:l.id, name:l.channelName||l.name||l.url||'(unnamed)', cat, origin:leadOrigin(l)});
     });
-    return {targets, ht, msn, virals, reinMsn, msnRest, map, tally, moved, perRep, HT_REP, REST_REPS, MSN_TO_REIN:JC_MSN_TO_REIN};
+    return {targets, ht, msn, virals, reinMsn, msnRest, map, tally, moved, perRep, HT_REP, REST_REPS, MSN_TO_REIN:JC_MSN_TO_REIN, excludedOnLeave};
   }
   function autoAssignJC(){
-    const {targets, ht, reinMsn, msnRest, virals, map, tally, moved, HT_REP, REST_REPS, MSN_TO_REIN}=jcAssignPlan();
+    const {targets, ht, reinMsn, msnRest, virals, map, tally, moved, HT_REP, REST_REPS, MSN_TO_REIN, excludedOnLeave}=jcAssignPlan();
     if(!targets.length){ addToast("No Potential or HT leads under JC to distribute — tag his leads Potential/HT first.",'info'); return; }
-    if(!moved.length){ addToast('No target reps (Rein / Chase / Mikka) available to distribute to','info'); return; }
-    const summary = `Distribute ${moved.length} of JC's Potential lead(s)?\n\n`
-      + `• ${ht.filter(l=>map[l.id]).length} High-Ticket → ${HT_REP||'(Rein not available)'}\n`
-      + `• ${reinMsn.filter(l=>map[l.id]).length} MSN → ${HT_REP||'(Rein n/a)'} (cap ${MSN_TO_REIN})\n`
+    if(!moved.length){ addToast('No target reps available to distribute to (all of Rein / Chase / Mikka are on leave or missing)','info'); return; }
+    const htTarget = HT_REP || (REST_REPS.join(' / ')||'(none)');
+    const summary = `Distribute ${moved.length} of JC's Potential/HT lead(s)?\n\n`
+      + (excludedOnLeave.length ? `⛱ On leave today — skipped: ${excludedOnLeave.join(', ')}\n\n` : '')
+      + `• ${ht.filter(l=>map[l.id]).length} High-Ticket → ${htTarget}\n`
+      + (HT_REP ? `• ${reinMsn.filter(l=>map[l.id]).length} MSN → ${HT_REP} (cap ${MSN_TO_REIN})\n` : '')
       + `• ${msnRest.filter(l=>map[l.id]).length} MSN → ${REST_REPS.join(' / ')||'(none)'}\n`
       + `• ${virals.filter(l=>map[l.id]).length} VIRALS → ${REST_REPS.join(' / ')||'(none)'}\n\n`
       + `Fresh & imported are balanced within each split.\nResult: ${Object.keys(tally).sort().map(r=>`${r} +${tally[r]}`).join(' · ')}`;
