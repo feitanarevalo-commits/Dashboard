@@ -1893,7 +1893,8 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
           <button className="btn btn-outline btn-sm" onClick={openSelected} title="Open each selected lead's URL in a new tab">🔗 Open {sel.length}</button>
           {closeSend&&(<>
             <div className="toolbar-sep"/>
-            <button className="btn btn-primary btn-sm" disabled={!sel.length}
+            <button className="btn btn-sm" disabled={!sel.length}
+              style={{background:'#3E5C76',color:'#fff',borderColor:'#3E5C76'}}
               onClick={()=>{ closeSend.onSend(leads.filter(l=>sel.includes(l.id))); setSel([]); }}
               title="Send the selected leads to Close.io (assigned to their rep)">⬆ Send {sel.length} to Close</button>
           </>)}
@@ -1904,7 +1905,8 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
               <option value="">{(smartReachSend.campaigns||[]).length?'— campaign —':'no campaigns synced'}</option>
               {(smartReachSend.campaigns||[]).map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
-            <button className="btn btn-primary btn-sm" disabled={!srCampaign||selEmailable.length===0}
+            <button className="btn btn-sm" disabled={!srCampaign||selEmailable.length===0}
+              style={{background:'#3F7D74',color:'#fff',borderColor:'#3F7D74'}}
               onClick={()=>{
                 const camp=(smartReachSend.campaigns||[]).find(c=>String(c.id)===String(srCampaign));
                 smartReachSend.onSend(selEmailable, srCampaign, camp?camp.label:'');
