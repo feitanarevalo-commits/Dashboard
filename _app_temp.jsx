@@ -4615,7 +4615,22 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
     if(!closeIdsKey) return;
     const base=(config.supabaseUrl||'').trim(); if(!base) return;
     fetch(base+'/functions/v1/close-last-contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leadIds:closeIdsKey.split(',')})})
-      .then(r=>r.json()).then(res=>{ if(res&&res.ok&&res.contacts) setCloseContacts(res.contacts); }).catch(()=>{});
+      .then(r=>r.json()).then(res=>{ if(!res||!res.ok||!res.contacts) return; const c=res.contacts; setCloseContacts(c);
+        // AUTO-FILL: persist Close's last-email/activity date onto the lead when the
+        // rep never set one manually. Without this the date only showed here — the
+        // recycle clock in other views + the server recycle job read l.lastContactDate,
+        // which stayed empty, so leads that reps forgot to date never recycled on time.
+        // Only writes on a real change (converges); capped per pass so a big Contacted
+        // list backfills gradually across visits instead of one giant write burst.
+        if(onSave){ let wrote=0; const CAP=300;
+          for(const l of contacted){ if(wrote>=CAP) break;
+            if(l.contactDateManual || !l.closeLeadId) continue;
+            const raw=c[l.closeLeadId]; if(!raw) continue; const d=toLocalDay(raw); if(!d) continue;
+            const ymd=ymdLocal(d); const curD=l.lastContactDate?toLocalDay(l.lastContactDate):null; const cur=curD?ymdLocal(curD):'';
+            if(ymd && ymd!==cur){ onSave({...l,lastContactDate:ymd,contactDateManual:false}); wrote++; }
+          }
+        }
+      }).catch(()=>{});
   },[closeIdsKey]);
   // Effective "last contact" = the most recent of Close's last touch and the
   // manually-logged date. Returns {date, fromClose}.
@@ -4727,6 +4742,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
           {(()=>{const f=!!(search||colFilter.campaign||colFilter.assignedTo||colFilter.emails);return `${rows.length} contacted lead${rows.length!==1?'s':''}${f?' (filtered)':''}`;})()}
         </span>
         <div style={{flex:1}}/>
+        {(config.closeSearchWebhook||'').trim() && <MiniCloseSearch config={config}/>}
         <button className="btn btn-outline btn-sm" title="Download the leads shown below (filtered set if a filter is on, otherwise all contacted) as a CSV for back-tracking"
           onClick={()=>{
             if(!rows.length){ addToast&&addToast('No contacted leads to export','info'); return; }
@@ -5629,6 +5645,12 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
   const queue=leads.filter(l=>!hasAnyStatusTag(l,config) && leadOrigin(l)!=='Imported' && (seeAll || (l.scrapedBy===myName && (!l.assignedTo || l.assignedTo===myName))));
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
+      {(config.closeSearchWebhook||'').trim() && (
+        <div style={{display:'flex',justifyContent:'flex-end',alignItems:'center',gap:8,padding:'8px 14px 0'}} className="no-print">
+          <span style={{fontSize:11,fontWeight:600,color:'var(--text-dim)'}}>Check before scraping:</span>
+          <MiniCloseSearch config={config}/>
+        </div>
+      )}
       <LeadsTable leads={queue} onEdit={onSave} onDelete={onDelete} onBulkDelete={onBulkDelete} onArchive={onArchive} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin toolbarStart={runBtn} toolbarAfterSearch={scraperFilters} hideRepFilter={!seeAll}
         searchValue={keyword} onSearchChange={setKeyword} searchFilters={false} searchPlaceholder="Search query (sent to scraper)…"
