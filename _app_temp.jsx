@@ -4162,6 +4162,15 @@ const AVATAR_STYLES=[
 ];
 const isAnimAvatar=v=>typeof v==='string' && v.indexOf('anim:')===0;
 const animAvatarId=v=>isAnimAvatar(v) ? v.slice(5) : '';
+// Emoji avatars — a big centred emoji over the rep's colour. Stored in the same
+// `photo` field as "emoji:<char>" (no DB change). Curated into groups for the picker.
+const EMOJI_AVATARS={
+  Animals:['🦊','🐱','🐶','🦁','🐯','🐼','🐻','🐨','🐸','🐵','🦉','🦅','🦄','🐺','🐷','🐮','🐔','🐧','🦋','🐝','🐢','🐙','🦈','🐬','🐳','🦖','🐲','🦥','🦦','🦔','🐰','🐹'],
+  Faces:['😎','😀','🤓','🥳','😺','👻','🤖','👽','🎃','💀','🤠','🦸','🥷','🧙','🧠'],
+  Fun:['🚀','🔥','⭐','🌟','💎','🍀','🎯','🏆','⚡','🌈','🎸','🎮','🍕','☕','⚽','🎨'],
+};
+const isEmojiAvatar=v=>typeof v==='string' && v.indexOf('emoji:')===0;
+const emojiAvatarChar=v=>isEmojiAvatar(v) ? v.slice(6) : '';
 function AnimatedAvatar({styleId,size=36}){
   const W='rgba(255,255,255,.95)';
   const svg=(children)=>(<svg width={size} height={size} viewBox="0 0 100 100" style={{display:'block'}} aria-hidden="true">{children}</svg>);
@@ -4199,7 +4208,8 @@ function RepAvatar({rep,config,size=36,online=false,bgOverride=null}) {
   // A photo uploaded via Edit Profile (localStorage) wins over a config photo.
   const photo=getProfile(rep).photo || (config.repPhotos||{})[rep] || '';
   const anim=isAnimAvatar(photo);
-  const realPhoto=!anim && photo;
+  const emojiAv=isEmojiAvatar(photo);
+  const realPhoto=photo && !anim && !emojiAv;
   const fontSize=emoji?Math.round(size*.48):Math.round(size*.38);
   const dotSize=Math.max(6,Math.round(size*.28));
   const borderColor=bgOverride||'var(--bg)';
@@ -4209,7 +4219,9 @@ function RepAvatar({rep,config,size=36,online=false,bgOverride=null}) {
         ? <img src={photo} alt={rep}/>
         : anim
           ? <AnimatedAvatar styleId={animAvatarId(photo)} size={size}/>
-          : (emoji||rep[0].toUpperCase())}
+          : emojiAv
+            ? <span style={{fontSize:Math.round(size*.58),lineHeight:1}}>{emojiAvatarChar(photo)}</span>
+            : (emoji||rep[0].toUpperCase())}
       {online&&<div className="rep-online-dot" style={{width:dotSize,height:dotSize,bottom:-1,right:-1,border:`${Math.max(1,Math.round(dotSize*.22))}px solid ${borderColor}`}}/>}
     </div>
   );
@@ -7263,8 +7275,9 @@ function LoginScreen({config,onLogin}) {
         {list.map(u=>(
           <div key={u.name} className="lg-card" tabIndex={0} role="button"
             onClick={()=>pick(u)} onKeyDown={e=>{if(e.key==='Enter')pick(u);}}>
-            <div className="lg-avatar" style={{background:(getProfile(u.name).photo&&!isAnimAvatar(getProfile(u.name).photo))?'transparent':colorFor(u),boxShadow:`0 6px 16px -6px ${colorFor(u)}`}}>
+            <div className="lg-avatar" style={{background:(getProfile(u.name).photo&&!isAnimAvatar(getProfile(u.name).photo)&&!isEmojiAvatar(getProfile(u.name).photo))?'transparent':colorFor(u),boxShadow:`0 6px 16px -6px ${colorFor(u)}`}}>
               {isAnimAvatar(getProfile(u.name).photo) ? <AnimatedAvatar styleId={animAvatarId(getProfile(u.name).photo)} size={54}/>
+                : isEmojiAvatar(getProfile(u.name).photo) ? <span style={{fontSize:30,lineHeight:1}}>{emojiAvatarChar(getProfile(u.name).photo)}</span>
                 : getProfile(u.name).photo ? <img src={getProfile(u.name).photo} alt={u.name}/> : initial(u)}
             </div>
             <div className="lg-card-name">{u.name}</div>
@@ -7332,8 +7345,9 @@ function LoginScreen({config,onLogin}) {
               </div>
             ) : (
               <form onSubmit={submit}>
-                <div className="lg-m-avatar" style={{background:(getProfile(selected.name).photo&&!isAnimAvatar(getProfile(selected.name).photo))?'transparent':colorFor(selected)}}>
+                <div className="lg-m-avatar" style={{background:(getProfile(selected.name).photo&&!isAnimAvatar(getProfile(selected.name).photo)&&!isEmojiAvatar(getProfile(selected.name).photo))?'transparent':colorFor(selected)}}>
                   {isAnimAvatar(getProfile(selected.name).photo) ? <AnimatedAvatar styleId={animAvatarId(getProfile(selected.name).photo)} size={64}/>
+                    : isEmojiAvatar(getProfile(selected.name).photo) ? <span style={{fontSize:38,lineHeight:1}}>{emojiAvatarChar(getProfile(selected.name).photo)}</span>
                     : getProfile(selected.name).photo ? <img src={getProfile(selected.name).photo} alt={selected.name}/> : initial(selected)}
                 </div>
                 <div className="lg-m-as">Signing in as</div>
@@ -7539,8 +7553,9 @@ function ProfileModal({user,config,onClose,addToast}) {
         </div>
         <form onSubmit={save} style={{display:'flex',flexDirection:'column',gap:14}}>
           <div style={{display:'flex',alignItems:'center',gap:16}}>
-            <div className="rep-avatar" style={{width:72,height:72,background:(photo&&!isAnimAvatar(photo))?'transparent':color,color:'#fff',fontSize:28,flexShrink:0}}>
+            <div className="rep-avatar" style={{width:72,height:72,background:(photo&&!isAnimAvatar(photo)&&!isEmojiAvatar(photo))?'transparent':color,color:'#fff',fontSize:28,flexShrink:0}}>
               {isAnimAvatar(photo) ? <AnimatedAvatar styleId={animAvatarId(photo)} size={72}/>
+                : isEmojiAvatar(photo) ? <span style={{fontSize:42,lineHeight:1}}>{emojiAvatarChar(photo)}</span>
                 : photo ? <img src={photo} alt={name}/> : name[0].toUpperCase()}
             </div>
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
@@ -7561,6 +7576,22 @@ function ProfileModal({user,config,onClose,addToast}) {
               );})}
             </div>
             <div style={{fontSize:11,color:'var(--text-light)',marginTop:6}}>They animate live on your avatar everywhere. Uploading a photo replaces the animated one.</div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">…or an emoji avatar <span style={{fontWeight:400,color:'var(--text-light)'}}>— animals, faces &amp; more</span></label>
+            <div style={{display:'flex',flexDirection:'column',gap:8,maxHeight:190,overflowY:'auto',border:'1px solid var(--border)',borderRadius:10,padding:'8px 10px'}}>
+              {Object.keys(EMOJI_AVATARS).map(grp=>(
+                <div key={grp}>
+                  <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',color:'var(--text-light)',margin:'2px 0 5px'}}>{grp.toUpperCase()}</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:5}}>
+                    {EMOJI_AVATARS[grp].map(em=>{ const on=photo===('emoji:'+em); return (
+                      <button key={em} type="button" onClick={()=>setPhoto(on?'':'emoji:'+em)} title={em}
+                        style={{width:34,height:34,fontSize:19,lineHeight:1,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:9,cursor:'pointer',background:on?color:'var(--bg)',border:`2px solid ${on?color:'var(--border)'}`}}>{em}</button>
+                    );})}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
           <div className="form-group"><label className="form-label">Title</label>
             <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Senior Sales Rep" autoFocus/></div>
