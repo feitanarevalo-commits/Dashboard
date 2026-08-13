@@ -1112,3 +1112,24 @@ html[data-dark] .dup-banner-btn:hover { background: #e0a92e; }
 .lead-link-close:hover { border-color:#2f6bf0; color:#2f6bf0; background:rgba(47,107,240,.1); }
 .lead-link-off { opacity:.55; cursor:help; }
 .lead-link-off:hover { border-color:var(--border); color:var(--text-dim); background:var(--card); }
+
+/* ── Animated avatars (fun alternative to a photo). Drawn white over the rep's
+   colour by <AnimatedAvatar>. Transform/opacity only, so cheap even in dense
+   tables; disabled under prefers-reduced-motion. ── */
+.rep-avatar svg { width:100%; height:100%; }
+@keyframes av-spin  { to { transform: rotate(360deg); } }
+@keyframes av-pulse { 0% { transform: scale(.35); opacity:.85; } 70% { opacity:0; } 100% { transform: scale(1.7); opacity:0; } }
+@keyframes av-wobble{ 0%,100% { transform: rotate(-9deg) scale(1); } 50% { transform: rotate(9deg) scale(1.07); } }
+@keyframes av-blink { 0%,90%,100% { transform: scaleY(1); } 95% { transform: scaleY(.12); } }
+@keyframes av-bar   { 0%,100% { transform: scaleY(.35); } 50% { transform: scaleY(1); } }
+.av-rot    { animation: av-spin 3.2s linear infinite; }
+.av-wobble { animation: av-wobble 2.1s ease-in-out infinite; }
+.av-eye    { animation: av-blink 3.6s ease-in-out infinite; }
+.av-ring   { animation: av-pulse 1.9s ease-out infinite; }
+.av-ring2  { animation-delay: .95s; }
+.av-bar    { animation: av-bar 1s ease-in-out infinite; }
+.av-bar2   { animation-delay: .18s; }
+.av-bar3   { animation-delay: .36s; }
+@media (prefers-reduced-motion: reduce) {
+  .av-rot, .av-wobble, .av-eye, .av-ring, .av-bar { animation: none !important; }
+}

@@ -4148,19 +4148,68 @@ function markRepliesSeen(name,ids){ try{ const s=repliesSeenSet(name); ids.forEa
 function dupSeenSet(name){ try{ return new Set(JSON.parse(localStorage.getItem('dupSeen_'+name)||'[]')); }catch(e){ return new Set(); } }
 function markDupSeen(name,ids){ try{ const s=dupSeenSet(name); ids.forEach(id=>s.add(id)); localStorage.setItem('dupSeen_'+name,JSON.stringify([...s])); }catch(e){} }
 
+// Animated avatars — a fun alternative to uploading a photo. Stored in the
+// profile's `photo` field as the string "anim:<id>" (no DB change needed). Each
+// is a self-contained inline SVG animated with CSS classes in styles.css, drawn
+// in white over the rep's colour so it reads on the avatar circle.
+const AVATAR_STYLES=[
+  {id:'pulse',  label:'Pulse'},
+  {id:'orbit',  label:'Orbit'},
+  {id:'comet',  label:'Comet'},
+  {id:'wobble', label:'Wobble'},
+  {id:'blink',  label:'Blinky'},
+  {id:'bars',   label:'Waves'},
+];
+const isAnimAvatar=v=>typeof v==='string' && v.indexOf('anim:')===0;
+const animAvatarId=v=>isAnimAvatar(v) ? v.slice(5) : '';
+function AnimatedAvatar({styleId,size=36}){
+  const W='rgba(255,255,255,.95)';
+  const svg=(children)=>(<svg width={size} height={size} viewBox="0 0 100 100" style={{display:'block'}} aria-hidden="true">{children}</svg>);
+  switch(styleId){
+    case 'orbit': return svg(<>
+      <circle cx="50" cy="50" r="27" fill="none" stroke="rgba(255,255,255,.32)" strokeWidth="3"/>
+      <circle cx="50" cy="50" r="9" fill={W}/>
+      <g className="av-rot" style={{transformBox:'view-box',transformOrigin:'50px 50px'}}><circle cx="50" cy="21" r="7" fill="#fff"/></g>
+    </>);
+    case 'comet': return svg(<g className="av-rot" style={{transformBox:'view-box',transformOrigin:'50px 50px'}}>
+      <path d="M50 50 L50 12 A38 38 0 0 1 84 42 Z" fill="rgba(255,255,255,.9)"/>
+      <circle cx="50" cy="50" r="7" fill="#fff"/>
+    </g>);
+    case 'wobble': return svg(<rect className="av-wobble" x="28" y="28" width="44" height="44" rx="13" fill={W} style={{transformBox:'fill-box',transformOrigin:'center'}}/>);
+    case 'blink': return svg(<g fill="#fff">
+      <rect className="av-eye" x="31" y="37" width="10" height="15" rx="5" style={{transformBox:'fill-box',transformOrigin:'center'}}/>
+      <rect className="av-eye" x="59" y="37" width="10" height="15" rx="5" style={{transformBox:'fill-box',transformOrigin:'center'}}/>
+      <path d="M34 61 Q50 75 66 61" fill="none" stroke="#fff" strokeWidth="5" strokeLinecap="round"/>
+    </g>);
+    case 'bars': return svg(<g fill="#fff">
+      <rect className="av-bar" x="29" y="30" width="11" height="40" rx="4" style={{transformBox:'fill-box',transformOrigin:'center bottom'}}/>
+      <rect className="av-bar av-bar2" x="45" y="30" width="11" height="40" rx="4" style={{transformBox:'fill-box',transformOrigin:'center bottom'}}/>
+      <rect className="av-bar av-bar3" x="61" y="30" width="11" height="40" rx="4" style={{transformBox:'fill-box',transformOrigin:'center bottom'}}/>
+    </g>);
+    default: /* pulse */ return svg(<>
+      <circle cx="50" cy="50" r="15" fill={W}/>
+      <circle className="av-ring" cx="50" cy="50" r="15" fill="none" stroke="#fff" strokeWidth="4" style={{transformBox:'fill-box',transformOrigin:'center'}}/>
+      <circle className="av-ring av-ring2" cx="50" cy="50" r="15" fill="none" stroke="#fff" strokeWidth="4" style={{transformBox:'fill-box',transformOrigin:'center'}}/>
+    </>);
+  }
+}
 function RepAvatar({rep,config,size=36,online=false,bgOverride=null}) {
   const color=(config.repColors||{})[rep]||'#6366F1';
   const emoji=(config.repEmojis||{})[rep]||'';
   // A photo uploaded via Edit Profile (localStorage) wins over a config photo.
   const photo=getProfile(rep).photo || (config.repPhotos||{})[rep] || '';
+  const anim=isAnimAvatar(photo);
+  const realPhoto=!anim && photo;
   const fontSize=emoji?Math.round(size*.48):Math.round(size*.38);
   const dotSize=Math.max(6,Math.round(size*.28));
   const borderColor=bgOverride||'var(--bg)';
   return(
-    <div className="rep-avatar" style={{width:size,height:size,background:photo?'transparent':color,color:'white',fontSize,flexShrink:0}}>
-      {photo
+    <div className="rep-avatar" style={{width:size,height:size,background:realPhoto?'transparent':color,color:'white',fontSize,flexShrink:0}}>
+      {realPhoto
         ? <img src={photo} alt={rep}/>
-        : (emoji||rep[0].toUpperCase())}
+        : anim
+          ? <AnimatedAvatar styleId={animAvatarId(photo)} size={size}/>
+          : (emoji||rep[0].toUpperCase())}
       {online&&<div className="rep-online-dot" style={{width:dotSize,height:dotSize,bottom:-1,right:-1,border:`${Math.max(1,Math.round(dotSize*.22))}px solid ${borderColor}`}}/>}
     </div>
   );
@@ -7214,8 +7263,9 @@ function LoginScreen({config,onLogin}) {
         {list.map(u=>(
           <div key={u.name} className="lg-card" tabIndex={0} role="button"
             onClick={()=>pick(u)} onKeyDown={e=>{if(e.key==='Enter')pick(u);}}>
-            <div className="lg-avatar" style={{background:getProfile(u.name).photo?'transparent':colorFor(u),boxShadow:`0 6px 16px -6px ${colorFor(u)}`}}>
-              {getProfile(u.name).photo ? <img src={getProfile(u.name).photo} alt={u.name}/> : initial(u)}
+            <div className="lg-avatar" style={{background:(getProfile(u.name).photo&&!isAnimAvatar(getProfile(u.name).photo))?'transparent':colorFor(u),boxShadow:`0 6px 16px -6px ${colorFor(u)}`}}>
+              {isAnimAvatar(getProfile(u.name).photo) ? <AnimatedAvatar styleId={animAvatarId(getProfile(u.name).photo)} size={54}/>
+                : getProfile(u.name).photo ? <img src={getProfile(u.name).photo} alt={u.name}/> : initial(u)}
             </div>
             <div className="lg-card-name">{u.name}</div>
           </div>
@@ -7282,8 +7332,9 @@ function LoginScreen({config,onLogin}) {
               </div>
             ) : (
               <form onSubmit={submit}>
-                <div className="lg-m-avatar" style={{background:getProfile(selected.name).photo?'transparent':colorFor(selected)}}>
-                  {getProfile(selected.name).photo ? <img src={getProfile(selected.name).photo} alt={selected.name}/> : initial(selected)}
+                <div className="lg-m-avatar" style={{background:(getProfile(selected.name).photo&&!isAnimAvatar(getProfile(selected.name).photo))?'transparent':colorFor(selected)}}>
+                  {isAnimAvatar(getProfile(selected.name).photo) ? <AnimatedAvatar styleId={animAvatarId(getProfile(selected.name).photo)} size={64}/>
+                    : getProfile(selected.name).photo ? <img src={getProfile(selected.name).photo} alt={selected.name}/> : initial(selected)}
                 </div>
                 <div className="lg-m-as">Signing in as</div>
                 <div className="lg-m-name">{selected.name}</div>
@@ -7488,14 +7539,28 @@ function ProfileModal({user,config,onClose,addToast}) {
         </div>
         <form onSubmit={save} style={{display:'flex',flexDirection:'column',gap:14}}>
           <div style={{display:'flex',alignItems:'center',gap:16}}>
-            <div className="rep-avatar" style={{width:72,height:72,background:photo?'transparent':color,color:'#fff',fontSize:28,flexShrink:0}}>
-              {photo ? <img src={photo} alt={name}/> : name[0].toUpperCase()}
+            <div className="rep-avatar" style={{width:72,height:72,background:(photo&&!isAnimAvatar(photo))?'transparent':color,color:'#fff',fontSize:28,flexShrink:0}}>
+              {isAnimAvatar(photo) ? <AnimatedAvatar styleId={animAvatarId(photo)} size={72}/>
+                : photo ? <img src={photo} alt={name}/> : name[0].toUpperCase()}
             </div>
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
               <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={onFile}/>
-              <button type="button" className="btn btn-outline btn-sm" onClick={()=>fileRef.current&&fileRef.current.click()}>📷 {photo?'Change photo':'Upload photo'}</button>
-              {photo && <button type="button" className="btn btn-ghost btn-sm" onClick={()=>setPhoto('')}>Remove photo</button>}
+              <button type="button" className="btn btn-outline btn-sm" onClick={()=>fileRef.current&&fileRef.current.click()}>📷 {(photo&&!isAnimAvatar(photo))?'Change photo':'Upload photo'}</button>
+              {photo && <button type="button" className="btn btn-ghost btn-sm" onClick={()=>setPhoto('')}>Remove {isAnimAvatar(photo)?'avatar':'photo'}</button>}
             </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">No photo? Pick an animated avatar</label>
+            <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+              {AVATAR_STYLES.map(a=>{ const on=photo===('anim:'+a.id); return (
+                <button key={a.id} type="button" title={a.label} onClick={()=>setPhoto(on?'':'anim:'+a.id)}
+                  style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,padding:'6px 4px 4px',border:`2px solid ${on?color:'var(--border)'}`,borderRadius:12,background:on?'var(--bg)':'transparent',cursor:'pointer',width:64}}>
+                  <div className="rep-avatar" style={{width:40,height:40,background:color}}><AnimatedAvatar styleId={a.id} size={40}/></div>
+                  <span style={{fontSize:10,fontWeight:600,color:on?color:'var(--text-dim)'}}>{a.label}</span>
+                </button>
+              );})}
+            </div>
+            <div style={{fontSize:11,color:'var(--text-light)',marginTop:6}}>They animate live on your avatar everywhere. Uploading a photo replaces the animated one.</div>
           </div>
           <div className="form-group"><label className="form-label">Title</label>
             <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Senior Sales Rep" autoFocus/></div>
