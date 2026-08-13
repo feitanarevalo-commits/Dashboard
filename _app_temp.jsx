@@ -1712,6 +1712,10 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
   const allSel=filtered.length>0&&filtered.every(l=>sel.includes(l.id));
   // Selected leads that actually have an email (the SmartReach-sendable subset).
   const selEmailable=filtered.filter(l=>sel.includes(l.id)&&(l.emails||[]).length>0);
+  // Close only ever takes FRESH leads (not already on Close). Even if the rep
+  // ticks imported/existing leads, they're skipped — Close would just duplicate
+  // them. So "Send to Close" auto-narrows the selection to the fresh ones.
+  const selCloseFresh=filtered.filter(l=>sel.includes(l.id)&&leadOrigin(l)==='Fresh');
   function toggleAll(){setSel(allSel?[]:filtered.map(l=>l.id));}
   function toggleOne(id){setSel(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);}
   const lastIdx=useRef(null);
@@ -1893,10 +1897,12 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
           <button className="btn btn-outline btn-sm" onClick={openSelected} title="Open each selected lead's URL in a new tab">🔗 Open {sel.length}</button>
           {closeSend&&(<>
             <div className="toolbar-sep"/>
-            <button className="btn btn-sm" disabled={!sel.length}
+            <button className="btn btn-sm" disabled={!selCloseFresh.length}
               style={{background:'#3E5C76',color:'#fff',borderColor:'#3E5C76'}}
-              onClick={()=>{ closeSend.onSend(leads.filter(l=>sel.includes(l.id))); setSel([]); }}
-              title="Send the selected leads to Close.io (assigned to their rep)">⬆ Send {sel.length} to Close</button>
+              onClick={()=>{ closeSend.onSend(selCloseFresh); setSel([]); }}
+              title={selCloseFresh.length
+                ? `Send ${selCloseFresh.length} FRESH lead(s) to Close${selCloseFresh.length<sel.length?` · ${sel.length-selCloseFresh.length} already-imported skipped`:''}`
+                : 'None of the selected leads are Fresh — leads already on Close (Imported) can’t be re-sent'}>⬆ Send {selCloseFresh.length} to Close{selCloseFresh.length<sel.length?` (of ${sel.length})`:''}</button>
           </>)}
           {smartReachSend&&(<>
             <div className="toolbar-sep"/>
