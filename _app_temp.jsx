@@ -5904,7 +5904,7 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
   const [jcManualOpen,setJcManualOpen]=useState(false);
   const [jcUseManual,setJcUseManual]=useState(false);       // follow the manual numbers on auto-assign
   const [jcManual,setJcManual]=useState({HT:{},MSN:{},VIRALS:{}});   // {cat:{rep:count}}
-  const JC_REPS=['Rein','Chase','Mikka'];
+  const JC_REPS=['Rein','Chase','Mikka','Bella'];
   const JC_CATS=[{key:'HT',label:'High-Ticket'},{key:'MSN',label:'MSN'},{key:'VIRALS',label:'VIRALS'}];
   const feats=config.features||{};
   const campColorMap={};
