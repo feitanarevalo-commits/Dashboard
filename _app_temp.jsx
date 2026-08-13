@@ -7966,7 +7966,12 @@ function App() {
   const [navCollapsed,setNavCollapsed]=useState(()=>{ try{ return localStorage.getItem('navCollapsed')!=='0'; }catch(e){ return true; } });
   useEffect(()=>{ try{ localStorage.setItem('navCollapsed',navCollapsed?'1':'0'); }catch(e){} },[navCollapsed]);
   const [leaves,setLeaves]=useState([]);
-  useEffect(()=>{ if(SB) loadLeavesFromSupabase().then(setLeaves); },[]);
+  // Load leaves on mount, then re-poll every 60s so the admin's pending-leave
+  // badge picks up newly-submitted requests without a page reload. The server is
+  // source of truth, so this safely reconciles any optimistic local updates.
+  useEffect(()=>{ if(!SB) return; loadLeavesFromSupabase().then(setLeaves);
+    const t=setInterval(()=>loadLeavesFromSupabase().then(setLeaves),60000);
+    return ()=>clearInterval(t); },[]);
   const [sessions,setSessions]=useState([]);
   const sessionIdRef=useRef(null);
   useEffect(()=>{ if(SB) loadSessionsFromSupabase().then(setSessions); },[]);
@@ -9520,6 +9525,7 @@ function App() {
   const poolVisibleToUser = pid => pid==='highticket' ? canSeeHighTicket : (pid==='virals' ? true : (isAdmin || !isJC));
   const visiblePools = POOLS.filter(p=>poolVisibleToUser(p.id));
 
+  const pendingLeaveCount = leaves.filter(l=>l && l.status==='Pending').length;   // for the admin Leaves nav badge
   const NAV_MAIN=[
     {id:'home',icon:'⊟',label:'Home'},
     {id:'scraper',icon:'◎',label:'Scraper'},
@@ -9787,6 +9793,7 @@ function App() {
             <div key={n.id} data-tour={'nav-'+n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
               {n.id==='errors' && errUnseen>0 && <span className="nav-badge red">{errUnseen>99?'99+':errUnseen}</span>}
+              {n.id==='leaves' && isAdmin && pendingLeaveCount>0 && <span className="nav-badge amber" title={`${pendingLeaveCount} leave request${pendingLeaveCount>1?'s':''} awaiting your approval`}>{pendingLeaveCount>99?'99+':pendingLeaveCount}</span>}
               {n.id==='ai-scraper' && <span className="nav-badge amber">BETA</span>}
             </div>
           ))}
