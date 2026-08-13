@@ -5901,6 +5901,11 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
   const [repView,setRepView]=useState('');
   const [jcPrev,setJcPrev]=useState(false);
   const [jcShowLeads,setJcShowLeads]=useState({});   // per-rep expanded lead list in the preview
+  const [jcManualOpen,setJcManualOpen]=useState(false);
+  const [jcUseManual,setJcUseManual]=useState(false);       // follow the manual numbers on auto-assign
+  const [jcManual,setJcManual]=useState({HT:{},MSN:{},VIRALS:{}});   // {cat:{rep:count}}
+  const JC_REPS=['Rein','Chase','Mikka'];
+  const JC_CATS=[{key:'HT',label:'High-Ticket'},{key:'MSN',label:'MSN'},{key:'VIRALS',label:'VIRALS'}];
   const feats=config.features||{};
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
@@ -5911,7 +5916,18 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
   const pool=leads.filter(l=>!hasTabStatusTag(l));
   const unassigned=pool.filter(l=>!l.assignedTo);
   const display=repView==='unassigned'?unassigned:repView?pool.filter(l=>l.assignedTo===repView):pool;
-  const jcPreviewPlan = (jcPrev && jcPlan) ? jcPlan() : null;   // dry-run for the preview panel
+  // Category pools (available counts) — independent of the allocation, so we read
+  // them from a rules dry-run. Used by the manual grid + the "rule defaults" fill.
+  const jcCats = jcPlan ? jcPlan(null) : null;
+  const jcAvail = { HT:jcCats?jcCats.ht.length:0, MSN:jcCats?jcCats.msn.length:0, VIRALS:jcCats?jcCats.virals.length:0 };
+  const jcOnLeave = new Set(jcCats?jcCats.excludedOnLeave:[]);
+  const jcManualActive = jcUseManual && jcManualOpen;
+  const jcPreviewPlan = (jcPrev && jcPlan) ? jcPlan(jcManualActive?jcManual:null) : null;   // dry-run for the preview panel
+  const setJcCell=(cat,rep,val)=>{ const n=val===''?'':Math.max(0,parseInt(val,10)||0); setJcManual(m=>({...m,[cat]:{...(m[cat]||{}),[rep]:n}})); };
+  const jcFillDefaults=()=>{ if(!jcPlan) return; const p=jcPlan(null); const m={HT:{},MSN:{},VIRALS:{}};
+    JC_REPS.forEach(rep=>{ const b=(p.perRep||{})[rep]||{}; m.HT[rep]=b.HT||0; m.MSN[rep]=b.MSN||0; m.VIRALS[rep]=b.VIRALS||0; }); setJcManual(m); };
+  const jcColTotal=rep=>JC_CATS.reduce((s,c)=>s+(parseInt((jcManual[c.key]||{})[rep],10)||0),0);
+  const jcRowTotal=cat=>JC_REPS.reduce((s,rep)=>s+(parseInt((jcManual[cat]||{})[rep],10)||0),0);
 
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
@@ -5928,10 +5944,12 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
         </button>
         {onAutoAssignJC && (()=>{ const jcN=leads.filter(l=>l.assignedTo==='JC' && ((l.tags||[]).includes('Potential')||(l.tags||[]).includes('HT'))).length; return (<>
           <button className="btn btn-sm btn-primary" style={{marginLeft:8}} disabled={!jcN}
-            title="Distribute JC's Potential leads — all High-Ticket + 20 MSN → Rein · the rest (remaining MSN + VIRALS) → Chase / Mikka (fresh & imported balanced)"
-            onClick={onAutoAssignJC}>⚡ Auto-assign JC's leads{jcN?` (${jcN})`:''}</button>
+            title={jcManualActive?"Distribute JC's leads by YOUR manual numbers below":"Distribute JC's Potential leads — all High-Ticket + 20 MSN → Rein · the rest (remaining MSN + VIRALS) → Chase / Mikka (fresh & imported balanced)"}
+            onClick={()=>onAutoAssignJC(jcManualActive?jcManual:null)}>⚡ Auto-assign JC's leads{jcN?` (${jcN})`:''}{jcManualActive?' · manual':''}</button>
           {jcPlan && <button className="btn btn-sm btn-outline" onClick={()=>setJcPrev(v=>!v)}
             title="See exactly how JC's leads would be split — before assigning">{jcPrev?'▾':'▸'} 🔍 Preview split</button>}
+          {jcPlan && <button className="btn btn-sm btn-outline" onClick={()=>setJcManualOpen(o=>{ const nx=!o; if(nx && jcRowTotal('HT')+jcRowTotal('MSN')+jcRowTotal('VIRALS')===0) jcFillDefaults(); return nx; })}
+            title="Set the exact number of leads per campaign that each rep should get">{jcManualOpen?'▾':'▸'} 🎚 Manual numbers</button>}
         </>); })()}
         {onVerifyUrls && (()=>{ const bad=leads.filter(l=>l.urlBroken).length; return (
           <button className="btn btn-sm btn-outline" style={{marginLeft:8}} onClick={onVerifyUrls}
@@ -5941,6 +5959,58 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
           onClick={()=>{ const ans=window.prompt(`⚠ DANGER: this permanently deletes ALL ${leads.length} lead(s) from the shared database — for EVERY rep — and cannot be undone.\n\nTo confirm, type DELETE (in capitals) below:`); if(ans==null) return; if(ans.trim()==='DELETE') onClearAll(); else addToast('Clear All cancelled — you must type DELETE exactly to confirm','info'); }}
           title="Permanently delete every lead">🗑 Clear ALL leads</button>}
       </div>
+      {onAutoAssignJC && jcManualOpen && jcPlan && (
+        <div style={{background:'var(--bg)',borderBottom:'1px solid var(--border)',padding:'13px 20px',fontSize:12.5,flexShrink:0}} className="no-print">
+          <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:10}}>
+            <span style={{fontWeight:800,fontSize:13}}>🎚 Manual split — leads per campaign, per rep</span>
+            <label style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:12,fontWeight:700,color:jcUseManual?'var(--accent)':'var(--text-dim)',cursor:'pointer'}}>
+              <input type="checkbox" checked={jcUseManual} onChange={e=>setJcUseManual(e.target.checked)} style={{cursor:'pointer'}}/>
+              Follow these numbers when I auto-assign
+            </label>
+            <button className="btn btn-ghost btn-xs" style={{fontSize:11}} onClick={jcFillDefaults} title="Fill with the standard rule split (all HT + 20 MSN → Rein, rest → Chase/Mikka)">↺ Rule defaults</button>
+            <button className="btn btn-ghost btn-xs" style={{fontSize:11}} onClick={()=>setJcManual({HT:{},MSN:{},VIRALS:{}})}>Clear</button>
+          </div>
+          <div style={{overflowX:'auto'}}>
+            <table style={{borderCollapse:'collapse',fontSize:12.5}}>
+              <thead><tr>
+                <th style={{textAlign:'left',padding:'4px 10px',color:'var(--text-dim)',fontWeight:700}}>Campaign</th>
+                <th style={{textAlign:'right',padding:'4px 10px',color:'var(--text-light)',fontWeight:600}}>available</th>
+                {JC_REPS.map(rep=>(
+                  <th key={rep} style={{padding:'4px 10px',textAlign:'center',color:jcOnLeave.has(rep)?'var(--text-light)':'var(--text)',fontWeight:700}}>
+                    {rep}{jcOnLeave.has(rep)&&<span title="On leave today — excluded" style={{marginLeft:4}}>⛱</span>}
+                  </th>
+                ))}
+                <th style={{textAlign:'right',padding:'4px 10px',color:'var(--text-light)',fontWeight:600}}>assigned</th>
+              </tr></thead>
+              <tbody>
+                {JC_CATS.map(cat=>{ const rowT=jcRowTotal(cat.key); const over=rowT>jcAvail[cat.key]; return (
+                  <tr key={cat.key} style={{borderTop:'1px solid var(--border)'}}>
+                    <td style={{padding:'6px 10px',fontWeight:700}}>{cat.label}</td>
+                    <td style={{padding:'6px 10px',textAlign:'right',fontFamily:"'IBM Plex Mono',monospace",color:'var(--text-dim)'}}>{jcAvail[cat.key]}</td>
+                    {JC_REPS.map(rep=>(
+                      <td key={rep} style={{padding:'4px 10px',textAlign:'center'}}>
+                        <input type="number" min="0" disabled={jcOnLeave.has(rep)} value={(jcManual[cat.key]||{})[rep]??''}
+                          onChange={e=>setJcCell(cat.key,rep,e.target.value)} placeholder="0"
+                          style={{width:56,padding:'4px 6px',textAlign:'center',border:'1px solid var(--border)',borderRadius:7,background:jcOnLeave.has(rep)?'var(--bg)':'var(--card)',color:'var(--text)',fontFamily:"'IBM Plex Mono',monospace",opacity:jcOnLeave.has(rep)?.4:1}}/>
+                      </td>
+                    ))}
+                    <td style={{padding:'6px 10px',textAlign:'right',fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:over?'var(--danger)':'var(--text)'}} title={over?`Over by ${rowT-jcAvail[cat.key]} — only ${jcAvail[cat.key]} available, extras will be skipped`:''}>{rowT}{over?' ⚠':''}</td>
+                  </tr>
+                );})}
+                <tr style={{borderTop:'2px solid var(--border)'}}>
+                  <td style={{padding:'6px 10px',fontWeight:700,color:'var(--text-dim)'}}>Per rep</td>
+                  <td/>
+                  {JC_REPS.map(rep=><td key={rep} style={{padding:'6px 10px',textAlign:'center',fontFamily:"'IBM Plex Mono',monospace",fontWeight:700}}>{jcColTotal(rep)}</td>)}
+                  <td style={{padding:'6px 10px',textAlign:'right',fontFamily:"'IBM Plex Mono',monospace",fontWeight:800,color:'var(--accent)'}}>{JC_REPS.reduce((s,r)=>s+jcColTotal(r),0)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style={{fontSize:11,color:'var(--text-light)',marginTop:8}}>
+            {jcUseManual ? 'Auto-assign will follow these exact numbers.' : 'Tick “Follow these numbers” above to make auto-assign use them (otherwise the rule split applies).'} Fresh &amp; imported stay balanced within each rep's take; anything above “available” is skipped. Turn on 🔍 Preview split to see the resulting names.
+          </div>
+        </div>
+      )}
       {jcPreviewPlan && (
         <div style={{background:'var(--bg)',borderBottom:'1px solid var(--border)',padding:'13px 20px',fontSize:12.5,flexShrink:0,maxHeight:'46vh',overflowY:'auto'}} className="no-print">
           {jcPreviewPlan.targets.length===0
@@ -5955,11 +6025,13 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
                     ⛱ On leave today — skipped: {P.excludedOnLeave.join(', ')} <span style={{fontWeight:500,color:'#a97b2e'}}>(their share went to whoever's available)</span>
                   </div>
                 )}
-                <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12}}>
-                  <span>🎯 <b>{P.ht.length}</b> High-Ticket → <b>{P.HT_REP||P.REST_REPS.join(' / ')||'—'}</b></span>
-                  {P.HT_REP && <span>📊 <b>{P.reinMsn.length}</b> MSN → <b>{P.HT_REP}</b> <span style={{color:'var(--text-light)'}}>(cap {P.MSN_TO_REIN})</span></span>}
-                  <span>📊 <b>{P.msnRest.length}</b> MSN + 🔥 <b>{P.virals.length}</b> VIRALS → <b>{P.REST_REPS.join(' / ')||'—'}</b></span>
-                </div>
+                {P.manual
+                  ? <div style={{display:'inline-flex',alignItems:'center',gap:7,alignSelf:'flex-start',padding:'5px 11px',borderRadius:8,background:'var(--accent-light,#EEF)',color:'var(--accent)',fontSize:12,fontWeight:700}}>🎚 Following your manual numbers — {P.ht.length} HT · {P.msn.length} MSN · {P.virals.length} VIRALS available</div>
+                  : <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12}}>
+                      <span>🎯 <b>{P.ht.length}</b> High-Ticket → <b>{P.HT_REP||P.REST_REPS.join(' / ')||'—'}</b></span>
+                      {P.HT_REP && <span>📊 <b>{P.reinMsn.length}</b> MSN → <b>{P.HT_REP}</b> <span style={{color:'var(--text-light)'}}>(cap {P.MSN_TO_REIN})</span></span>}
+                      <span>📊 <b>{P.msnRest.length}</b> MSN + 🔥 <b>{P.virals.length}</b> VIRALS → <b>{P.REST_REPS.join(' / ')||'—'}</b></span>
+                    </div>}
                 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:10}}>
                   {order.length===0
                     ? <span style={{color:'var(--text-dim)'}}>Nobody — no eligible target reps (Rein / Chase / Mikka).</span>
@@ -8603,7 +8675,7 @@ function App() {
   // Pure dry-run of the JC distribution — used BOTH for the preview (before you
   // click) and the real assignment, so the two can never disagree.
   const JC_MSN_TO_REIN = 20;   // Rein's fixed MSN allocation on top of all High-Ticket
-  function jcAssignPlan(){
+  function jcAssignPlan(manual){
     const valid=new Set((config.salesReps||[]).concat((config.users||[]).map(u=>u.name)));
     // Skip anyone on an approved leave that covers today — don't hand leads to a
     // rep who's out of office. Their share falls through to whoever's available.
@@ -8630,27 +8702,44 @@ function App() {
       let a=0; fr.forEach(l=>inc(reps[a++%reps.length],l));
       let b=0; im.forEach(l=>inc(reps[b++%reps.length],l));
     };
-    // 1) All High-Ticket → Rein — unless Rein is on leave, then split among the
-    //    available rest reps so the HT leads still get worked.
-    if(HT_REP) ht.forEach(l=>inc(HT_REP,l)); else spread(ht, REST_REPS);
-    // 2) The first JC_MSN_TO_REIN MSN → Rein, kept origin-balanced so Rein's share
-    //    isn't all one type; the remaining MSN fall through to Chase/Mikka.
     let reinMsn=[], msnRest=msn;
-    if(HT_REP && msn.length){
-      const fr=msn.filter(l=>leadOrigin(l)==='Fresh'), im=msn.filter(l=>leadOrigin(l)!=='Fresh');
-      const want=Math.min(JC_MSN_TO_REIN, msn.length); let fi=0,ii=0;
-      while(reinMsn.length<want){
-        if(fi<fr.length && reinMsn.length<want) reinMsn.push(fr[fi++]);
-        if(ii<im.length && reinMsn.length<want) reinMsn.push(im[ii++]);
-        if(fi>=fr.length && ii>=im.length) break;
+    if(manual){
+      // MANUAL MODE — assign exactly the numbers the admin entered per category per
+      // rep (origin-balanced within each rep's take), skipping anyone on leave. Any
+      // leads beyond the entered totals simply stay with JC.
+      const takeFor=(pool, alloc)=>{ const remaining=[...pool];
+        Object.keys(alloc||{}).forEach(rep=>{ if(!avail(rep)) return;
+          let need=Math.max(0, Math.min(parseInt(alloc[rep],10)||0, remaining.length)); if(!need) return;
+          const fr=remaining.filter(l=>leadOrigin(l)==='Fresh'), im=remaining.filter(l=>leadOrigin(l)!=='Fresh');
+          const picked=[]; let fi=0,ii=0;
+          while(picked.length<need){ if(fi<fr.length&&picked.length<need)picked.push(fr[fi++]); if(ii<im.length&&picked.length<need)picked.push(im[ii++]); if(fi>=fr.length&&ii>=im.length)break; }
+          const taken=new Set(picked.map(l=>l.id)); picked.forEach(l=>inc(rep,l));
+          for(let k=remaining.length-1;k>=0;k--){ if(taken.has(remaining[k].id)) remaining.splice(k,1); }
+        });
+      };
+      takeFor(ht, manual.HT); takeFor(msn, manual.MSN); takeFor(virals, manual.VIRALS);
+    } else {
+      // 1) All High-Ticket → Rein — unless Rein is on leave, then split among the
+      //    available rest reps so the HT leads still get worked.
+      if(HT_REP) ht.forEach(l=>inc(HT_REP,l)); else spread(ht, REST_REPS);
+      // 2) The first JC_MSN_TO_REIN MSN → Rein, kept origin-balanced so Rein's share
+      //    isn't all one type; the remaining MSN fall through to Chase/Mikka.
+      if(HT_REP && msn.length){
+        const fr=msn.filter(l=>leadOrigin(l)==='Fresh'), im=msn.filter(l=>leadOrigin(l)!=='Fresh');
+        const want=Math.min(JC_MSN_TO_REIN, msn.length); let fi=0,ii=0;
+        while(reinMsn.length<want){
+          if(fi<fr.length && reinMsn.length<want) reinMsn.push(fr[fi++]);
+          if(ii<im.length && reinMsn.length<want) reinMsn.push(im[ii++]);
+          if(fi>=fr.length && ii>=im.length) break;
+        }
+        const taken=new Set(reinMsn.map(l=>l.id));
+        msnRest=msn.filter(l=>!taken.has(l.id));
+        reinMsn.forEach(l=>inc('Rein',l));
       }
-      const taken=new Set(reinMsn.map(l=>l.id));
-      msnRest=msn.filter(l=>!taken.has(l.id));
-      reinMsn.forEach(l=>inc('Rein',l));
+      // 3) Remaining MSN + all VIRALS → split between Chase and Mikka.
+      spread(msnRest, REST_REPS);
+      spread(virals, REST_REPS);
     }
-    // 3) Remaining MSN + all VIRALS → split between Chase and Mikka.
-    spread(msnRest, REST_REPS);
-    spread(virals, REST_REPS);
     const moved = targets.filter(l=>map[l.id]);
     // Per-rep breakdown for the preview: counts by category + the actual leads.
     const perRep={};
@@ -8658,20 +8747,27 @@ function App() {
       const b=perRep[r]||(perRep[r]={HT:0,MSN:0,VIRALS:0,total:0,leads:[]});
       b[cat]++; b.total++; b.leads.push({id:l.id, name:l.channelName||l.name||l.url||'(unnamed)', cat, origin:leadOrigin(l)});
     });
-    return {targets, ht, msn, virals, reinMsn, msnRest, map, tally, moved, perRep, HT_REP, REST_REPS, MSN_TO_REIN:JC_MSN_TO_REIN, excludedOnLeave};
+    return {targets, ht, msn, virals, reinMsn, msnRest, map, tally, moved, perRep, HT_REP, REST_REPS, MSN_TO_REIN:JC_MSN_TO_REIN, excludedOnLeave, manual:!!manual};
   }
-  function autoAssignJC(){
-    const {targets, ht, reinMsn, msnRest, virals, map, tally, moved, HT_REP, REST_REPS, MSN_TO_REIN, excludedOnLeave}=jcAssignPlan();
+  function autoAssignJC(manual){
+    const plan=jcAssignPlan(manual);
+    const {targets, ht, msn, reinMsn, msnRest, virals, map, tally, moved, HT_REP, REST_REPS, MSN_TO_REIN, excludedOnLeave}=plan;
     if(!targets.length){ addToast("No Potential or HT leads under JC to distribute — tag his leads Potential/HT first.",'info'); return; }
-    if(!moved.length){ addToast('No target reps available to distribute to (all of Rein / Chase / Mikka are on leave or missing)','info'); return; }
+    if(!moved.length){ addToast(manual?'Your manual numbers assign 0 leads — enter some counts first.':'No target reps available to distribute to (all of Rein / Chase / Mikka are on leave or missing)','info'); return; }
     const htTarget = HT_REP || (REST_REPS.join(' / ')||'(none)');
-    const summary = `Distribute ${moved.length} of JC's Potential/HT lead(s)?\n\n`
-      + (excludedOnLeave.length ? `⛱ On leave today — skipped: ${excludedOnLeave.join(', ')}\n\n` : '')
-      + `• ${ht.filter(l=>map[l.id]).length} High-Ticket → ${htTarget}\n`
-      + (HT_REP ? `• ${reinMsn.filter(l=>map[l.id]).length} MSN → ${HT_REP} (cap ${MSN_TO_REIN})\n` : '')
-      + `• ${msnRest.filter(l=>map[l.id]).length} MSN → ${REST_REPS.join(' / ')||'(none)'}\n`
-      + `• ${virals.filter(l=>map[l.id]).length} VIRALS → ${REST_REPS.join(' / ')||'(none)'}\n\n`
-      + `Fresh & imported are balanced within each split.\nResult: ${Object.keys(tally).sort().map(r=>`${r} +${tally[r]}`).join(' · ')}`;
+    const aCt=pool=>pool.filter(l=>map[l.id]).length;
+    const summary = manual
+      ? `Distribute ${moved.length} of JC's Potential/HT lead(s) by your MANUAL numbers?\n\n`
+        + (excludedOnLeave.length ? `⛱ On leave today — skipped: ${excludedOnLeave.join(', ')}\n\n` : '')
+        + `• ${aCt(ht)} High-Ticket · ${aCt(msn)} MSN · ${aCt(virals)} VIRALS assigned\n\n`
+        + `Result: ${Object.keys(tally).sort().map(r=>`${r} +${tally[r]}`).join(' · ')||'nobody'}`
+      : `Distribute ${moved.length} of JC's Potential/HT lead(s)?\n\n`
+        + (excludedOnLeave.length ? `⛱ On leave today — skipped: ${excludedOnLeave.join(', ')}\n\n` : '')
+        + `• ${ht.filter(l=>map[l.id]).length} High-Ticket → ${htTarget}\n`
+        + (HT_REP ? `• ${reinMsn.filter(l=>map[l.id]).length} MSN → ${HT_REP} (cap ${MSN_TO_REIN})\n` : '')
+        + `• ${msnRest.filter(l=>map[l.id]).length} MSN → ${REST_REPS.join(' / ')||'(none)'}\n`
+        + `• ${virals.filter(l=>map[l.id]).length} VIRALS → ${REST_REPS.join(' / ')||'(none)'}\n\n`
+        + `Fresh & imported are balanced within each split.\nResult: ${Object.keys(tally).sort().map(r=>`${r} +${tally[r]}`).join(' · ')}`;
     if(!window.confirm(summary)) return;
     // Credit JC (the lead-gen who qualified it) via qualifiedBy so his KPI survives
     // the handoff; assignment date resets to the handoff day.
@@ -8682,7 +8778,7 @@ function App() {
     setLeads(ls=>ls.map(l=> map[l.id] ? {...l,assignedTo:map[l.id],dateAssigned:today,qualifiedBy:l.qualifiedBy||l.assignedTo,handedOffAt:today,
       history:pushHist(l,[histEvent(me,'assigned',{from:l.assignedTo||'',to:map[l.id],via:'auto-assign JC'})])} : l));
     addToast(`Distributed JC's Potential leads → ${Object.keys(tally).sort().map(r=>`${r} ${tally[r]}`).join(' · ')}`,'success');
-    logH('⚡',`Auto-assigned ${moved.length} JC Potential leads — HT + ${MSN_TO_REIN} MSN → Rein · rest MSN + VIRALS → Chase/Mikka`,{type:'revert',before,after});
+    logH('⚡',`Auto-assigned ${moved.length} JC leads — ${manual?'manual numbers':`HT + ${MSN_TO_REIN} MSN → Rein · rest → Chase/Mikka`} · ${Object.keys(tally).sort().map(r=>`${r} ${tally[r]}`).join(' · ')}`,{type:'revert',before,after});
   }
   function bulkDelete(ids){
     if(!ids||!ids.length) return;
