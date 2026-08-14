@@ -2292,6 +2292,12 @@ function fmtCloseDate(iso){
 function isNegCloseStatus(s){
   return /not\s*interested|unqualified|not\s*qualif|do\s*not\s*contact|lost|bad\s*fit|dead|reject|declin/i.test(String(s||''));
 }
+// Statuses that mean the deal is WON in Close — a signed/onboarding partner. These
+// leads must NOT be recycled; they belong in Already Partner. Conservative on
+// purpose (only unambiguous won states) so a live lead is never wrongly parked.
+function isWonCloseStatus(s){
+  return /distribut\w*\s*partner|active\s*partner|closed[\s-]*won|\bwon\b|\bcustomer\b|\bsigned\b|onboard/i.test(String(s||''));
+}
 // Compact Close-DB search for the rep-dashboard header — type a name/email/URL and
 // get a dropdown of matching Close leads (status, owner, last-contacted, open link).
 // Reuses the same closeSearchWebhook as the full Search Close DB tab.
@@ -4714,7 +4720,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
     if(!closeIdsKey) return;
     const base=(config.supabaseUrl||'').trim(); if(!base) return;
     fetch(base+'/functions/v1/close-last-contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leadIds:closeIdsKey.split(',')})})
-      .then(r=>r.json()).then(res=>{ if(!res||!res.ok||!res.contacts) return; const c=res.contacts; setCloseContacts(c);
+      .then(r=>r.json()).then(res=>{ if(!res||!res.ok) return; const c=res.contacts||{}; const st=res.statuses||{}; const wonMap=res.won||{}; setCloseContacts(c);
         // AUTO-FILL: persist Close's last-email/activity date onto the lead when the
         // rep never set one manually. Without this the date only showed here — the
         // recycle clock in other views + the server recycle job read l.lastContactDate,
@@ -4723,7 +4729,13 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
         // list backfills gradually across visits instead of one giant write burst.
         if(onSave){ let wrote=0; const CAP=300;
           for(const l of contacted){ if(wrote>=CAP) break;
-            if(l.contactDateManual || !l.closeLeadId) continue;
+            if(!l.closeLeadId) continue;
+            // WON in Close → it's a signed partner; tag Partner so it leaves Contacted
+            // and never ages into recycle. Takes priority over the date backfill.
+            if((wonMap[l.closeLeadId]===true || isWonCloseStatus(st[l.closeLeadId])) && !(l.tags||[]).includes('Partner')){
+              onSave({...l, tags:[...(l.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'), 'Partner']}); wrote++; continue;
+            }
+            if(l.contactDateManual) continue;
             const raw=c[l.closeLeadId]; if(!raw) continue; const d=toLocalDay(raw); if(!d) continue;
             const ymd=ymdLocal(d); const curD=l.lastContactDate?toLocalDay(l.lastContactDate):null; const cur=curD?ymdLocal(curD):'';
             if(ymd && ymd!==cur){ onSave({...l,lastContactDate:ymd,contactDateManual:false}); wrote++; }
@@ -6623,9 +6635,32 @@ function ErrorLogView({addToast}) {
 // queue, which is the whole point: a lead that went cold gets another run.
 function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,onClaim,isAdmin,config,campColorMap}) {
   const today=ymdLocal(new Date());
-  const freeAgents=leads.filter(l=>!l.assignedTo).length;
-  const releasedToday=leads.filter(l=>l.recycledAt===today).length;
-  const msn=leads.filter(l=>{const c=(l.campaigns||[]).join(' ').toUpperCase();return c.includes('MSN')||c.includes('MCN');}).length;
+  // Pull the Close status for every recycle lead that's in Close and drop the ones
+  // already WON (Distributor Partner / Closed Won / Customer …) — a signed partner
+  // must never be re-worked. They're also re-tagged Partner so they move to Already
+  // Partner for good and don't age back into recycle.
+  const [wonIds,setWonIds]=useState(()=>new Set());
+  const closeIdsKey=[...new Set(leads.map(l=>l.closeLeadId).filter(Boolean))].sort().join(',');
+  useEffect(()=>{
+    if(!closeIdsKey) return;
+    const base=(config.supabaseUrl||'').trim(); if(!base) return;
+    fetch(base+'/functions/v1/close-last-contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leadIds:closeIdsKey.split(',')})})
+      .then(r=>r.json()).then(res=>{ if(!res||!res.ok) return; const wonMap=res.won||{}; const st=res.statuses||{};
+        const isWon=l=>!!l.closeLeadId && (wonMap[l.closeLeadId]===true || isWonCloseStatus(st[l.closeLeadId]));
+        const won=new Set(); leads.forEach(l=>{ if(isWon(l)) won.add(l.id); });
+        setWonIds(won);
+        if(onEdit){ let n=0; for(const l of leads){ if(n>=200) break;
+          if(isWon(l) && !(l.tags||[]).includes('Partner')){
+            onEdit({...l, tags:[...(l.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'), 'Partner']}); n++;
+          }
+        } }
+      }).catch(()=>{});
+  },[closeIdsKey]);
+  const hiddenWon=leads.filter(l=>wonIds.has(l.id)).length;
+  const shownLeads=leads.filter(l=>!wonIds.has(l.id));   // never show/recycle a won-in-Close lead
+  const freeAgents=shownLeads.filter(l=>!l.assignedTo).length;
+  const releasedToday=shownLeads.filter(l=>l.recycledAt===today).length;
+  const msn=shownLeads.filter(l=>{const c=(l.campaigns||[]).join(' ').toUpperCase();return c.includes('MSN')||c.includes('MCN');}).length;
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
       <div style={{padding:'14px 24px 0',flexShrink:0}}>
@@ -6644,7 +6679,7 @@ function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,
           </div>
           <div className="stat-card green" style={{flex:1,minWidth:150}}>
             <div className="stat-label">Other campaigns (30-day)</div>
-            <div className="stat-value">{leads.length-msn}</div>
+            <div className="stat-value">{shownLeads.length-msn}</div>
           </div>
         </div>
         <div style={{fontSize:12,color:'var(--text-dim)',margin:'11px 2px 0',lineHeight:1.6}}>
@@ -6652,8 +6687,13 @@ function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,
           Select the ones you want and hit <b>♻ Pick up &amp; re-qualify</b>: they get assigned to you, tagged
           <b> Potential</b>, and their contact clock resets so they read as fresh to contact.
         </div>
+        {hiddenWon>0 && (
+          <div style={{margin:'10px 2px 0',padding:'8px 12px',borderRadius:9,background:'#E3FCEF',color:'#006644',fontSize:12,fontWeight:600}}>
+            ✓ {hiddenWon} lead{hiddenWon!==1?'s':''} kept out of recycling — already Won / Distributor Partner in Close (moved to Already Partner).
+          </div>
+        )}
       </div>
-      <LeadsTable leads={leads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete}
+      <LeadsTable leads={shownLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete}
         onArchive={onArchive} onBulkAssign={onBulkAssign} onClaim={onClaim}
         claimLabel="♻ Pick up & re-qualify"
         claimTitle="Assign these to you and tag them Potential — they move straight into your queue"
