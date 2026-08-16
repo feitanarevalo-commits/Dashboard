@@ -2011,14 +2011,10 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                             ⏳ contacted {w.days}d ago{w.rep?` · ${w.rep}`:''} · recycle in {w.left}d
                           </span>;
                         })()}
-                        {(()=>{
-                          const rc=rejectedCampaigns(lead);
-                          if(!rc.length) return null;
-                          return <span style={{display:'inline-block',marginLeft:6,fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:20,background:'#FFEBE6',color:'#DE350B',whiteSpace:'nowrap'}}
-                            title={`Rejected (Not Qualified) from ${rc.join(', ')} — still fair game to offer to another campaign.`}>⊘ Rejected from {rc.join(' / ')}</span>;
-                        })()}
                       </div>
                       {isInClose(lead) && <div className="in-close-badge" title="This channel already exists in your Close CRM">☁ In Close</div>}
+                      {isRejectedCloseStatus(lead.closeStatus) && <div style={{display:'inline-flex',alignItems:'center',gap:4,marginTop:4,fontSize:10,fontWeight:700,padding:'2px 8px',borderRadius:20,background:'#FFEBE6',color:'#DE350B',whiteSpace:'nowrap'}}
+                        title={`Close status: "${lead.closeStatus}" — rejected in Close. Still fair game to offer to another campaign.`}>☁ {lead.closeStatus}</div>}
                       {lead.urlBroken && (recheckId===lead.id
                         ? <div className="url-broken-badge" style={{opacity:.65}}>⏳ checking…</div>
                         : <span className="url-broken-badge" role="button" tabIndex={0} style={{cursor:'pointer'}}
@@ -2298,12 +2294,12 @@ function fmtCloseDate(iso){
 function isNegCloseStatus(s){
   return /not\s*interested|unqualified|not\s*qualif|do\s*not\s*contact|lost|bad\s*fit|dead|reject|declin/i.test(String(s||''));
 }
-// Campaigns a lead was rejected from = the campaign(s) it sits in while tagged NQ.
-// Surfaced as a badge so a rep sees "rejected from MSN" and can re-offer it to
-// another campaign (VVV / MCN) instead of writing the creator off entirely.
-function rejectedCampaigns(lead){
-  if(!lead || !(lead.tags||[]).includes('NQ')) return [];
-  return (lead.campaigns||[]).filter(Boolean);
+// A Close status that means the lead was REJECTED there (e.g. "Rejected", "Rejected
+// MSN", "Not Interested"). Surfaced as a badge so reps can still offer it to another
+// campaign instead of re-pitching a dead one. Close status is backfilled onto the
+// lead (l.closeStatus) in the Contacted/Recycle views.
+function isRejectedCloseStatus(s){
+  return /reject|not\s*interested|declin|unqualif|not\s*qualif|lost|bad\s*fit|dead|do\s*not\s*contact/i.test(String(s||''));
 }
 // Statuses that mean the deal is WON in Close — a signed/onboarding partner. These
 // leads must NOT be recycled; they belong in Already Partner. Conservative on
@@ -4748,10 +4744,17 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
             if((wonMap[l.closeLeadId]===true || isWonCloseStatus(st[l.closeLeadId])) && !(l.tags||[]).includes('Partner')){
               onSave({...l, tags:[...(l.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'), 'Partner']}); wrote++; continue;
             }
-            if(l.contactDateManual) continue;
-            const raw=c[l.closeLeadId]; if(!raw) continue; const d=toLocalDay(raw); if(!d) continue;
-            const ymd=ymdLocal(d); const curD=l.lastContactDate?toLocalDay(l.lastContactDate):null; const cur=curD?ymdLocal(curD):'';
-            if(ymd && ymd!==cur){ onSave({...l,lastContactDate:ymd,contactDateManual:false}); wrote++; }
+            // One combined write: persist the Close status (for the rejected badge)
+            // and, unless the rep set the date manually, the last-contact date.
+            const patch={};
+            const cs=st[l.closeLeadId]||'';
+            if(cs && cs!==(l.closeStatus||'')) patch.closeStatus=cs;
+            if(!l.contactDateManual){
+              const raw=c[l.closeLeadId]; const d=raw?toLocalDay(raw):null;
+              if(d){ const ymd=ymdLocal(d); const curD=l.lastContactDate?toLocalDay(l.lastContactDate):null; const cur=curD?ymdLocal(curD):'';
+                if(ymd && ymd!==cur){ patch.lastContactDate=ymd; patch.contactDateManual=false; } }
+            }
+            if(Object.keys(patch).length){ onSave({...l, ...patch}); wrote++; }
           }
         }
       }).catch(()=>{});
@@ -6664,8 +6667,10 @@ function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,
         setWonIds(won);
         if(onEdit){ let n=0; for(const l of leads){ if(n>=200) break;
           if(isWon(l) && !(l.tags||[]).includes('Partner')){
-            onEdit({...l, tags:[...(l.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'), 'Partner']}); n++;
+            onEdit({...l, tags:[...(l.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'), 'Partner']}); n++; continue;
           }
+          // Backfill the Close status so the "rejected in Close" badge shows here too.
+          const cs=l.closeLeadId?(st[l.closeLeadId]||''):''; if(cs && cs!==(l.closeStatus||'')){ onEdit({...l, closeStatus:cs}); n++; }
         } }
       }).catch(()=>{});
   },[closeIdsKey]);
@@ -9314,6 +9319,9 @@ function App() {
       // Who worked the lead before it aged out into For Recycle. The recycle job
       // unassigns the lead so anyone can pick it up; this keeps the attribution.
       recycledFrom: x.recycledFrom || null, recycledAt: x.recycledAt || null,
+      // The lead's current Close status_label, backfilled from Close in the
+      // Contacted/Recycle views. Powers the "rejected in Close" badge.
+      closeStatus: x.closeStatus || null,
       // Set on an archived duplicate that was folded into the record a rep works,
       // so the merge stays traceable (and undoable) from the Archive tab.
       mergedInto: x.mergedInto || null, mergedAt: x.mergedAt || null,
