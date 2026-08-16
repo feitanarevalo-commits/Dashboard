@@ -2011,6 +2011,12 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                             ⏳ contacted {w.days}d ago{w.rep?` · ${w.rep}`:''} · recycle in {w.left}d
                           </span>;
                         })()}
+                        {(()=>{
+                          const rc=rejectedCampaigns(lead);
+                          if(!rc.length) return null;
+                          return <span style={{display:'inline-block',marginLeft:6,fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:20,background:'#FFEBE6',color:'#DE350B',whiteSpace:'nowrap'}}
+                            title={`Rejected (Not Qualified) from ${rc.join(', ')} — still fair game to offer to another campaign.`}>⊘ Rejected from {rc.join(' / ')}</span>;
+                        })()}
                       </div>
                       {isInClose(lead) && <div className="in-close-badge" title="This channel already exists in your Close CRM">☁ In Close</div>}
                       {lead.urlBroken && (recheckId===lead.id
@@ -2291,6 +2297,13 @@ function fmtCloseDate(iso){
 // Statuses that mean "don't re-pitch" — highlighted red in the Close search.
 function isNegCloseStatus(s){
   return /not\s*interested|unqualified|not\s*qualif|do\s*not\s*contact|lost|bad\s*fit|dead|reject|declin/i.test(String(s||''));
+}
+// Campaigns a lead was rejected from = the campaign(s) it sits in while tagged NQ.
+// Surfaced as a badge so a rep sees "rejected from MSN" and can re-offer it to
+// another campaign (VVV / MCN) instead of writing the creator off entirely.
+function rejectedCampaigns(lead){
+  if(!lead || !(lead.tags||[]).includes('NQ')) return [];
+  return (lead.campaigns||[]).filter(Boolean);
 }
 // Statuses that mean the deal is WON in Close — a signed/onboarding partner. These
 // leads must NOT be recycled; they belong in Already Partner. Conservative on
@@ -6633,7 +6646,7 @@ function ErrorLogView({addToast}) {
 // everything else 30) into here, unassigned — so whoever gets to it first picks
 // it up. Picking up re-tags the lead Potential and drops it into that rep's
 // queue, which is the whole point: a lead that went cold gets another run.
-function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,onClaim,isAdmin,config,campColorMap}) {
+function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,onClaim,onAutoDistribute,isAdmin,config,campColorMap}) {
   const today=ymdLocal(new Date());
   // Pull the Close status for every recycle lead that's in Close and drop the ones
   // already WON (Distributor Partner / Closed Won / Customer …) — a signed partner
@@ -6682,10 +6695,16 @@ function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,
             <div className="stat-value">{shownLeads.length-msn}</div>
           </div>
         </div>
-        <div style={{fontSize:12,color:'var(--text-dim)',margin:'11px 2px 0',lineHeight:1.6}}>
-          These leads finished their recycle period and were released back to the team &mdash; nobody owns them.
-          Select the ones you want and hit <b>♻ Pick up &amp; re-qualify</b>: they get assigned to you, tagged
-          <b> Potential</b>, and their contact clock resets so they read as fresh to contact.
+        <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',margin:'11px 2px 0'}}>
+          <div style={{fontSize:12,color:'var(--text-dim)',lineHeight:1.6,flex:1,minWidth:260}}>
+            These leads finished their recycle period and were released back to the team &mdash; nobody owns them.
+            Select the ones you want and hit <b>♻ Pick up &amp; re-qualify</b>, or an admin can auto-split the whole pool.
+          </div>
+          {onAutoDistribute && shownLeads.length>0 && (
+            <button className="btn btn-sm" style={{background:'#3F7D74',color:'#fff',borderColor:'#3F7D74',whiteSpace:'nowrap'}}
+              onClick={onAutoDistribute}
+              title="Split every recycle lead evenly across the sales team — each lead goes to a rep OTHER than the one who last worked it, and is re-tagged Potential">⚡ Auto-distribute {shownLeads.length} evenly</button>
+          )}
         </div>
         {hiddenWon>0 && (
           <div style={{margin:'10px 2px 0',padding:'8px 12px',borderRadius:9,background:'#E3FCEF',color:'#006644',fontSize:12,fontWeight:600}}>
@@ -8708,6 +8727,46 @@ function App() {
     addToast(`♻ ${ids.length} lead(s) picked up and tagged Potential — they're in your queue now`,'success');
     logH('♻️',`Recycle pick-up: ${ids.length} lead(s) → ${me}, re-tagged Potential`, before.length?{type:'revert',before,after}:null);
   }
+  // Auto-distribute the WHOLE recycle pool evenly across the sales reps, giving each
+  // lead to a rep OTHER than the one who last worked it (recycledFrom) — a fresh set
+  // of eyes. Uses least-loaded-eligible so the split stays even. Skips on-leave reps.
+  function autoDistributeRecycle(){
+    const recycle=leads.filter(l=>(l.tags||[]).includes('For Recycle') && !l.archived);
+    if(!recycle.length){ addToast('No leads in the recycle pool to distribute','info'); return; }
+    const onLeave=repsOnLeave(leaves);
+    // The MSN/VVV sales reps who work recycle leads = employee-role users (not JC the
+    // lead-gen, not the admins). Minus anyone on leave today.
+    const targets=(config.salesReps||[]).filter(r=>{ const u=(config.users||[]).find(x=>x.name===r); return u && u.role==='employee' && !onLeave.has(r); });
+    if(!targets.length){ addToast('No available sales reps to distribute to','info'); return; }
+    const counts={}; targets.forEach(r=>counts[r]=0);
+    const map={}, tally={};
+    for(const l of recycle){
+      const from=l.recycledFrom||l.assignedTo||'';
+      let pool=targets.filter(r=>r!==from); if(!pool.length) pool=targets.slice();   // only the last handler is a target → allow it
+      pool.sort((a,b)=>counts[a]-counts[b]);
+      const rep=pool[0]; map[l.id]=rep; counts[rep]++; tally[rep]=(tally[rep]||0)+1;
+    }
+    const summary=`Distribute ${recycle.length} recycle lead(s) evenly across the sales team?\n\n`
+      + `Each lead goes to a rep OTHER than the one who last worked it, and is re-tagged Potential (contact clock reset).\n\n`
+      + `Result: ${Object.keys(tally).sort().map(r=>`${r} +${tally[r]}`).join(' · ')}`;
+    if(!window.confirm(summary)) return;
+    const me=(currentUser&&currentUser.name)||'';
+    const today=ymdLocal(new Date());
+    const moved=recycle.filter(l=>map[l.id]);
+    const before=moved.map(undoSnap);
+    setLeads(ls=>ls.map(l=>{ const rep=map[l.id]; if(!rep) return l;
+      const tags=[...(l.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'&&t!=='Pending Qualification')];
+      if(!tags.includes('Potential')) tags.push('Potential');
+      const evs=[histEvent(me,'assigned',{from:l.assignedTo||'',to:rep,via:'recycle auto-distribute'}),
+                 histEvent(me,'qualified',{from:'For Recycle',to:'Potential',via:'recycle auto-distribute'})];
+      return {...l, assignedTo:rep, dateAssigned:today, tags, lastContactDate:null, contactDateManual:false,
+        scrapedBy:humanScraper(l)||l.scrapedBy||null, history:pushHist(l,evs)};
+    }));
+    const after=before.map(b=>({...b, assignedTo:map[b.id], dateAssigned:today,
+      tags:[...(b.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'&&t!=='Pending Qualification'),'Potential'], lastContactDate:null}));
+    addToast(`♻ Distributed ${moved.length} recycle lead(s) → ${Object.keys(tally).sort().map(r=>`${r} ${tally[r]}`).join(' · ')}`,'success');
+    logH('♻️',`Recycle auto-distribute: ${moved.length} lead(s) evenly across ${targets.join('/')} (each avoided its last handler)`,{type:'revert',before,after});
+  }
 
   // Distribute lead-gen JC's QUALIFIED (Potential-tagged) leads to the sales team by
   // category:
@@ -9912,7 +9971,7 @@ function App() {
     // Contacted is unassigned, so everyone sees the same board and whoever gets
     // there first picks it up. "Pick up & re-qualify" claims it AND tags it
     // Potential in one step so it lands straight in that rep's queue.
-    if(tab==='recycle') return <RecycleView leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={claimRecycled} isAdmin={isAdmin} config={config} campColorMap={campColorMap}/>;
+    if(tab==='recycle') return <RecycleView leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={claimRecycled} onAutoDistribute={isAdmin?autoDistributeRecycle:null} isAdmin={isAdmin} config={config} campColorMap={campColorMap}/>;
     // Already Partner: the lead is won and out of the pipeline. Reps see their
     // own, admins see everyone's — same scoping as Pending.
     if(tab==='partner') return <LeadsTable leads={vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="already_partner" printTitle="Already Partner"/>;
