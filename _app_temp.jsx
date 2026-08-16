@@ -3021,7 +3021,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const [heatMonthOffset,setHeatMonthOffset]=useState(0);   // month heatmap: 0=current, -1=prev…
   React.useEffect(()=>{ setHeatMonthOffset(0); },[detail]); // reset to current month each time a rep report opens
 
-  const campDefs=(config.campaigns||[]).map(c=>({id:c.id,label:c.label,color:c.color}));
+  const campDefs=(config.campaigns||[]).map(c=>({id:c.id,label:c.label,color:c.color,logo:c.logo||''}));
   const campIds=campDefs.map(c=>c.id);
   const allReps=(config.salesReps||[]);
   const reps=lockedRep?allReps.filter(r=>r===lockedRep):allReps;
@@ -3435,8 +3435,10 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
               return (
                 <div key={c.id} style={{...card,padding:'18px 18px 16px',display:'flex',flexDirection:'column',justifyContent:'space-between'}}>
                   <div>
-                    <div style={{display:'inline-flex',alignItems:'center',gap:8,padding:'5px 11px 5px 8px',borderRadius:999,background:tint(c.color,.12)}}>
-                      <span style={{width:8,height:8,borderRadius:999,background:c.color}}/>
+                    <div style={{display:'inline-flex',alignItems:'center',gap:8,padding:c.logo?'4px 12px 4px 6px':'5px 11px 5px 8px',borderRadius:999,background:tint(c.color,.12)}}>
+                      {c.logo
+                        ? <img src={c.logo} alt={c.label} style={{width:18,height:18,borderRadius:5,objectFit:'contain',display:'block'}}/>
+                        : <span style={{width:8,height:8,borderRadius:999,background:c.color}}/>}
                       <span style={{fontSize:10.5,fontWeight:800,letterSpacing:'.04em',color:c.color}}>{c.label}</span>
                     </div>
                     <div style={{fontFamily:SG,fontSize:34,fontWeight:800,letterSpacing:'-.035em',lineHeight:1,marginTop:14,fontVariantNumeric:'tabular-nums'}}>{fmt(o.potentials)}</div>
@@ -10236,7 +10238,9 @@ function App() {
               const cnt=vLeads.filter(l=>l.campaigns.includes(c.id) && isWorkable(l) && canSeeLead(l)).length;
               return(
                 <div key={id} title={c.label} className={`nav-item ${tab===id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(id);}}>
-                  <span className="nav-icon" style={{color:c.color}}>●</span>{c.label}
+                  {c.logo
+                    ? <span className="nav-icon" style={{display:'inline-flex'}}><img src={c.logo} alt="" style={{width:16,height:16,borderRadius:4,objectFit:'contain',display:'block'}}/></span>
+                    : <span className="nav-icon" style={{color:c.color}}>●</span>}{c.label}
                   <span className="nav-badge">{cnt}</span>
                 </div>
               );
