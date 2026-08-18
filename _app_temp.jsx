@@ -1620,7 +1620,11 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
     // and a bare .toLowerCase() on it threw here — taking the whole app down on
     // the first keystroke in search. One bad row must never break the table.
     if(s){
-      const hay=[l.channelName,l.niche,l.platform].map(v=>String(v==null?'':v).toLowerCase());
+      // Search matches the whole lead, not just channel/niche/platform — reps
+      // routinely paste an email or a channel URL to find a lead, and those
+      // returned nothing before. Include emails, url, handle and assignee too.
+      const hay=[l.channelName,l.niche,l.platform,l.url,l.channelId,l.handle,l.assignedTo,...(l.emails||[])]
+        .map(v=>String(v==null?'':v).toLowerCase());
       if(!hay.some(h=>h.includes(s))) return false;
     }
     if(skipCol!=='tags' && cf.tags){
@@ -4834,7 +4838,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
   function handleSort(col,dir){ setSortCol(col); setSortDir(dir||'asc'); }
   const colHeaderProps={sortCol,sortDir,onSort:handleSort,leads:contacted,colFilter,setColFilter,openFilterCol,setOpenFilterCol,config};
   const rows=contacted.filter(l=>{
-    if(search){ const s=search.toLowerCase(); const hay=[l.channelName,l.niche,l.platform,(l.emails||[])[0]].map(v=>String(v==null?'':v).toLowerCase()); if(!hay.some(h=>h.includes(s))) return false; }
+    if(search){ const s=search.toLowerCase(); const hay=[l.channelName,l.niche,l.platform,l.url,l.channelId,l.handle,l.assignedTo,...(l.emails||[])].map(v=>String(v==null?'':v).toLowerCase()); if(!hay.some(h=>h.includes(s))) return false; }
     if(colFilter.campaign){ if(colFilter.campaign==='None'){ if((l.campaigns||[]).length>0) return false; } else if(!(l.campaigns||[]).includes(colFilter.campaign)) return false; }
     if(colFilter.assignedTo){ if(colFilter.assignedTo==='Unassigned'){ if(l.assignedTo) return false; } else if(l.assignedTo!==colFilter.assignedTo) return false; }
     if(colFilter.emails){ const n=(l.emails||[]).filter(Boolean).length; if(colFilter.emails==='No email' ? n>0 : n===0) return false; }
@@ -5463,7 +5467,7 @@ function DiscoveryView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onResult
   // The discovery queue = leads not yet worked (no status tag), like the old scraper queue.
   let pool=leads.filter(l=>!hasStatusTag(l));
   if(platTab!=='All' && platTab!=='Amazon') pool=pool.filter(l=>l.platform===platTab);
-  if(keyword.trim()){ const k=keyword.toLowerCase(); pool=pool.filter(l=>(l.channelName||'').toLowerCase().includes(k)||(l.niche||'').toLowerCase().includes(k)); }
+  if(keyword.trim()){ const k=keyword.toLowerCase(); pool=pool.filter(l=>[l.channelName,l.niche,l.platform,l.url,l.channelId,l.handle,...(l.emails||[])].some(v=>String(v==null?'':v).toLowerCase().includes(k))); }
   if(interest!=='All') pool=pool.filter(l=>(l.niche||'').toLowerCase().includes(interest.toLowerCase()));
   const minN=parseFollowers(minF), maxN=parseFollowers(maxF);
   if(minF) pool=pool.filter(l=>parseFollowers(l.followers)>=minN);
@@ -6131,7 +6135,7 @@ function ArchiveView({loadArchived,onRestore,config,campColorMap,addToast}) {
   },[reloadTick]);
 
   const s=search.trim().toLowerCase();
-  const filtered=(rows||[]).filter(l=>!s || (l.channelName||'').toLowerCase().includes(s) || (l.niche||'').toLowerCase().includes(s) || (l.assignedTo||'').toLowerCase().includes(s));
+  const filtered=(rows||[]).filter(l=>!s || [l.channelName,l.niche,l.platform,l.url,l.channelId,l.handle,l.assignedTo,...(l.emails||[])].some(v=>String(v==null?'':v).toLowerCase().includes(s)));
   const allSel=filtered.length>0 && filtered.every(l=>sel.includes(l.id));
   function toggleAll(){ setSel(allSel?[]:filtered.map(l=>l.id)); }
   function toggleOne(id){ setSel(x=>x.includes(id)?x.filter(i=>i!==id):[...x,id]); }
@@ -9860,7 +9864,12 @@ function App() {
   // tag never stuck, and showed Contacted leads in two tabs at once.
   // NQ leads are explicitly excluded — a lead the rep rejected is Not Qualified,
   // never Pending, so it can't sit in both tabs.
-  const isPendingLead = l => !(l.tags||[]).includes('NQ') && !(l.tags||[]).includes('Awaiting Potential') && (
+  // A contacted lead has landed in the Contacted tab and must leave Pending, even
+  // if it still literally carries the 'Pending Qualification' tag. isContacted
+  // also catches the imported "Recently Contacted" Close status, which is NOT in
+  // STATUS_TAGS — so hasStatusTag missed it and the lead stuck in Pending, which
+  // is exactly the "tagged Recently Contacted but didn't move to Contacted" bug.
+  const isPendingLead = l => !(l.tags||[]).includes('NQ') && !(l.tags||[]).includes('Awaiting Potential') && !isContacted(l) && (
     (l.tags||[]).includes('Pending Qualification') ||
     (l.assignedTo && (l.campaigns||[]).length===0 && !hasStatusTag(l)));
   // Non-admins only see their OWN leads on scoped tabs (e.g. Pending); admins see all.
