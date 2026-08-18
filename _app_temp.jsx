@@ -7041,6 +7041,13 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   const QUOTA_TIERS=[{key:'main',label:'Main quota'},{key:'newHire',label:`New-hire · ${localNewHires.join(' · ')}`},{key:'jc',label:'JC quota'}];
   function apply(){
     onConfig(local);
+    // Make sure every listed account has a real login credential. Adding a rep
+    // only writes app_config.users; the actual login check reads app_credentials
+    // (bcrypt), so without this a new account's default password never worked.
+    // ensure_credential is insert-if-missing — it never overwrites an existing
+    // password — so calling it for every user on save both provisions brand-new
+    // accounts (default 'Enfinity26') and self-heals any account missing a login.
+    try{ if(typeof SB!=='undefined' && SB){ (local.users||[]).forEach(u=>{ if(u&&u.name){ SB.rpc('ensure_credential',{p_name:u.name,p_role:u.role||'employee'}); } }); } }catch(e){}
     // Persist any typed Close keys (write-only; blank = leave the existing one).
     let savedCloseKeys=0;
     Object.keys(closeKeyDrafts).forEach(rep=>{ const v=(closeKeyDrafts[rep]||'').trim(); if(v){ saveRepCloseKey(rep,v); savedCloseKeys++; } });
