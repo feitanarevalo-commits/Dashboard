@@ -3233,7 +3233,12 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
     return d>=cur.from && d<=cur.to;
   });
   const srcScope = lockedRep ? leads.filter(l=>l.assignedTo===lockedRep) : leads;
-  const srcCount=(list,k)=>list.filter(l=>leadSource(l)===k).length;
+  // Count only leads that actually became PRODUCTIVE — Potential/HT (now or ever)
+  // or Contacted — so each source reflects the quality leads it produced, not raw
+  // intake volume. Otherwise a giant untouched bulk sheet import dwarfs the real
+  // sourced/scraped work even though none of those rows were ever qualified.
+  const isProductiveLead = l => isQualifiedLead(l) || isContacted(l);
+  const srcCount=(list,k)=>list.filter(l=>leadSource(l)===k && isProductiveLead(l)).length;
   // Three headline categories the user cares about + a muted 'other' residual.
   const srcCats=[
     {key:'import', label:'📄 Sheet import', color:'#3B82F6', w:srcCount(srcWinLeads,'import'),  a:srcCount(srcScope,'import')},
@@ -3334,7 +3339,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
             <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',gap:16,flexWrap:'wrap'}}>
               <div>
                 <div style={{fontSize:11,fontWeight:800,letterSpacing:'.06em',color:'var(--text-dim)'}}>LEAD SOURCES · {periodWord}</div>
-                <div style={{fontSize:11.5,color:'var(--text-light)',marginTop:2}}>{srcAll>0 ? `where the ${fmt(srcAll)} lead${srcAll!==1?'s':''} added ${periodWord} came from` : `No new leads added ${periodWord}`}</div>
+                <div style={{fontSize:11.5,color:'var(--text-light)',marginTop:2}}>{srcAll>0 ? `${fmt(srcAll)} potential/contacted lead${srcAll!==1?'s':''} ${periodWord} — by where they came from` : `No potential/contacted leads ${periodWord}`}</div>
               </div>
               {srcAll>0 && <div style={{display:'flex',gap:22,flexWrap:'wrap'}}>
                 {srcCats.map(c=>(
@@ -3358,7 +3363,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
               <span style={{fontWeight:800,letterSpacing:'.05em',color:'var(--text-dim)',fontSize:10.5}}>ALL-TIME</span>
               {srcCats.map(c=><span key={c.key}><b style={{color:c.color}}>{fmt(c.a)}</b> {c.label.replace(/^[^ ]+ /,'')}</span>)}
               {atOther>0 && <span><b style={{color:'var(--text-dim)'}}>{fmt(atOther)}</b> other</span>}
-              <span style={{marginLeft:'auto',color:'var(--text-light)'}}>{fmt(atAll)} total leads</span>
+              <span style={{marginLeft:'auto',color:'var(--text-light)'}}>{fmt(atAll)} total potential/contacted</span>
             </div>
           </div>
         )}
