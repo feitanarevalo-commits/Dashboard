@@ -2332,29 +2332,29 @@ function MiniCloseSearch({config}){
   }
   return (
     <div ref={boxRef} style={{position:'relative'}}>
-      <form onSubmit={run} style={{display:'flex',alignItems:'center',gap:6,background:'#17171f',border:'1px solid #26262f',borderRadius:9,padding:'0 10px',height:34}}>
-        <span style={{color:'#71717a',fontSize:13}}>☁</span>
+      <form onSubmit={run} style={{display:'flex',alignItems:'center',gap:6,background:'var(--card)',border:'1px solid var(--border)',borderRadius:9,padding:'0 10px',height:34}}>
+        <span style={{color:'var(--text-dim)',fontSize:13}}>☁</span>
         <input value={q} onChange={e=>setQ(e.target.value)} onFocus={()=>{ if(res) setOpen(true); }}
           placeholder="Search Close DB…" title="Search your Close database by name, email or URL"
-          style={{background:'transparent',border:'none',color:'#f4f4f5',fontSize:13,fontFamily:'inherit',outline:'none',width:158}}/>
+          style={{background:'transparent',border:'none',color:'var(--text)',fontSize:13,fontFamily:'inherit',outline:'none',width:158}}/>
         <button type="submit" disabled={!q.trim()||loading} aria-label="Search Close"
-          style={{background:'none',border:'none',color:q.trim()?'#d4d4d8':'#52525b',cursor:q.trim()?'pointer':'default',fontSize:13,padding:0,lineHeight:1}}>{loading?'…':'🔍'}</button>
+          style={{background:'none',border:'none',color:q.trim()?'var(--text-dim)':'var(--text-light)',cursor:q.trim()?'pointer':'default',fontSize:13,padding:0,lineHeight:1}}>{loading?'…':'🔍'}</button>
       </form>
       {open && (res||loading) && (
-        <div style={{position:'absolute',top:'calc(100% + 6px)',right:0,width:340,maxHeight:360,overflowY:'auto',background:'#1b1b23',border:'1px solid #2f2f3a',borderRadius:12,boxShadow:'0 16px 40px -12px rgba(0,0,0,.5)',padding:8,zIndex:60}}>
-          {loading && <div style={{padding:12,color:'#a1a1aa',fontSize:12.5}}>Searching Close…</div>}
-          {!loading && res && res.err && <div style={{padding:12,color:'#f87171',fontSize:12.5}}>Search failed: {res.err}</div>}
-          {!loading && res && !res.err && res.leads.length===0 && <div style={{padding:12,color:'#a1a1aa',fontSize:12.5}}>No Close leads match “{q}”. <span style={{color:'#6b6b76'}}>Likely a fresh lead.</span></div>}
+        <div style={{position:'absolute',top:'calc(100% + 6px)',right:0,width:340,maxHeight:360,overflowY:'auto',background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,boxShadow:'0 16px 40px -12px rgba(0,0,0,.25)',padding:8,zIndex:60}}>
+          {loading && <div style={{padding:12,color:'var(--text-dim)',fontSize:12.5}}>Searching Close…</div>}
+          {!loading && res && res.err && <div style={{padding:12,color:'#ef4444',fontSize:12.5}}>Search failed: {res.err}</div>}
+          {!loading && res && !res.err && res.leads.length===0 && <div style={{padding:12,color:'var(--text-dim)',fontSize:12.5}}>No Close leads match “{q}”. <span style={{color:'var(--text-light)'}}>Likely a fresh lead.</span></div>}
           {!loading && res && !res.err && res.leads.length>0 && <>
-            <div style={{fontSize:11,color:'#71717a',padding:'2px 6px 6px'}}>{res.total} match{res.total!==1?'es':''}{res.total>res.leads.length?` · showing ${res.leads.length}`:''}</div>
+            <div style={{fontSize:11,color:'var(--text-dim)',padding:'2px 6px 6px'}}>{res.total} match{res.total!==1?'es':''}{res.total>res.leads.length?` · showing ${res.leads.length}`:''}</div>
             {res.leads.slice(0,8).map(l=>{ const neg=isNegCloseStatus(l.status); return (
               <div key={l.id} style={{padding:'7px 8px',borderRadius:8,display:'flex',flexDirection:'column',gap:3}}>
                 <div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'space-between'}}>
-                  <span style={{fontSize:12.5,fontWeight:600,color:'#f4f4f5',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.channelName||l.name||'—'}</span>
-                  {l.closeUrl && <a href={l.closeUrl} target="_blank" rel="noreferrer" style={{fontSize:11,color:'#818cf8',flexShrink:0,textDecoration:'none'}}>Open ↗</a>}
+                  <span style={{fontSize:12.5,fontWeight:600,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.channelName||l.name||'—'}</span>
+                  {l.closeUrl && <a href={l.closeUrl} target="_blank" rel="noreferrer" style={{fontSize:11,color:'var(--accent)',flexShrink:0,textDecoration:'none'}}>Open ↗</a>}
                 </div>
-                <div style={{display:'flex',alignItems:'center',gap:8,fontSize:11,color:'#a1a1aa',flexWrap:'wrap'}}>
-                  {l.status && <span style={{padding:'1px 7px',borderRadius:999,fontWeight:600,background:neg?'#3a1e1e':'#26263a',color:neg?'#f87171':'#a5b4fc'}}>{neg?'⚠ ':''}{l.status}</span>}
+                <div style={{display:'flex',alignItems:'center',gap:8,fontSize:11,color:'var(--text-dim)',flexWrap:'wrap'}}>
+                  {l.status && <span style={{padding:'1px 7px',borderRadius:999,fontWeight:600,background:neg?'rgba(239,68,68,.15)':'rgba(99,102,241,.15)',color:neg?'#ef4444':'var(--accent)'}}>{neg?'⚠ ':''}{l.status}</span>}
                   {l.assignedTo && <span>{l.assignedTo}</span>}
                   {l.lastContacted && <span>· {fmtCloseDate(l.lastContacted)}</span>}
                 </div>
