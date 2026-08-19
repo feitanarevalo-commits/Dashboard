@@ -1866,11 +1866,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
           </>}
           {feats.bulkAssign&&<>
             <span className="bulk-panel-label">Rep</span>
-            <select value={bulkRep} onChange={e=>setBulkRep(e.target.value)} style={{fontSize:12,padding:'5px 10px'}}>
-              <option value="">— none —</option>
-              {allReps.map(r=><option key={r}>{r}</option>)}
-              <option value="__unassign__">✕ Unassign</option>
-            </select>
+            <RepSelect value={bulkRep} onChange={setBulkRep} reps={allReps} config={config}/>
           </>}
           <div className="toolbar-sep"/>
           <span className="bulk-panel-label">Tags</span>
@@ -4273,6 +4269,47 @@ function RepAvatar({rep,config,size=36,online=false,bgOverride=null}) {
             ? <span style={{fontSize:Math.round(size*.58),lineHeight:1}}>{emojiAvatarChar(photo)}</span>
             : (emoji||rep[0].toUpperCase())}
       {online&&<div className="rep-online-dot" style={{width:dotSize,height:dotSize,bottom:-1,right:-1,border:`${Math.max(1,Math.round(dotSize*.22))}px solid ${borderColor}`}}/>}
+    </div>
+  );
+}
+
+// A rep picker that shows each person's avatar beside their name. A native
+// <select> can't render images next to options, so this is a small custom
+// dropdown that mirrors the select's value/onChange contract. Special values:
+// '' = none/unassigned placeholder, '__unassign__' = explicit unassign action.
+function RepSelect({value, onChange, reps, config, allowUnassign=true, placeholder='— none —'}){
+  const [open,setOpen]=useState(false);
+  const ref=useRef(null);
+  useEffect(()=>{ const h=e=>{ if(ref.current && !ref.current.contains(e.target)) setOpen(false); }; document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h); },[]);
+  const AV=18;
+  const row=active=>({display:'flex',alignItems:'center',gap:8,padding:'5px 8px',borderRadius:7,cursor:'pointer',fontSize:12.5,color:'var(--text)',background:active?'var(--bg)':'transparent',whiteSpace:'nowrap'});
+  const isRep = value && value!=='__unassign__';
+  const label = value==='__unassign__' ? '✕ Unassign' : (value||placeholder);
+  return (
+    <div ref={ref} style={{position:'relative',display:'inline-block'}}>
+      <button type="button" onClick={()=>setOpen(o=>!o)} title="Assign to rep"
+        style={{display:'inline-flex',alignItems:'center',gap:6,background:'var(--card)',border:'1px solid var(--border)',borderRadius:7,padding:'3px 8px',height:30,fontSize:12,fontFamily:'inherit',color:'var(--text)',cursor:'pointer',minWidth:128}}>
+        {isRep && <RepAvatar rep={value} config={config} size={AV}/>}
+        <span style={{flex:1,textAlign:'left',color:value?'var(--text)':'var(--text-dim)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{label}</span>
+        <span style={{color:'var(--text-dim)',fontSize:9}}>▾</span>
+      </button>
+      {open && (
+        <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,minWidth:172,maxHeight:300,overflowY:'auto',background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,boxShadow:'0 14px 34px -10px rgba(0,0,0,.28)',padding:5,zIndex:70}}>
+          <div onClick={()=>{onChange('');setOpen(false);}} style={row(value==='')}>
+            <span style={{width:AV,height:AV,borderRadius:'50%',border:'1px dashed var(--border)',flexShrink:0}}/>
+            <span style={{color:'var(--text-dim)'}}>{placeholder}</span>
+          </div>
+          {(reps||[]).map(r=>(
+            <div key={r} onClick={()=>{onChange(r);setOpen(false);}} style={row(value===r)}>
+              <RepAvatar rep={r} config={config} size={AV}/>
+              <span>{r}</span>
+            </div>
+          ))}
+          {allowUnassign && <div onClick={()=>{onChange('__unassign__');setOpen(false);}} style={{...row(value==='__unassign__'),color:'var(--danger)'}}>
+            <span style={{width:AV,textAlign:'center',flexShrink:0,color:'var(--danger)'}}>✕</span><span>Unassign</span>
+          </div>}
+        </div>
+      )}
     </div>
   );
 }
