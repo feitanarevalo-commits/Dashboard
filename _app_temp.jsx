@@ -3011,6 +3011,9 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
 
   const [period,setPeriod]=useState('daily');
   const [dayOffset,setDayOffset]=useState(0);      // ≤0 days from today
+  // Custom date range (e.g. Jul 15 → Aug 15). When period==='custom' this drives
+  // the whole window instead of the daily/weekly/monthly presets.
+  const [range,setRange]=useState(null);           // {from,to} ISO strings, or null
   const [repMetric,setRepMetric]=useState('potentialNow');   // drives the rep bars
   // Which of the 4 live campaign metrics to show (Potential/Contacted/Imported/Fresh).
   const [metricsShown,setMetricsShown]=useState({potentialNow:true,contactedNow:true,impNow:true,freshNow:true});
@@ -3029,17 +3032,33 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   // ── Window ────────────────────────────────────────────────
   const today=new Date(); today.setHours(0,0,0,0);
   const anchor=new Date(today); anchor.setDate(anchor.getDate()+dayOffset);
-  const DAYS=HOME_PERIOD_DAYS[period];
   const win=(endDate,days)=>{
     const to=ymdLocal(endDate);
     const f=new Date(endDate); f.setDate(f.getDate()-(days-1));
     return {from:ymdLocal(f), to};
   };
-  const cur=win(anchor,DAYS);
-  const prevEnd=new Date(anchor); prevEnd.setDate(prevEnd.getDate()-DAYS);
-  const prev=win(prevEnd,DAYS);
-  const dayStr=ymdLocal(anchor);
-  const atToday=dayOffset>=0;
+  // A custom range is only "live" once both ends are picked; otherwise fall back
+  // to a 30-day window so the page never computes against an undefined preset.
+  const isCustom = period==='custom' && range && range.from && range.to;
+  let cur, prev, dayStr, atToday, DAYS;
+  if(isCustom){
+    // Tolerate the two inputs being picked in either order.
+    const from = range.from<=range.to ? range.from : range.to;
+    const to   = range.from<=range.to ? range.to   : range.from;
+    cur = {from, to};
+    DAYS = Math.round((new Date(to+'T00:00:00') - new Date(from+'T00:00:00'))/86400000)+1;
+    const pe=new Date(from+'T00:00:00'); pe.setDate(pe.getDate()-1);          // prev = equal-length window immediately before
+    const pf=new Date(pe); pf.setDate(pf.getDate()-(DAYS-1));
+    prev = {from:ymdLocal(pf), to:ymdLocal(pe)};
+    dayStr = to; atToday = true;
+  } else {
+    DAYS=HOME_PERIOD_DAYS[period]||1;
+    cur=win(anchor,DAYS);
+    const prevEnd=new Date(anchor); prevEnd.setDate(prevEnd.getDate()-DAYS);
+    prev=win(prevEnd,DAYS);
+    dayStr=ymdLocal(anchor);
+    atToday=dayOffset>=0;
+  }
 
   // ── One pass over every lead → per-rep, per-campaign buckets ──
   // `assigned` = everything that landed on the rep in the window (the raw intake,
@@ -3203,7 +3222,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
     assigned:'Everything that landed on this rep inside the selected window.',
     contactedNow:'Leads this rep has contacted (tagged Contacted) that they are holding right now. Not limited to the selected window.',
   }[repMetric];
-  const periodWord = period==='daily' ? (dayOffset===0?'today':'that day') : period==='weekly' ? 'this week' : 'this month';
+  const periodWord = isCustom ? 'in this range' : period==='daily' ? (dayOffset===0?'today':'that day') : period==='weekly' ? 'this week' : 'this month';
   let repRows=reps.map(rep=>{
     const a=get(S,rep,null);
     const camps=campDefs.map(c=>{ const o=get(S,rep,c.id); return {...c, o}; });
@@ -3297,22 +3316,37 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
             <div style={{fontSize:11.5,color:'var(--text-dim)',marginTop:2}}>{campDefs.map(c=>c.label).join(' · ')||'No campaigns'}</div>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-            <div style={{display:'flex',alignItems:'center',gap:6,background:'var(--card)',border:'1px solid var(--border)',borderRadius:999,padding:'4px 6px 4px 10px'}}>
-              <button onClick={()=>setDayOffset(o=>o-1)} title="Previous"
-                style={{width:26,height:26,borderRadius:999,border:'none',background:'transparent',cursor:'pointer',color:'var(--text-dim)',fontSize:14,lineHeight:1}}>‹</button>
-              <input type="date" value={dayStr} max={ymdLocal(today)}
-                onChange={e=>{ if(!e.target.value) return; const p=new Date(e.target.value+'T00:00:00'); setDayOffset(Math.min(0,Math.round((p-today)/86400000))); }}
-                style={{border:0,outline:0,background:'transparent',fontFamily:MONO,fontSize:12.5,fontWeight:600,color:'var(--text)',width:132,cursor:'pointer',textAlign:'center'}}/>
-              <button onClick={()=>setDayOffset(o=>Math.min(0,o+1))} disabled={atToday} title="Next"
-                style={{width:26,height:26,borderRadius:999,border:'none',background:'transparent',cursor:atToday?'default':'pointer',color:'var(--text-dim)',fontSize:14,lineHeight:1,opacity:atToday?.35:1}}>›</button>
-              <button onClick={()=>setDayOffset(0)} disabled={atToday}
-                style={{padding:'5px 12px',borderRadius:999,fontSize:11,fontWeight:700,cursor:atToday?'default':'pointer',border:'none',fontFamily:'inherit',
-                  color:atToday?'var(--text-light)':'#fff', background:atToday?'var(--bg)':C.ink, opacity:atToday?.6:1}}>Today</button>
-            </div>
+            {period==='custom' ? (
+              // From → To range picker (e.g. Jul 15 → Aug 15).
+              <div style={{display:'flex',alignItems:'center',gap:8,background:'var(--card)',border:'1px solid var(--border)',borderRadius:999,padding:'4px 12px'}}>
+                <input type="date" value={(range&&range.from)||''} max={ymdLocal(today)}
+                  onChange={e=>setRange(r=>({from:e.target.value, to:(r&&r.to)||e.target.value}))}
+                  style={{border:0,outline:0,background:'transparent',fontFamily:MONO,fontSize:12.5,fontWeight:600,color:'var(--text)',width:128,cursor:'pointer'}}/>
+                <span style={{color:'var(--text-dim)',fontSize:13,fontWeight:700}}>→</span>
+                <input type="date" value={(range&&range.to)||''} min={(range&&range.from)||''} max={ymdLocal(today)}
+                  onChange={e=>setRange(r=>({from:(r&&r.from)||e.target.value, to:e.target.value}))}
+                  style={{border:0,outline:0,background:'transparent',fontFamily:MONO,fontSize:12.5,fontWeight:600,color:'var(--text)',width:128,cursor:'pointer'}}/>
+              </div>
+            ) : (
+              <div style={{display:'flex',alignItems:'center',gap:6,background:'var(--card)',border:'1px solid var(--border)',borderRadius:999,padding:'4px 6px 4px 10px'}}>
+                <button onClick={()=>setDayOffset(o=>o-1)} title="Previous"
+                  style={{width:26,height:26,borderRadius:999,border:'none',background:'transparent',cursor:'pointer',color:'var(--text-dim)',fontSize:14,lineHeight:1}}>‹</button>
+                <input type="date" value={dayStr} max={ymdLocal(today)}
+                  onChange={e=>{ if(!e.target.value) return; const p=new Date(e.target.value+'T00:00:00'); setDayOffset(Math.min(0,Math.round((p-today)/86400000))); }}
+                  style={{border:0,outline:0,background:'transparent',fontFamily:MONO,fontSize:12.5,fontWeight:600,color:'var(--text)',width:132,cursor:'pointer',textAlign:'center'}}/>
+                <button onClick={()=>setDayOffset(o=>Math.min(0,o+1))} disabled={atToday} title="Next"
+                  style={{width:26,height:26,borderRadius:999,border:'none',background:'transparent',cursor:atToday?'default':'pointer',color:'var(--text-dim)',fontSize:14,lineHeight:1,opacity:atToday?.35:1}}>›</button>
+                <button onClick={()=>setDayOffset(0)} disabled={atToday}
+                  style={{padding:'5px 12px',borderRadius:999,fontSize:11,fontWeight:700,cursor:atToday?'default':'pointer',border:'none',fontFamily:'inherit',
+                    color:atToday?'var(--text-light)':'#fff', background:atToday?'var(--bg)':C.ink, opacity:atToday?.6:1}}>Today</button>
+              </div>
+            )}
             <div style={track}>
               {HOME_PERIODS.map(p=>(
                 <button key={p.id} onClick={()=>setPeriod(p.id)} style={pill(period===p.id)}>{p.label}</button>
               ))}
+              {/* Custom range — seeds a sensible last-30-days span on first entry. */}
+              <button onClick={()=>{ setPeriod('custom'); setRange(r=>r||{from:win(anchor,30).from, to:ymdLocal(today)}); }} style={pill(period==='custom')} title="Pick a specific date range">Custom</button>
             </div>
             {/* Metrics dropdown — choose which of the 4 live metrics the campaign cards + rep grid show */}
             <div style={{position:'relative'}}>
