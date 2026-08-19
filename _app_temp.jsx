@@ -3048,7 +3048,11 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   // sourced 2,000 fresh leads, and the board used to read as if they had.
   const EMPTY=()=>({assigned:0,imported:0,potentials:0,potentialNow:0,contacted:0,contactedNow:0,pending:0,fresh:0,toWork:0,sourced:0,impNow:0,freshNow:0});
   function buildStats(w){
-    const inW=d=>{ const s=String(d||'').slice(0,10); return !!s && s>=w.from && s<=w.to; };
+    // Normalise through toYmd, NOT a raw slice: some leads store dateAssigned in
+    // US "M/D/YY" form (e.g. "8/19/26"), which slice()+string-compare never
+    // matches an ISO window — so a sheet-imported lead silently fell out of every
+    // windowed KPI and read as 0 on Home even though it was clearly from today.
+    const inW=d=>{ const s=toYmd(d); return !!s && s>=w.from && s<=w.to; };
     const byRep={}, byCamp={}, team=EMPTY();
     const bucket=(rep,camp)=>{ const r=byRep[rep]||(byRep[rep]={_all:EMPTY()}); return camp?(r[camp]||(r[camp]=EMPTY())):r._all; };
     campIds.forEach(c=>{ byCamp[c]=EMPTY(); });
@@ -3229,8 +3233,8 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   // Lead sources this window: Sheet import vs Dashboard-sourced (scoped to viewer).
   const srcWinLeads = leads.filter(l=>{
     if(lockedRep && l.assignedTo!==lockedRep) return false;
-    const d=String(l.dateAssigned||l.addedAt||'').slice(0,10);
-    return d>=cur.from && d<=cur.to;
+    const d=toYmd(l.dateAssigned)||toYmd(l.addedAt);
+    return !!d && d>=cur.from && d<=cur.to;
   });
   const srcScope = lockedRep ? leads.filter(l=>l.assignedTo===lockedRep) : leads;
   // Count only leads that actually became PRODUCTIVE — Potential/HT (now or ever)
