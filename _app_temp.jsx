@@ -3317,15 +3317,18 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
             {period==='custom' ? (
-              // From → To range picker (e.g. Jul 15 → Aug 15).
-              <div style={{display:'flex',alignItems:'center',gap:8,background:'var(--card)',border:'1px solid var(--border)',borderRadius:999,padding:'4px 12px'}}>
-                <input type="date" value={(range&&range.from)||''} max={ymdLocal(today)}
+              // From → To range picker (e.g. Jul 16 → Aug 20). Explicit From/To
+              // labels because two bare native date boxes weren't obvious as a range.
+              <div style={{display:'flex',alignItems:'center',gap:7,background:'var(--card)',border:'1px solid var(--border)',borderRadius:999,padding:'4px 12px'}}>
+                <span style={{fontSize:9.5,fontWeight:800,letterSpacing:'.06em',color:'var(--text-light)'}}>FROM</span>
+                <input type="date" value={(range&&range.from)||''} max={ymdLocal(today)} title="Start date"
                   onChange={e=>setRange(r=>({from:e.target.value, to:(r&&r.to)||e.target.value}))}
-                  style={{border:0,outline:0,background:'transparent',fontFamily:MONO,fontSize:12.5,fontWeight:600,color:'var(--text)',width:128,cursor:'pointer'}}/>
+                  style={{border:0,outline:0,background:'transparent',fontFamily:MONO,fontSize:12.5,fontWeight:600,color:'var(--text)',width:124,cursor:'pointer'}}/>
                 <span style={{color:'var(--text-dim)',fontSize:13,fontWeight:700}}>→</span>
-                <input type="date" value={(range&&range.to)||''} min={(range&&range.from)||''} max={ymdLocal(today)}
+                <span style={{fontSize:9.5,fontWeight:800,letterSpacing:'.06em',color:'var(--text-light)'}}>TO</span>
+                <input type="date" value={(range&&range.to)||''} min={(range&&range.from)||''} max={ymdLocal(today)} title="End date"
                   onChange={e=>setRange(r=>({from:(r&&r.from)||e.target.value, to:e.target.value}))}
-                  style={{border:0,outline:0,background:'transparent',fontFamily:MONO,fontSize:12.5,fontWeight:600,color:'var(--text)',width:128,cursor:'pointer'}}/>
+                  style={{border:0,outline:0,background:'transparent',fontFamily:MONO,fontSize:12.5,fontWeight:600,color:'var(--text)',width:124,cursor:'pointer'}}/>
               </div>
             ) : (
               <div style={{display:'flex',alignItems:'center',gap:6,background:'var(--card)',border:'1px solid var(--border)',borderRadius:999,padding:'4px 6px 4px 10px'}}>
