@@ -7989,7 +7989,7 @@ function GlobalSearch({leads,config,isAdmin,currentUser,dupIndex,onClose,onNavig
     {id:'nq',label:'NQ (Not Qualified)',icon:'⊘'},
     {id:'awaiting',label:'Awaiting Potential',icon:'⌛'},
     {id:'contacted',label:'Contacted Leads',icon:'✉'},{id:'recycle',label:'For Recycle',icon:'↻'},
-  ].filter(p=>(config.tabs||{})[p.id]);
+  ].filter(p=>(config.tabs||{})[p.id]).filter(p=>p.id!=='lead-mgmt'||isAdmin);   // Lead Management is admin-only
   if((config.tabs||{}).pools!==false){
     PAGE_DEFS.push({id:'pool-highticket',label:'High Ticket Pool',icon:'⚡'},{id:'pool-msn',label:'MSN Pool',icon:'📰'},{id:'pool-virals',label:'VIRALS Pool',icon:'🔥'});
   }
@@ -10117,7 +10117,9 @@ function App() {
     if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory} isAdmin={isAdmin} onOpenRestorePoints={isAdmin?(()=>setTab('restore')):null}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={nonPoolLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
-    if(tab==='lead-mgmt') return <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} onAutoAssignJC={(isAdmin||(currentUser&&currentUser.name==='JC'))?autoAssignJC:null} jcPlan={(isAdmin||(currentUser&&currentUser.name==='JC'))?jcAssignPlan:null} onVerifyUrls={isAdmin?(()=>verifyUrls(nonPoolLeads)):null} addToast={addToast} config={config}/>;
+    // Lead Management is admin-only (nav hides it for everyone else); guard the
+    // render too so a non-admin can't reach it via a stale tab/deep link.
+    if(tab==='lead-mgmt') return isAdmin ? <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} onAutoAssignJC={autoAssignJC} jcPlan={jcAssignPlan} onVerifyUrls={()=>verifyUrls(nonPoolLeads)} addToast={addToast} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     // NQ (Not Qualified): rep-scoped like Pending — reps see only their own.
     if(tab==='nq') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="nq_leads" printTitle="Not Qualified (NQ)"/>;
@@ -10345,7 +10347,7 @@ function App() {
             <span className="sct-icon">{navCollapsed?'»':'«'}</span><span className="sct-label">Collapse</span>
           </div>
           <div className="sidebar-section-label">Main</div>
-          {NAV_MAIN.filter(n=>(n.id==='attendance'||n.id==='archive'||n.id==='restore'||n.id==='errors'||n.id==='ai-scraper')?isAdmin:((n.id==='leaves'||n.id==='knowledge')?config.tabs[n.id]!==false:config.tabs[n.id])).map(n=>(
+          {NAV_MAIN.filter(n=>(n.id==='attendance'||n.id==='archive'||n.id==='restore'||n.id==='errors'||n.id==='ai-scraper'||n.id==='lead-mgmt')?isAdmin:((n.id==='leaves'||n.id==='knowledge')?config.tabs[n.id]!==false:config.tabs[n.id])).map(n=>(
             <div key={n.id} data-tour={'nav-'+n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
               {n.id==='errors' && errUnseen>0 && <span className="nav-badge red">{errUnseen>99?'99+':errUnseen}</span>}
