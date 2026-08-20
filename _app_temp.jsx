@@ -577,6 +577,21 @@ function presenceStatus(u){
   return                      {key:'active', label:'Active', color:'#22A559',idleMs};
 }
 function fmtAgo(ms){ const m=Math.floor(ms/60000); if(m<1)return'just now'; if(m<60)return m+'m ago'; const h=Math.floor(m/60); return h+'h ago'; }
+// Human-readable "what are they looking at" label from the current nav state,
+// written into the presence heartbeat so Who's-online can show each person's
+// current screen. Mirrors the sidebar nav labels; unknown tabs pass through
+// title-cased so a new tab still reads sensibly instead of blank.
+function viewLabel(tab, activeRep, showRepSelect, config){
+  if(showRepSelect) return 'Choosing a rep';
+  if(tab==='rep-home' && activeRep) return `${activeRep}'s dashboard`;
+  const MAP={home:'Home',scraper:'Scraper','ai-scraper':'AI Scraper',history:'History','lead-mgmt':'Lead Management','google-import':'Google Sheets',agency:'Agency',leaves:'Leaves',knowledge:'Knowledge Base',attendance:'Attendance',archive:'Archive',restore:'Version History',errors:'Error Log',
+    pending:'Pending Qualification',nq:'NQ',awaiting:'Awaiting Potential',contacted:'Contacted',recycle:'For Recycle',partner:'Already Partner',duplicates:'Duplicates'};
+  if(MAP[tab]) return MAP[tab];
+  if(tab && tab.indexOf('pool-')===0){ const p=tab.slice(5); return ({highticket:'High Ticket Pool',msn:'MSN Pool',virals:'VIRALS Pool'})[p]||'Lead Pool'; }
+  const camp=((config&&config.campaigns)||[]).find(c=>String(c.id).toLowerCase()===String(tab).toLowerCase());
+  if(camp) return `${camp.label} campaign`;
+  return tab ? (String(tab).charAt(0).toUpperCase()+String(tab).slice(1)) : 'Home';
+}
 // Names on an APPROVED leave that covers the given day (default today). Used to
 // skip reps who are out of office in auto-distribution. Dates are 'YYYY-MM-DD'
 // strings, so lexical comparison is date comparison.
@@ -3302,6 +3317,9 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                     <div style={{fontSize:11,fontWeight:600,color:s.color,display:'flex',alignItems:'center',gap:5}}>
                       {s.label}{s.key!=='active' && <span style={{color:'var(--text-light)',fontWeight:500}}>· active {fmtAgo(s.idleMs)}</span>}
                     </div>
+                    {u.activity && <div title={`Currently on: ${u.activity}`} style={{fontSize:10.5,fontWeight:600,color:'var(--text-dim)',marginTop:2,display:'flex',alignItems:'center',gap:4,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      <span style={{fontSize:9,opacity:.8}}>📍</span>{u.activity}
+                    </div>}
                   </div>
                 </div>
               );})}
@@ -8354,6 +8372,11 @@ function App() {
   // (mouse/keyboard) so we can tell Active vs Idle vs Away. Poll the shared
   // `presence` table every 15s to render who's online and toast new logins.
   const [onlineUsers,setOnlineUsers]=useState([]);
+  // What screen the current user is on — written into the heartbeat so Who's-online
+  // can show it. A ref (not state) so the heartbeat reads the latest without
+  // re-subscribing; beatRef lets the nav effect push an immediate update on move.
+  const activityRef=useRef('Home');
+  const beatRef=useRef(()=>{});
   useEffect(()=>{
     if(!SB || !currentUser){ setOnlineUsers([]); return; }
     const me=currentUser.name, role=currentUser.role||'';
@@ -8361,11 +8384,12 @@ function App() {
     const bump=()=>{ lastActive=Date.now(); };
     const acts=['mousemove','mousedown','keydown','scroll','touchstart'];
     acts.forEach(ev=>window.addEventListener(ev,bump,{passive:true}));
-    const beat=()=>{ try{ SB.from('presence').upsert({name:me,role,last_seen:new Date().toISOString(),last_active:new Date(lastActive).toISOString(),updated_at:new Date().toISOString()},{onConflict:'name'}).then(()=>{},()=>{}); }catch(e){} };
+    const beat=()=>{ try{ SB.from('presence').upsert({name:me,role,last_seen:new Date().toISOString(),last_active:new Date(lastActive).toISOString(),activity:activityRef.current||'',updated_at:new Date().toISOString()},{onConflict:'name'}).then(()=>{},()=>{}); }catch(e){} };
+    beatRef.current=beat;
     beat();
     const hb=setInterval(beat,25000);
     const seen={cur:null};   // null until first poll, so we don't toast everyone on load
-    const poll=()=>{ try{ SB.from('presence').select('name,role,last_seen,last_active').then(({data,error})=>{
+    const poll=()=>{ try{ SB.from('presence').select('name,role,last_seen,last_active,activity').then(({data,error})=>{
       if(error||!data) return;
       const now=Date.now();
       const online=data.filter(u=> now-new Date(u.last_seen).getTime() < 90000)
@@ -8382,6 +8406,12 @@ function App() {
     window.addEventListener('beforeunload',bye);
     return ()=>{ clearInterval(hb); clearInterval(pl); acts.forEach(ev=>window.removeEventListener(ev,bump)); window.removeEventListener('beforeunload',bye); };
   },[currentUser]);
+  // Keep the presence "activity" fresh: recompute the screen label whenever the
+  // user navigates and push it right away (don't wait up to 25s for the next beat).
+  useEffect(()=>{
+    activityRef.current = viewLabel(tab, activeRep, showRepSelect, config);
+    if(beatRef.current) beatRef.current();
+  },[tab, activeRep, showRepSelect, config&&config.campaigns]);
   // Agency folders (per-rep). Persisted to localStorage — membership is by
   // stable leadKey, so folders survive reloads even though leads are in-memory.
   const [agencies,setAgencies]=useState(()=>{ try{return JSON.parse(localStorage.getItem('agencies')||'[]');}catch(e){return [];} });
