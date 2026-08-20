@@ -3015,6 +3015,50 @@ function mergeQuotas(def, stored){
   return out;
 }
 
+// Live "Who's online" presence strip — shown on the admin Home AND every rep's
+// own dashboard, so reps (not just admins) can see who's on and what screen each
+// person is currently on. Reads the shared PresenceContext; renders nothing when
+// nobody is online.
+function WhosOnline({config}){
+  const presence = React.useContext(PresenceContext);
+  const onlineUsers = presence.online || [];
+  if(!onlineUsers.length) return null;
+  const card={background:'var(--card)',border:'1px solid var(--border)',borderRadius:20,boxShadow:'0 1px 2px rgba(19,19,24,.05)'};
+  return (
+    <div style={{...card,padding:'14px 18px',marginBottom:16}}>
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+        <span style={{width:9,height:9,borderRadius:999,background:'#22A559',boxShadow:'0 0 0 3px rgba(34,165,89,.18)'}}/>
+        <span style={{fontSize:13.5,fontWeight:800,letterSpacing:'.01em'}}>Who’s online</span>
+        <span style={{fontSize:12,color:'var(--text-dim)'}}>· {onlineUsers.length} on the dashboard right now</span>
+        <span style={{marginLeft:'auto',fontSize:10.5,color:'var(--text-light)',display:'inline-flex',gap:12,flexWrap:'wrap'}}>
+          <span><span style={{color:'#22A559',fontWeight:800}}>●</span> Active</span>
+          <span><span style={{color:'#E6B800',fontWeight:800}}>●</span> Idle (3m+)</span>
+          <span><span style={{color:'#E8912D',fontWeight:800}}>●</span> Away (10m+)</span>
+        </span>
+      </div>
+      <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
+        {onlineUsers.map(u=>{ const s=presenceStatus(u); return (
+          <div key={u.name} style={{display:'flex',alignItems:'center',gap:9,padding:'7px 13px 7px 8px',borderRadius:999,background:'var(--bg)',border:'1px solid var(--border)'}}>
+            <span style={{position:'relative'}}>
+              <RepAvatar rep={u.name} config={config} size={30} bgOverride="var(--bg)"/>
+              <span title={s.label} style={{position:'absolute',bottom:-1,right:-1,width:10,height:10,borderRadius:'50%',background:s.color,border:'2px solid var(--bg)'}}/>
+            </span>
+            <div style={{lineHeight:1.25}}>
+              <div style={{fontSize:13,fontWeight:700}}>{u.name}{u.name===presence.me && <span style={{fontSize:10,fontWeight:700,color:'var(--text-light)',marginLeft:5}}>(you)</span>}</div>
+              <div style={{fontSize:11,fontWeight:600,color:s.color,display:'flex',alignItems:'center',gap:5}}>
+                {s.label}{s.key!=='active' && <span style={{color:'var(--text-light)',fontWeight:500}}>· active {fmtAgo(s.idleMs)}</span>}
+              </div>
+              {u.activity && <div title={`Currently on: ${u.activity}`} style={{fontSize:10.5,fontWeight:600,color:'var(--text-dim)',marginTop:2,display:'flex',alignItems:'center',gap:4,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                <span style={{fontSize:9,opacity:.8}}>📍</span>{u.activity}
+              </div>}
+            </div>
+          </div>
+        );})}
+      </div>
+    </div>
+  );
+}
+
 function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const isAdmin = !!(currentUser && currentUser.role==='admin');
   const presence = React.useContext(PresenceContext);
@@ -3293,39 +3337,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
       <div style={{width:'100%',maxWidth:1320,margin:'0 auto'}}>
 
         {/* ── Who's online (live presence) ── */}
-        {onlineUsers.length>0 && (
-          <div style={{...card,padding:'14px 18px',marginBottom:16}}>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
-              <span style={{width:9,height:9,borderRadius:999,background:'#22A559',boxShadow:'0 0 0 3px rgba(34,165,89,.18)'}}/>
-              <span style={{fontSize:13.5,fontWeight:800,letterSpacing:'.01em'}}>Who’s online</span>
-              <span style={{fontSize:12,color:'var(--text-dim)'}}>· {onlineUsers.length} on the dashboard right now</span>
-              <span style={{marginLeft:'auto',fontSize:10.5,color:'var(--text-light)',display:'inline-flex',gap:12,flexWrap:'wrap'}}>
-                <span><span style={{color:'#22A559',fontWeight:800}}>●</span> Active</span>
-                <span><span style={{color:'#E6B800',fontWeight:800}}>●</span> Idle (3m+)</span>
-                <span><span style={{color:'#E8912D',fontWeight:800}}>●</span> Away (10m+)</span>
-              </span>
-            </div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
-              {onlineUsers.map(u=>{ const s=presenceStatus(u); return (
-                <div key={u.name} style={{display:'flex',alignItems:'center',gap:9,padding:'7px 13px 7px 8px',borderRadius:999,background:'var(--bg)',border:'1px solid var(--border)'}}>
-                  <span style={{position:'relative'}}>
-                    <RepAvatar rep={u.name} config={config} size={30} bgOverride="var(--bg)"/>
-                    <span title={s.label} style={{position:'absolute',bottom:-1,right:-1,width:10,height:10,borderRadius:'50%',background:s.color,border:'2px solid var(--bg)'}}/>
-                  </span>
-                  <div style={{lineHeight:1.25}}>
-                    <div style={{fontSize:13,fontWeight:700}}>{u.name}{u.name===presence.me && <span style={{fontSize:10,fontWeight:700,color:'var(--text-light)',marginLeft:5}}>(you)</span>}</div>
-                    <div style={{fontSize:11,fontWeight:600,color:s.color,display:'flex',alignItems:'center',gap:5}}>
-                      {s.label}{s.key!=='active' && <span style={{color:'var(--text-light)',fontWeight:500}}>· active {fmtAgo(s.idleMs)}</span>}
-                    </div>
-                    {u.activity && <div title={`Currently on: ${u.activity}`} style={{fontSize:10.5,fontWeight:600,color:'var(--text-dim)',marginTop:2,display:'flex',alignItems:'center',gap:4,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                      <span style={{fontSize:9,opacity:.8}}>📍</span>{u.activity}
-                    </div>}
-                  </div>
-                </div>
-              );})}
-            </div>
-          </div>
-        )}
+        <WhosOnline config={config}/>
 
         {/* ── Header: title + day nav + period ── */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,flexWrap:'wrap',marginBottom:20}}>
@@ -4750,6 +4762,11 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             style={{background:!isDayView?'#4f46e5':'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'6px 13px',color:!isDayView?'#fff':'#d4d4d8',fontSize:12.5,fontWeight:600,fontFamily:'inherit',cursor:!isDayView?'default':'pointer'}}>All dates</button>
         </div>
       </header>
+      {/* Who's online — same live presence strip as the admin Home, so reps also
+          see who's on and what screen each teammate is currently on. */}
+      <div style={{padding:'14px 20px 0',flexShrink:0}}>
+        <WhosOnline config={config}/>
+      </div>
       <LeadsTable
         leads={tableLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin hideRepFilter config={config} feats={feats} campColorMap={campColorMap}
