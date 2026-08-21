@@ -9784,20 +9784,31 @@ function App() {
   const updateAvailableRef=useRef(false); updateAvailableRef.current=updateAvailable;
   const leadsLiveRef=useRef(leads); leadsLiveRef.current=leads;
   useEffect(()=>{
-    let stop=false, baseline=null;
+    let stop=false, baseline=null, lastActive=Date.now();
+    const bump=()=>{ lastActive=Date.now(); };
+    const acts=['mousemove','mousedown','keydown','scroll','touchstart'];
+    acts.forEach(ev=>window.addEventListener(ev,bump,{passive:true}));
     const tag=()=>fetch(location.pathname+'?_v='+Date.now(),{method:'HEAD',cache:'no-store'})
       .then(r=> r.headers.get('etag')||r.headers.get('last-modified')||r.headers.get('content-length')).catch(()=>null);
     const check=()=>{ if(stop) return; tag().then(t=>{ if(stop||!t) return; if(baseline==null){ baseline=t; return; } if(t!==baseline) setUpdateAvailable(true); }); };
     check();  // establishes the baseline
     const iv=setInterval(check,180000);   // re-check every 3 min
     const hasUnsaved=()=>{ const s=leadsSyncRef.current||{}; return (leadsLiveRef.current||[]).some(l=>stableStringify(l)!==(s[String(l.id)]||'~none~')); };
+    // Once a new build is live, keep EVERY tab in sync without needing a click:
+    // reload as soon as it's safe — the tab is backgrounded OR the user has been
+    // idle ~90s — but NEVER mid-edit (skips while there are unsaved lead changes).
+    // Idle times differ per person, so reloads stagger naturally (no stampede).
+    const idle=setInterval(()=>{
+      if(stop||!updateAvailableRef.current||hasUnsaved()) return;
+      if(document.visibilityState!=='visible' || (Date.now()-lastActive)>90000){ try{ location.reload(); }catch(e){} }
+    },15000);
     const onVis=()=>{
       if(document.visibilityState==='visible'){ check(); }
       else if(updateAvailableRef.current && !hasUnsaved()){ try{ location.reload(); }catch(e){} }  // reload quietly while away
     };
     document.addEventListener('visibilitychange',onVis);
     window.addEventListener('focus',onVis);
-    return ()=>{ stop=true; clearInterval(iv); document.removeEventListener('visibilitychange',onVis); window.removeEventListener('focus',onVis); };
+    return ()=>{ stop=true; clearInterval(iv); clearInterval(idle); acts.forEach(ev=>window.removeEventListener(ev,bump)); document.removeEventListener('visibilitychange',onVis); window.removeEventListener('focus',onVis); };
   },[]);
 
   // Auto-load from Close after login ONLY if Supabase had no leads yet (first-time
