@@ -6074,8 +6074,9 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
   // status tab (Pending Qualification / Contacted / For Recycle). Once tagged,
   // they live in that tab instead of cluttering this list.
   const pool=leads.filter(l=>!hasTabStatusTag(l));
-  const unassigned=pool.filter(l=>!l.assignedTo);
-  const display=repView==='unassigned'?unassigned:repView?pool.filter(l=>l.assignedTo===repView):pool;
+  // "Unassigned" now lives in its own shared tab under Lead Filters (visible to
+  // everyone), so it's no longer a filter button here.
+  const display=repView?pool.filter(l=>l.assignedTo===repView):pool;
   // Category pools (available counts) — independent of the allocation, so we read
   // them from a rules dry-run. Used by the manual grid + the "rule defaults" fill.
   const jcCats = jcPlan ? jcPlan(null) : null;
@@ -6099,9 +6100,6 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
             {r} ({cnt})
           </button>
         );})}
-        <button className={`btn btn-sm ${repView==='unassigned'?'btn-danger':'btn-outline'}`} onClick={()=>setRepView(v=>v==='unassigned'?'':'unassigned')} style={repView==='unassigned'?{}:{borderColor:'var(--warn)',color:'var(--warn)'}}>
-          Unassigned ({unassigned.length})
-        </button>
         {onAutoAssignJC && (()=>{ const jcN=leads.filter(l=>l.assignedTo==='JC' && ((l.tags||[]).includes('Potential')||(l.tags||[]).includes('HT'))).length; return (<>
           <button className="btn btn-sm btn-primary" style={{marginLeft:8}} disabled={!jcN}
             title={jcManualActive?"Distribute JC's leads by YOUR manual numbers below":"Distribute JC's Potential leads — all High-Ticket + 20 MSN → Rein · the rest (remaining MSN + VIRALS) → Chase / Mikka (fresh & imported balanced)"}
@@ -10011,11 +10009,12 @@ function App() {
     (l.assignedTo && (l.campaigns||[]).length===0 && !hasStatusTag(l)));
   // Non-admins only see their OWN leads on scoped tabs (e.g. Pending); admins see all.
   const canSeeLead = l => isAdmin || (currentUser && l.assignedTo===currentUser.name);
-  // Unassigned = a scraped lead nobody has taken: no owner, not in a named pool,
-  // no campaign, and still untriaged (no status tag). It's a SHARED board — every
-  // role sees the same list and anyone can claim ("scrape") from it, same as the
-  // pools. Not scoped by canSeeLead on purpose (unassigned belongs to no one yet).
-  const isUnassignedLead = l => l && !l.assignedTo && !l.archived && !l.pool && (l.campaigns||[]).length===0 && !hasStatusTag(l);
+  // Unassigned = a scraped lead nobody has taken. Mirrors the old Lead-Management
+  // "Unassigned" view exactly: no owner, not yet in a dedicated status tab
+  // (Pending/Contacted/NQ/Awaiting/Recycle/Partner), and not a pool candidate.
+  // It's a SHARED board — every role sees the same list and anyone can claim it.
+  // Not scoped by canSeeLead on purpose (unassigned belongs to no one yet).
+  const isUnassignedLead = l => l && !l.assignedTo && !l.archived && !hasTabStatusTag(l) && !(l.pool && (l.campaigns||[]).length===0);
   const counts=React.useMemo(()=>{
     const rc=new Date(); rc.setDate(rc.getDate()-7);   // matches the Recent-tab cutoff
     return {
