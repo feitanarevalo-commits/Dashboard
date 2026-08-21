@@ -10011,6 +10011,11 @@ function App() {
     (l.assignedTo && (l.campaigns||[]).length===0 && !hasStatusTag(l)));
   // Non-admins only see their OWN leads on scoped tabs (e.g. Pending); admins see all.
   const canSeeLead = l => isAdmin || (currentUser && l.assignedTo===currentUser.name);
+  // Unassigned = a scraped lead nobody has taken: no owner, not in a named pool,
+  // no campaign, and still untriaged (no status tag). It's a SHARED board — every
+  // role sees the same list and anyone can claim ("scrape") from it, same as the
+  // pools. Not scoped by canSeeLead on purpose (unassigned belongs to no one yet).
+  const isUnassignedLead = l => l && !l.assignedTo && !l.archived && !l.pool && (l.campaigns||[]).length===0 && !hasStatusTag(l);
   const counts=React.useMemo(()=>{
     const rc=new Date(); rc.setDate(rc.getDate()-7);   // matches the Recent-tab cutoff
     return {
@@ -10023,6 +10028,7 @@ function App() {
       recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=rc).length,
       duplicates:myDupGroups.length,
       partner:vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l)).length,
+      unassigned:vLeads.filter(l=>isUnassignedLead(l)).length,
     };
   },[leads, isAdmin, meName, myDupGroups]);
 
@@ -10098,6 +10104,7 @@ function App() {
     {id:'errors',icon:'🐞',label:'Error Log'},
   ];
   const NAV_FILTER=[
+    {id:'unassigned',icon:'📥',label:'Unassigned',count:counts.unassigned,cls:'blue'},
     {id:'pending',icon:'◔',label:'Pending Qualification',count:counts.pending,cls:'orange'},
     {id:'nq',icon:'⊘',label:'NQ',count:counts.nq,cls:'red'},
     {id:'awaiting',icon:'⌛',label:'Awaiting Potential',count:counts.awaiting,cls:'amber'},
@@ -10120,6 +10127,10 @@ function App() {
     // Lead Management is admin-only (nav hides it for everyone else); guard the
     // render too so a non-admin can't reach it via a stale tab/deep link.
     if(tab==='lead-mgmt') return isAdmin ? <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} onAutoAssignJC={autoAssignJC} jcPlan={jcAssignPlan} onVerifyUrls={()=>verifyUrls(nonPoolLeads)} addToast={addToast} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
+    // Unassigned — a SHARED board of scraped leads nobody has claimed. Everyone
+    // sees the same list and can "Claim to me" (→ assigns it to them, moving it
+    // into their own queue to qualify), same claim flow as the pools.
+    if(tab==='unassigned') return <LeadsTable leads={vLeads.filter(l=>isUnassignedLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} claimLabel="⚡ Claim to me" claimTitle="Assign the selected leads to you and move them into your queue" showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="unassigned_leads" printTitle="Unassigned Leads"/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     // NQ (Not Qualified): rep-scoped like Pending — reps see only their own.
     if(tab==='nq') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="nq_leads" printTitle="Not Qualified (NQ)"/>;
@@ -10357,7 +10368,7 @@ function App() {
           ))}
           <div className="nav-divider"/>
           <div className="sidebar-section-label" data-tour="grp-filters">Lead Filters</div>
-          {NAV_FILTER.filter(n=>config.tabs[n.id]).map(n=>(
+          {NAV_FILTER.filter(n=>n.id==='unassigned' ? config.tabs.unassigned!==false : config.tabs[n.id]).map(n=>(
             <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
               <span className={`nav-badge ${n.cls}`}>{n.count}</span>
