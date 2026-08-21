@@ -4767,11 +4767,6 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             style={{background:!isDayView?'#4f46e5':'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'6px 13px',color:!isDayView?'#fff':'#d4d4d8',fontSize:12.5,fontWeight:600,fontFamily:'inherit',cursor:!isDayView?'default':'pointer'}}>All dates</button>
         </div>
       </header>
-      {/* Who's online — same live presence strip as the admin Home, so reps also
-          see who's on and what screen each teammate is currently on. */}
-      <div style={{padding:'14px 20px 0',flexShrink:0}}>
-        <WhosOnline config={config}/>
-      </div>
       <LeadsTable
         leads={tableLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin hideRepFilter config={config} feats={feats} campColorMap={campColorMap}
