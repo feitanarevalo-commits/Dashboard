@@ -101,6 +101,11 @@ function leadLocation(lead, config){
   return {tab:'lead-mgmt', label:'Lead Management'};
 }
 function hasTabStatusTag(lead){ return isContacted(lead) || STATUS_TAB_TAGS.some(t=>(lead.tags||[]).includes(t)); }
+// Non-admins allowed into Lead Management, but SCOPED to only their own leads
+// (they can view + edit leads assigned to them, never other reps'). Admins keep
+// the full cross-team view. Add a name here to grant another rep the same.
+const LEAD_MGMT_SOLO_REPS = ['Mikka'];
+function canSeeLeadMgmt(user, isAdmin){ return !!(isAdmin || (user && LEAD_MGMT_SOLO_REPS.includes(user.name))); }
 // Any status tag — built-in OR admin-added (config.statusTags). Used to drop a
 // lead from the FRESH Scraper queue the moment it's triaged with any status.
 function hasAnyStatusTag(lead, config){
@@ -6057,7 +6062,7 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
 }
 
 // ─── LEAD MGMT VIEW ───────────────────────────────────────
-function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onClearAll,onAutoAssignJC,onVerifyUrls,addToast,config,jcPlan=null}) {
+function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onClearAll,onAutoAssignJC,onVerifyUrls,addToast,config,jcPlan=null,soloRep=null}) {
   const [repView,setRepView]=useState('');
   const [jcPrev,setJcPrev]=useState(false);
   const [jcShowLeads,setJcShowLeads]=useState({});   // per-rep expanded lead list in the preview
@@ -6069,7 +6074,8 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
   const feats=config.features||{};
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
-  const all=(config.salesReps||[]);
+  // Solo mode (a rep viewing only their own leads): no per-rep filter buttons.
+  const all=soloRep?[]:(config.salesReps||[]);
   // Lead Management = the working pool of leads NOT yet sorted into a dedicated
   // status tab (Pending Qualification / Contacted / For Recycle). Once tagged,
   // they live in that tab instead of cluttering this list.
@@ -6093,7 +6099,7 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
       <div style={{background:'var(--card)',borderBottom:'1px solid var(--border)',padding:'12px 20px',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',flexShrink:0}} className="no-print">
-        <button className={`btn btn-sm ${repView===''?'btn-primary':'btn-outline'}`} onClick={()=>setRepView('')}>All ({pool.length})</button>
+        <button className={`btn btn-sm ${repView===''?'btn-primary':'btn-outline'}`} onClick={()=>setRepView('')}>{soloRep?`My leads (${pool.length})`:`All (${pool.length})`}</button>
         {all.map(r=>{const cnt=pool.filter(l=>l.assignedTo===r).length;return(
           <button key={r} className={`btn btn-sm ${repView===r?'btn-primary':'btn-outline'}`} onClick={()=>setRepView(v=>v===r?'':r)}>
             <div style={{width:16,height:16,borderRadius:'50%',background:'var(--accent)',color:'white',display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:700,marginRight:4}}>{r[0]}</div>
@@ -7987,7 +7993,7 @@ function GlobalSearch({leads,config,isAdmin,currentUser,dupIndex,onClose,onNavig
     {id:'nq',label:'NQ (Not Qualified)',icon:'⊘'},
     {id:'awaiting',label:'Awaiting Potential',icon:'⌛'},
     {id:'contacted',label:'Contacted Leads',icon:'✉'},{id:'recycle',label:'For Recycle',icon:'↻'},
-  ].filter(p=>(config.tabs||{})[p.id]).filter(p=>p.id!=='lead-mgmt'||isAdmin);   // Lead Management is admin-only
+  ].filter(p=>(config.tabs||{})[p.id]).filter(p=>p.id!=='lead-mgmt'||canSeeLeadMgmt(currentUser,isAdmin));   // Lead Management: admins + allow-listed reps
   if((config.tabs||{}).pools!==false){
     PAGE_DEFS.push({id:'pool-highticket',label:'High Ticket Pool',icon:'⚡'},{id:'pool-msn',label:'MSN Pool',icon:'📰'},{id:'pool-virals',label:'VIRALS Pool',icon:'🔥'});
   }
@@ -10123,9 +10129,15 @@ function App() {
     if(tab==='scraper') return <ScraperView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onResults={addDiscovered} addToast={addToast} config={config} currentUser={currentUser}/>;
     if(tab==='history') return <HistoryView history={history} addToast={addToast} feats={config.features||{}} onRestore={restoreHistory} isAdmin={isAdmin} onOpenRestorePoints={isAdmin?(()=>setTab('restore')):null}/>;
     if(tab==='prev-scraped') return <LeadsTable leads={nonPoolLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="all_leads" printTitle="All Scraped Leads"/>;
-    // Lead Management is admin-only (nav hides it for everyone else); guard the
-    // render too so a non-admin can't reach it via a stale tab/deep link.
-    if(tab==='lead-mgmt') return isAdmin ? <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={isAdmin?clearAllLeads:null} onAutoAssignJC={autoAssignJC} jcPlan={jcAssignPlan} onVerifyUrls={()=>verifyUrls(nonPoolLeads)} addToast={addToast} config={config}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
+    // Lead Management: admins get the full cross-team view; allow-listed reps
+    // (e.g. Mikka) get a SOLO view scoped to only their own leads — no admin
+    // actions (Clear All / Verify URLs / JC auto-assign), no other reps' leads.
+    // Everyone else can't reach it (nav hides it); fall back to Home if they try.
+    if(tab==='lead-mgmt'){
+      if(isAdmin) return <LeadMgmtView leads={nonPoolLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={clearAllLeads} onAutoAssignJC={autoAssignJC} jcPlan={jcAssignPlan} onVerifyUrls={()=>verifyUrls(nonPoolLeads)} addToast={addToast} config={config}/>;
+      if(canSeeLeadMgmt(currentUser,false)){ const meLeads=nonPoolLeads.filter(l=>l.assignedTo===currentUser.name); return <LeadMgmtView leads={meLeads} soloRep={currentUser.name} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClearAll={null} onAutoAssignJC={null} jcPlan={null} onVerifyUrls={null} addToast={addToast} config={config}/>; }
+      return <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
+    }
     // Unassigned — a SHARED board of scraped leads nobody has claimed. Everyone
     // sees the same list and can "Claim to me" (→ assigns it to them, moving it
     // into their own queue to qualify), same claim flow as the pools.
@@ -10357,7 +10369,7 @@ function App() {
             <span className="sct-icon">{navCollapsed?'»':'«'}</span><span className="sct-label">Collapse</span>
           </div>
           <div className="sidebar-section-label">Main</div>
-          {NAV_MAIN.filter(n=>(n.id==='attendance'||n.id==='archive'||n.id==='restore'||n.id==='errors'||n.id==='ai-scraper'||n.id==='lead-mgmt')?isAdmin:((n.id==='leaves'||n.id==='knowledge')?config.tabs[n.id]!==false:config.tabs[n.id])).map(n=>(
+          {NAV_MAIN.filter(n=>n.id==='lead-mgmt' ? canSeeLeadMgmt(currentUser,isAdmin) : ((n.id==='attendance'||n.id==='archive'||n.id==='restore'||n.id==='errors'||n.id==='ai-scraper')?isAdmin:((n.id==='leaves'||n.id==='knowledge')?config.tabs[n.id]!==false:config.tabs[n.id]))).map(n=>(
             <div key={n.id} data-tour={'nav-'+n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
               {n.id==='errors' && errUnseen>0 && <span className="nav-badge red">{errUnseen>99?'99+':errUnseen}</span>}
