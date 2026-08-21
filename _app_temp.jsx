@@ -4261,6 +4261,9 @@ function markRepliesSeen(name,ids){ try{ const s=repliesSeenSet(name); ids.forEa
 // it up is a new alert rather than a silent no-op.
 function dupSeenSet(name){ try{ return new Set(JSON.parse(localStorage.getItem('dupSeen_'+name)||'[]')); }catch(e){ return new Set(); } }
 function markDupSeen(name,ids){ try{ const s=dupSeenSet(name); ids.forEach(id=>s.add(id)); localStorage.setItem('dupSeen_'+name,JSON.stringify([...s])); }catch(e){} }
+// Per-admin "seen" tracking for the SmartReach-send alerts in the 🔔 bell.
+function srSeenSet(name){ try{ return new Set(JSON.parse(localStorage.getItem('srSeen_'+name)||'[]')); }catch(e){ return new Set(); } }
+function markSrSeen(name,ids){ try{ const s=srSeenSet(name); ids.forEach(id=>s.add(id)); localStorage.setItem('srSeen_'+name,JSON.stringify([...s])); }catch(e){} }
 
 // Animated avatars — a fun alternative to uploading a photo. Stored in the
 // profile's `photo` field as the string "anim:<id>" (no DB change needed). Each
@@ -8447,6 +8450,10 @@ function App() {
   const [showBell,setShowBell]=useState(false);
   const [repliesLoading,setRepliesLoading]=useState(false);
   const [bellScope,setBellScope]=useState('mine'); // admins can flip to 'all' to see everyone's
+  // SmartReach-send alerts for ADMINS: every time a rep pushes leads to SmartReach
+  // it's logged to activity_log ("SmartReach: N → campaign (rep)"); admins poll
+  // those so it shows on the 🔔 bell. Reps don't need this, so it stays empty for them.
+  const [srSends,setSrSends]=useState([]);
   const [navCollapsed,setNavCollapsed]=useState(()=>{ try{ return localStorage.getItem('navCollapsed')!=='0'; }catch(e){ return true; } });
   useEffect(()=>{ try{ localStorage.setItem('navCollapsed',navCollapsed?'1':'0'); }catch(e){} },[navCollapsed]);
   const [leaves,setLeaves]=useState([]);
@@ -9542,6 +9549,18 @@ function App() {
     const t=setInterval(()=>loadReplies({silent:true}), 120000);
     return ()=>clearInterval(t);
   },[currentUser && currentUser.name, bellScope]);
+  // Admins-only: poll activity_log for SmartReach sends so the bell alerts them
+  // whenever a rep pushes leads to SmartReach. Success lines start "SmartReach: "
+  // (failures read "SmartReach send failed…", excluded by the ':' after the word).
+  useEffect(()=>{
+    if(!SB || !isAdmin){ setSrSends([]); return; }
+    let stop=false;
+    const load=()=>{ try{ SB.from('activity_log').select('id,created_at,actor,text').ilike('text','SmartReach:%').order('created_at',{ascending:false}).limit(40)
+      .then(({data})=>{ if(stop||!Array.isArray(data)) return; setSrSends(data.map(r=>({id:'sr_'+r.id, rep:r.actor||'', text:r.text||'', when:r.created_at}))); },()=>{}); }catch(e){} };
+    load();
+    const t=setInterval(load, 120000);
+    return ()=>{ stop=true; clearInterval(t); };
+  },[isAdmin]);
 
   function loadFromClose(opts){
     opts=opts||{};
@@ -10278,12 +10297,14 @@ function App() {
             const myReplies = allMode ? replies : replies.filter(r=>(r.rep||'')===currentUser.name);
             const seen = repliesSeenSet(currentUser.name);
             const dseen = dupSeenSet(currentUser.name);
+            const srseen = srSeenSet(currentUser.name);
             const unread = myReplies.filter(r=>!seen.has(r.id)).length
-                         + dupAlerts.filter(a=>!dseen.has(a.id)).length;
+                         + dupAlerts.filter(a=>!dseen.has(a.id)).length
+                         + srSends.filter(s=>!srseen.has(s.id)).length;
             return (
               <div className="bell-wrap" data-tour="tb-bell">
                 <button className="btn btn-outline btn-sm bell-btn" title="Replies, interest & lead conflicts"
-                  onClick={()=>{ if(!showBell){ markRepliesSeen(currentUser.name, myReplies.map(r=>r.id)); markDupSeen(currentUser.name, dupAlerts.map(a=>a.id)); } setShowBell(s=>!s); }}>
+                  onClick={()=>{ if(!showBell){ markRepliesSeen(currentUser.name, myReplies.map(r=>r.id)); markDupSeen(currentUser.name, dupAlerts.map(a=>a.id)); markSrSeen(currentUser.name, srSends.map(s=>s.id)); } setShowBell(s=>!s); }}>
                   🔔{unread>0 && <span className="bell-badge">{unread>9?'9+':unread}</span>}
                 </button>
                 {showBell && <>
@@ -10312,7 +10333,21 @@ function App() {
                           <span className="bell-open" style={{cursor:'pointer'}} onClick={()=>{ setShowBell(false); setTab('duplicates'); }}>Open Duplicates ↗</span>
                         </div>
                       ))}
-                      {myReplies.length===0 && dupAlerts.length===0
+                      {/* SmartReach sends — admins get told whenever a rep pushes leads to SR. */}
+                      {srSends.slice(0,20).map(s=>{
+                        const m=/^SmartReach:\s*(\d+)\s*→\s*(.+?)\s*\(([^)]+)\)\s*$/.exec(s.text)||[];
+                        const cnt=m[1], dest=m[2], who=m[3]||s.rep||'A rep';
+                        return (
+                          <div key={s.id} className={`bell-item${srseen.has(s.id)?'':' unread'}`}>
+                            <div className="bell-item-top">
+                              <span className="rs-chip" style={{background:'#DCFCE7',color:'#166534'}}>📤 Sent to SmartReach</span>
+                              <span className="bell-when">{fmtReplyWhen(s.when)}</span>
+                            </div>
+                            <div className="bell-name"><b>{who}</b> sent <b>{cnt||'some'}</b> lead{cnt==='1'?'':'s'} to SmartReach{dest?` → ${dest}`:''}</div>
+                          </div>
+                        );
+                      })}
+                      {myReplies.length===0 && dupAlerts.length===0 && srSends.length===0
                         ? <div className="bell-empty"><div style={{fontSize:24,marginBottom:6}}>🔔</div>Nothing new.<div className="bell-empty-sub">You'll be notified here when a prospect replies or shows interest — and when another rep starts working a channel you already have.</div></div>
                         : myReplies.slice(0,40).map(r=>(
                           <div key={r.id} className={`bell-item${seen.has(r.id)?'':' unread'}`}>
