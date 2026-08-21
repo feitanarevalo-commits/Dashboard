@@ -1919,7 +1919,12 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
             <div className="toolbar-sep"/>
             <button className="btn btn-sm" disabled={!selCloseFresh.length}
               style={{background:'#3E5C76',color:'#fff',borderColor:'#3E5C76'}}
-              onClick={()=>{ closeSend.onSend(selCloseFresh); setSel([]); }}
+              onClick={()=>{
+                const n=selCloseFresh.length;
+                const skipped=sel.length-n;
+                if(!window.confirm(`Send ${n} fresh lead${n!==1?'s':''} to Close?`+(skipped>0?`\n\n(${skipped} already-imported lead${skipped!==1?'s':''} will be skipped.)`:'')+`\n\nThis pushes ${n!==1?'them':'it'} into the Close CRM and marks ${n!==1?'them':'it'} as Imported.`)) return;
+                closeSend.onSend(selCloseFresh); setSel([]);
+              }}
               title={selCloseFresh.length
                 ? `Send ${selCloseFresh.length} FRESH lead(s) to Close${selCloseFresh.length<sel.length?` · ${sel.length-selCloseFresh.length} already-imported skipped`:''}`
                 : 'None of the selected leads are Fresh — leads already on Close (Imported) can’t be re-sent'}>⬆ Send {selCloseFresh.length} to Close{selCloseFresh.length<sel.length?` (of ${sel.length})`:''}</button>
@@ -1935,7 +1940,10 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
               style={{background:'#3F7D74',color:'#fff',borderColor:'#3F7D74'}}
               onClick={()=>{
                 const camp=(smartReachSend.campaigns||[]).find(c=>String(c.id)===String(srCampaign));
-                smartReachSend.onSend(selEmailable, srCampaign, camp?camp.label:'');
+                const label=camp?camp.label:'';
+                const n=selEmailable.length;
+                if(!window.confirm(`Send ${n} lead${n!==1?'s':''} to SmartReach${label?` → ${label}`:''}?\n\nThis adds ${n!==1?'them':'it'} to the SmartReach outreach campaign and starts emailing.`)) return;
+                smartReachSend.onSend(selEmailable, srCampaign, label);
                 setSel([]); setSrCampaign('');
               }}
               title={selEmailable.length?`Send the ${selEmailable.length} selected lead(s) with an email to the chosen SmartReach campaign`:'Select leads that have an email first'}>
@@ -4727,7 +4735,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             </button>
             {menuOpen && (
               <div style={{position:'absolute',top:'calc(100% + 8px)',right:0,background:'#1b1b23',border:'1px solid #2f2f3a',borderRadius:12,boxShadow:'0 16px 40px -12px rgba(0,0,0,.5)',padding:6,minWidth:214,zIndex:60,display:'flex',flexDirection:'column',gap:1}}>
-                {!isLeadgen && menuRow('⬆',`Send ${fresh} to Close.io`,()=>importToClose(rep,freshPotential),{disabled:!fresh})}
+                {!isLeadgen && menuRow('⬆',`Send ${fresh} to Close.io`,()=>{ if(!window.confirm(`Send ${fresh} fresh lead${fresh!==1?'s':''} to Close?\n\nThis pushes ${fresh!==1?'them':'it'} into the Close CRM and marks ${fresh!==1?'them':'it'} as Imported.`)) return; importToClose(rep,freshPotential); },{disabled:!fresh})}
                 {feats.exportCSV && menuRow('⬇','Export CSV',()=>exportCSV(myLeads,`${rep}_leads.csv`))}
                 {feats.exportPDF && menuRow('🖨','Export PDF',()=>exportPDF(rep))}
                 <div style={{height:1,background:'#2f2f3a',margin:'5px 4px'}}></div>
