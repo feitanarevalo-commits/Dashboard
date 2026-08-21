@@ -1165,7 +1165,7 @@ function ContextMenu({x,y,lead,sel,allLeads,config,campColorMap,onEdit,onDelete,
         const on=live.assignedTo===r;
         return(
           <div key={r} className="ctx-item" onClick={()=>assignRep(r)}>
-            <div style={{width:20,height:20,borderRadius:'50%',background:on?'var(--accent)':'var(--accent-light)',color:on?'white':'var(--accent)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:700,flexShrink:0}}>{r[0]}</div>
+            <RepAvatar rep={r} config={config} size={20}/>
             <span style={on?{fontWeight:600}:{}}>{r}</span>
             {on&&<span style={{marginLeft:'auto',color:'var(--accent)',fontSize:11}}>✓</span>}
           </div>
