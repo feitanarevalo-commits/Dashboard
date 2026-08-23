@@ -3566,6 +3566,9 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
           </div>
         </div>
 
+        {/* Rep comparison grid — admins only. A rep's own Home shows just their
+            hero + campaign cards above; the single-card grid was redundant. */}
+        {!lockedRep && <React.Fragment>
         {/* ── Rep controls ── */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:14,flexWrap:'wrap',margin:'26px 0 12px'}}>
           <div>
@@ -3669,6 +3672,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
             );
           })}
         </div>
+        </React.Fragment>}
 
         <div style={{marginTop:20,fontSize:10.5,fontFamily:MONO,color:'var(--text-light)'}}>
           {cur.from===cur.to?cur.from:`${cur.from} → ${cur.to}`} · Potential / Contacted / Imported / Fresh = what each rep is HOLDING right now (matches their tabs), not limited to this window · Imported + Fresh = Potential, split by Close status · the big campaign number (“potentials tagged”) is still activity inside the window
