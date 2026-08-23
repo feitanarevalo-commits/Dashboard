@@ -4729,7 +4729,25 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
               </div>
             </div>
           </div>
-          <div style={{flex:1,minWidth:12}}></div>
+          {/* Stat tiles live inline on the name row now (filling the gap) instead of
+              a separate strip below — reclaims a whole row of height. Compact tiles
+              so they fit; they wrap on narrow screens. Hide-stats swaps to a spacer. */}
+          {!metricsCollapsed
+            ? <div style={{flex:'1 1 300px',minWidth:0,display:'flex',background:'#141419',border:'1px solid #23232c',borderRadius:11,overflow:'hidden',flexWrap:'wrap'}}>
+                {stripMetrics.map((m,i)=>(
+                  <div key={m.label} title={m.title||''} style={{flex:'1 1 82px',minWidth:76,padding:'6px 11px',borderRight:i<stripMetrics.length-1?'1px solid #1f1f27':'none'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:2,minWidth:0}}>
+                      <span style={{width:7,height:7,borderRadius:2,background:m.chip,flexShrink:0}}></span>
+                      <span style={{fontSize:9.5,textTransform:'uppercase',letterSpacing:'.05em',color:'#8b8b96',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.label}</span>
+                    </div>
+                    <div style={{display:'flex',alignItems:'baseline',gap:5,minWidth:0}}>
+                      <span style={{fontFamily:SG,fontSize:18,fontWeight:700,color:m.val,lineHeight:1}}>{m.value}</span>
+                      {m.scoped!==false && <span style={{fontSize:9,color:'#6b6b76',whiteSpace:'nowrap'}}>{scopeNote}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            : <div style={{flex:1,minWidth:12}}></div>}
           {!isLeadgen && (config.closeSearchWebhook||'').trim() && <MiniCloseSearch config={config}/>}
           <button onClick={toggleMetrics}
             title={metricsCollapsed?'Show the stats panel':'Hide the stats panel — more room to work your leads'}
@@ -4756,24 +4774,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             )}
           </div>
         </div>
-        {/* row 2 — metric strip (collapsible: reps can hide it for more table room) */}
-        {!metricsCollapsed && <div style={{display:'flex',background:'#141419',border:'1px solid #23232c',borderRadius:13,overflow:'hidden',marginTop:15,flexWrap:'wrap'}}>
-          {stripMetrics.map((m,i)=>(
-            <div key={m.label} title={m.title||''} style={{flex:'1 1 110px',minWidth:100,padding:'13px 16px',borderRight:i<stripMetrics.length-1?'1px solid #1f1f27':'none'}}>
-              <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:6,minWidth:0}}>
-                <span style={{width:8,height:8,borderRadius:3,background:m.chip,flexShrink:0}}></span>
-                <span style={{fontSize:10.5,textTransform:'uppercase',letterSpacing:'.06em',color:'#8b8b96',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.label}</span>
-              </div>
-              <div style={{display:'flex',alignItems:'baseline',gap:6,minWidth:0}}>
-                <span style={{fontFamily:SG,fontSize:23,fontWeight:700,color:m.val,lineHeight:1}}>{m.value}</span>
-                {/* Say which slice this is, so a tile can never be read as an all-time
-                    total while the table below shows a single day. */}
-                {m.scoped!==false && <span style={{fontSize:10,color:'#6b6b76',whiteSpace:'nowrap'}}>{scopeNote}</span>}
-              </div>
-            </div>
-          ))}
-        </div>}
-        {/* row 3 — VIEWING DAY: scopes the leads table + Contacted count + SmartReach export */}
+        {/* (stat tiles moved up onto the name row above) */}
+        {/* row 2 — VIEWING DAY: scopes the leads table + Contacted count + SmartReach export */}
         <div style={{display:'flex',alignItems:'center',gap:10,fontSize:12.5,marginTop:12,flexWrap:'wrap'}}>
           <span style={{color:'#d4d4d8',fontWeight:600}}>🗓 Viewing</span>
           <span style={{color:'#71717a'}}>{isDayView?`leads assigned ${quotaDay===todayStr?'today':quotaDay} · ${tableLeads.length} shown`:`all dates · ${tableLeads.length} lead${tableLeads.length!==1?'s':''}`}</span>
