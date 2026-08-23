@@ -4673,6 +4673,11 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   // the table gets that height back. Remembered per browser.
   const [metricsCollapsed,setMetricsCollapsed]=useState(()=>{ try{ return localStorage.getItem('repMetricsCollapsed')==='1'; }catch(e){ return false; } });
   const toggleMetrics=()=>setMetricsCollapsed(v=>{ const n=!v; try{ localStorage.setItem('repMetricsCollapsed',n?'1':'0'); }catch(e){} return n; });
+  // The rep's profile + stats get portalled UP into the shared top bar (same dark
+  // hero background), so the rep identity/numbers sit alongside the global search
+  // and bell instead of in a second stacked bar. The slot lives in App's topbar.
+  const [topSlot,setTopSlot]=useState(null);
+  useEffect(()=>{ setTopSlot(document.getElementById('topbar-repslot')); return ()=>setTopSlot(null); },[]);
   const menuRef=useRef(null);
   useEffect(()=>{
     if(!menuOpen) return;
@@ -4716,38 +4721,31 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
       <header className="no-print" style={{background:'var(--hero-bg)',color:'#fff',padding:'14px 28px 16px',flexShrink:0}}>
         {/* row 1 — profile + primary/secondary actions */}
         <div style={{display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
-          <div style={{display:'flex',alignItems:'center',gap:13,minWidth:0}}>
-            <RepAvatar rep={rep} config={config} size={44} bgOverride={repColor}/>
-            <div style={{minWidth:0}}>
-              <div style={{fontFamily:SG,fontSize:20,fontWeight:700,letterSpacing:'-.02em',lineHeight:1.1,color:'#fff'}}>{rep}'s Dashboard</div>
-              <div style={{marginTop:3,fontSize:12.5,color:'#a1a1ac',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                {getProfile(rep).title?<span style={{fontWeight:600,color:'#d4d4d8'}}>{getProfile(rep).title}</span>:null}
-                <span>{total} lead{total!==1?'s':''}</span>
-                <span style={{width:3,height:3,borderRadius:'50%',background:'#52525b'}}></span>
-                <span>{contacted} contacted</span>
-                {(isLeadgen||handedOffCount>0)?<><span style={{width:3,height:3,borderRadius:'50%',background:'#52525b'}}></span><span>{handedOffCount} handed off</span></>:null}
+          {/* Profile + stats are portalled UP into the shared top bar (same dark hero
+              bg) so they sit next to the global search/bell. Rendered here only as a
+              portal — this row keeps just the rep-specific actions, pushed right. */}
+          {topSlot && ReactDOM.createPortal(
+            <React.Fragment>
+              <RepAvatar rep={rep} config={config} size={30} bgOverride={repColor}/>
+              <div style={{minWidth:0,flexShrink:0}}>
+                <div style={{fontFamily:SG,fontSize:14.5,fontWeight:700,color:'#fff',lineHeight:1.15,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{rep}'s Dashboard</div>
+                <div style={{fontSize:10.5,color:'#a1a1ac',whiteSpace:'nowrap'}}>{total} lead{total!==1?'s':''} · {contacted} contacted{(isLeadgen||handedOffCount>0)?` · ${handedOffCount} handed off`:''}</div>
               </div>
-            </div>
-          </div>
-          {/* Stat tiles live inline on the name row now (filling the gap) instead of
-              a separate strip below — reclaims a whole row of height. Compact tiles
-              so they fit; they wrap on narrow screens. Hide-stats swaps to a spacer. */}
-          {!metricsCollapsed
-            ? <div style={{flex:'1 1 300px',minWidth:0,display:'flex',background:'#141419',border:'1px solid #23232c',borderRadius:11,overflow:'hidden',flexWrap:'wrap'}}>
+              {!metricsCollapsed && <div style={{display:'flex',minWidth:0,overflow:'hidden',background:'#141419',border:'1px solid #23232c',borderRadius:10}}>
                 {stripMetrics.map((m,i)=>(
-                  <div key={m.label} title={m.title||''} style={{flex:'1 1 82px',minWidth:76,padding:'6px 11px',borderRight:i<stripMetrics.length-1?'1px solid #1f1f27':'none'}}>
-                    <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:2,minWidth:0}}>
-                      <span style={{width:7,height:7,borderRadius:2,background:m.chip,flexShrink:0}}></span>
-                      <span style={{fontSize:9.5,textTransform:'uppercase',letterSpacing:'.05em',color:'#8b8b96',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.label}</span>
+                  <div key={m.label} title={m.title||''} style={{flexShrink:0,padding:'3px 10px',borderRight:i<stripMetrics.length-1?'1px solid #1f1f27':'none'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:1}}>
+                      <span style={{width:6,height:6,borderRadius:2,background:m.chip,flexShrink:0}}></span>
+                      <span style={{fontSize:8.5,textTransform:'uppercase',letterSpacing:'.04em',color:'#8b8b96',whiteSpace:'nowrap'}}>{m.label}</span>
                     </div>
-                    <div style={{display:'flex',alignItems:'baseline',gap:5,minWidth:0}}>
-                      <span style={{fontFamily:SG,fontSize:18,fontWeight:700,color:m.val,lineHeight:1}}>{m.value}</span>
-                      {m.scoped!==false && <span style={{fontSize:9,color:'#6b6b76',whiteSpace:'nowrap'}}>{scopeNote}</span>}
-                    </div>
+                    <div style={{fontFamily:SG,fontSize:14,fontWeight:700,color:m.val,lineHeight:1}}>{m.value}</div>
                   </div>
                 ))}
-              </div>
-            : <div style={{flex:1,minWidth:12}}></div>}
+              </div>}
+            </React.Fragment>,
+            topSlot
+          )}
+          <div style={{flex:1,minWidth:12}}></div>
           {!isLeadgen && (config.closeSearchWebhook||'').trim() && <MiniCloseSearch config={config}/>}
           <button onClick={toggleMetrics}
             title={metricsCollapsed?'Show the stats panel':'Hide the stats panel — more room to work your leads'}
@@ -10328,7 +10326,10 @@ function App() {
           style={{marginLeft:10,opacity:canBack?1:.35,cursor:canBack?'pointer':'default'}}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
-        <div style={{flex:1}}/>
+        {/* Slot the rep dashboard portals its profile + stats into, so on a rep
+            view the top bar carries the rep identity + numbers alongside the
+            global search/bell. Empty (and zero-width) on every other screen. */}
+        <div id="topbar-repslot" style={{flex:1,minWidth:0,display:'flex',alignItems:'center',gap:12,overflow:'hidden',margin:'0 14px'}}/>
         <div className="topbar-right">
           <button className="topbar-icon-btn" data-tour="tb-search" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
