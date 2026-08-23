@@ -4718,9 +4718,9 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const srFilename=`${rep}${srCsvCampaign?'_'+srCsvCampaign.replace(/[^\w]+/g,''):''}${isDayView?'_'+quotaDay:''}_smartreach.csv`;
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
-      <header className="no-print" style={{background:'var(--hero-bg)',color:'#fff',padding:'14px 28px 16px',flexShrink:0}}>
-        {/* row 1 — profile + primary/secondary actions */}
-        <div style={{display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
+      <header className="no-print" style={{background:'var(--hero-bg)',color:'#fff',padding:'11px 24px',flexShrink:0}}>
+        {/* single compact control row (profile + stats are portalled to the top bar) */}
+        <div style={{display:'flex',alignItems:'center',gap:9,flexWrap:'wrap'}}>
           {/* Profile + stats are portalled UP into the shared top bar (same dark hero
               bg) so they sit next to the global search/bell. Rendered here only as a
               portal — this row keeps just the rep-specific actions, pushed right. */}
@@ -4745,20 +4745,34 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             </React.Fragment>,
             topSlot
           )}
+          <span style={{color:'#d4d4d8',fontWeight:600,fontSize:12.5,whiteSpace:'nowrap'}}>🗓 Viewing</span>
+          <span style={{color:'#71717a',fontSize:12.5,whiteSpace:'nowrap'}}>{isDayView?`${quotaDay===todayStr?'today':quotaDay} · ${tableLeads.length} shown`:`all dates · ${tableLeads.length} lead${tableLeads.length!==1?'s':''}`}</span>
           <div style={{flex:1,minWidth:12}}></div>
           {!isLeadgen && (config.closeSearchWebhook||'').trim() && <MiniCloseSearch config={config}/>}
+          {/* date group */}
+          <div style={{display:'flex',alignItems:'center',gap:5}}>
+            <input type="date" value={quotaDay} max={todayStr} onChange={e=>setQuotaDay(e.target.value)}
+              title="Pick a day to see only the leads assigned that day"
+              style={{background:'#17171f',border:`1px solid ${isDayView?'#4f46e5':'#26262f'}`,borderRadius:8,padding:'0 10px',height:32,color:isDayView?'#f4f4f5':'#8b8b96',fontSize:12.5,fontFamily:'inherit',colorScheme:'dark',cursor:'pointer'}}/>
+            <button onClick={()=>setQuotaDay(todayStr)} disabled={quotaDay===todayStr}
+              style={{background:quotaDay===todayStr?'#4f46e5':'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'0 12px',height:32,color:quotaDay===todayStr?'#fff':'#d4d4d8',fontSize:12.5,fontWeight:600,fontFamily:'inherit',cursor:quotaDay===todayStr?'default':'pointer'}}>Today</button>
+            <button onClick={()=>setQuotaDay('')} disabled={!isDayView} title="Show every day's leads"
+              style={{background:!isDayView?'#4f46e5':'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'0 12px',height:32,color:!isDayView?'#fff':'#d4d4d8',fontSize:12.5,fontWeight:600,fontFamily:'inherit',cursor:!isDayView?'default':'pointer'}}>All dates</button>
+          </div>
+          <div style={{width:1,height:22,background:'#2a2a34',margin:'0 2px'}}></div>
+          {/* action group */}
           <button onClick={toggleMetrics}
             title={metricsCollapsed?'Show the stats panel':'Hide the stats panel — more room to work your leads'}
-            style={{display:'flex',alignItems:'center',gap:6,background:'#17171f',border:'1px solid #26262f',color:'#d4d4d8',fontSize:13,fontWeight:500,padding:'0 12px',height:34,borderRadius:9,cursor:'pointer',fontFamily:'inherit'}}>
+            style={{display:'flex',alignItems:'center',gap:6,background:'#17171f',border:'1px solid #26262f',color:'#d4d4d8',fontSize:12.5,fontWeight:500,padding:'0 11px',height:32,borderRadius:8,cursor:'pointer',fontFamily:'inherit'}}>
             <span style={{fontSize:11,lineHeight:0}}>{metricsCollapsed?'▾':'▴'}</span> {metricsCollapsed?'Stats':'Hide stats'}
           </button>
           <button onClick={()=>setShowAdd(true)} title={`Manually add a lead under ${rep}`}
-            style={{display:'flex',alignItems:'center',gap:7,background:'#4f46e5',border:'none',color:'#fff',fontSize:13,fontWeight:600,padding:'0 15px',height:34,borderRadius:9,cursor:'pointer',fontFamily:'inherit'}}>
-            <span style={{fontSize:16,lineHeight:0}}>+</span> Add Lead
+            style={{display:'flex',alignItems:'center',gap:6,background:'#4f46e5',border:'none',color:'#fff',fontSize:12.5,fontWeight:600,padding:'0 14px',height:32,borderRadius:8,cursor:'pointer',fontFamily:'inherit'}}>
+            <span style={{fontSize:15,lineHeight:0}}>+</span> Add Lead
           </button>
           <div style={{position:'relative'}} ref={menuRef}>
             <button onClick={()=>setMenuOpen(o=>!o)} aria-label="More actions" aria-expanded={menuOpen}
-              style={{display:'flex',alignItems:'center',gap:7,background:menuOpen?'#1f1f29':'#17171f',border:'1px solid #26262f',color:'#d4d4d8',fontSize:13,fontWeight:500,padding:'0 13px',height:34,borderRadius:9,cursor:'pointer',fontFamily:'inherit'}}>
+              style={{display:'flex',alignItems:'center',gap:6,background:menuOpen?'#1f1f29':'#17171f',border:'1px solid #26262f',color:'#d4d4d8',fontSize:12.5,fontWeight:500,padding:'0 12px',height:32,borderRadius:8,cursor:'pointer',fontFamily:'inherit'}}>
               Actions <span style={{fontSize:11,color:'#71717a'}}>▾</span>
             </button>
             {menuOpen && (
@@ -4771,20 +4785,6 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
               </div>
             )}
           </div>
-        </div>
-        {/* (stat tiles moved up onto the name row above) */}
-        {/* row 2 — VIEWING DAY: scopes the leads table + Contacted count + SmartReach export */}
-        <div style={{display:'flex',alignItems:'center',gap:10,fontSize:12.5,marginTop:12,flexWrap:'wrap'}}>
-          <span style={{color:'#d4d4d8',fontWeight:600}}>🗓 Viewing</span>
-          <span style={{color:'#71717a'}}>{isDayView?`leads assigned ${quotaDay===todayStr?'today':quotaDay} · ${tableLeads.length} shown`:`all dates · ${tableLeads.length} lead${tableLeads.length!==1?'s':''}`}</span>
-          <div style={{flex:1,minWidth:8}}></div>
-          <input type="date" value={quotaDay} max={todayStr} onChange={e=>setQuotaDay(e.target.value)}
-            title="Pick a day to see only the leads assigned that day"
-            style={{background:'#17171f',border:`1px solid ${isDayView?'#4f46e5':'#26262f'}`,borderRadius:8,padding:'6px 11px',color:isDayView?'#f4f4f5':'#8b8b96',fontSize:12.5,fontFamily:'inherit',colorScheme:'dark',cursor:'pointer'}}/>
-          <button onClick={()=>setQuotaDay(todayStr)} disabled={quotaDay===todayStr}
-            style={{background:quotaDay===todayStr?'#4f46e5':'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'6px 13px',color:quotaDay===todayStr?'#fff':'#d4d4d8',fontSize:12.5,fontWeight:600,fontFamily:'inherit',cursor:quotaDay===todayStr?'default':'pointer'}}>Today</button>
-          <button onClick={()=>setQuotaDay('')} disabled={!isDayView} title="Show every day's leads"
-            style={{background:!isDayView?'#4f46e5':'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'6px 13px',color:!isDayView?'#fff':'#d4d4d8',fontSize:12.5,fontWeight:600,fontFamily:'inherit',cursor:!isDayView?'default':'pointer'}}>All dates</button>
         </div>
       </header>
       <LeadsTable
