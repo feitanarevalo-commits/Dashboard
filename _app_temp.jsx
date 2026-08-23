@@ -4669,6 +4669,10 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   // ── Redesigned rep header (compact dark top zone) ──
   const SG="'Space Grotesk',sans-serif";
   const [menuOpen,setMenuOpen]=useState(false);
+  // Reps asked for more room to work leads — let them collapse the stats strip so
+  // the table gets that height back. Remembered per browser.
+  const [metricsCollapsed,setMetricsCollapsed]=useState(()=>{ try{ return localStorage.getItem('repMetricsCollapsed')==='1'; }catch(e){ return false; } });
+  const toggleMetrics=()=>setMetricsCollapsed(v=>{ const n=!v; try{ localStorage.setItem('repMetricsCollapsed',n?'1':'0'); }catch(e){} return n; });
   const menuRef=useRef(null);
   useEffect(()=>{
     if(!menuOpen) return;
@@ -4727,6 +4731,11 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
           </div>
           <div style={{flex:1,minWidth:12}}></div>
           {!isLeadgen && (config.closeSearchWebhook||'').trim() && <MiniCloseSearch config={config}/>}
+          <button onClick={toggleMetrics}
+            title={metricsCollapsed?'Show the stats panel':'Hide the stats panel — more room to work your leads'}
+            style={{display:'flex',alignItems:'center',gap:6,background:'#17171f',border:'1px solid #26262f',color:'#d4d4d8',fontSize:13,fontWeight:500,padding:'0 12px',height:34,borderRadius:9,cursor:'pointer',fontFamily:'inherit'}}>
+            <span style={{fontSize:11,lineHeight:0}}>{metricsCollapsed?'▾':'▴'}</span> {metricsCollapsed?'Stats':'Hide stats'}
+          </button>
           <button onClick={()=>setShowAdd(true)} title={`Manually add a lead under ${rep}`}
             style={{display:'flex',alignItems:'center',gap:7,background:'#4f46e5',border:'none',color:'#fff',fontSize:13,fontWeight:600,padding:'0 15px',height:34,borderRadius:9,cursor:'pointer',fontFamily:'inherit'}}>
             <span style={{fontSize:16,lineHeight:0}}>+</span> Add Lead
@@ -4747,8 +4756,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
             )}
           </div>
         </div>
-        {/* row 2 — metric strip */}
-        <div style={{display:'flex',background:'#141419',border:'1px solid #23232c',borderRadius:13,overflow:'hidden',marginTop:15,flexWrap:'wrap'}}>
+        {/* row 2 — metric strip (collapsible: reps can hide it for more table room) */}
+        {!metricsCollapsed && <div style={{display:'flex',background:'#141419',border:'1px solid #23232c',borderRadius:13,overflow:'hidden',marginTop:15,flexWrap:'wrap'}}>
           {stripMetrics.map((m,i)=>(
             <div key={m.label} title={m.title||''} style={{flex:'1 1 110px',minWidth:100,padding:'13px 16px',borderRight:i<stripMetrics.length-1?'1px solid #1f1f27':'none'}}>
               <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:6,minWidth:0}}>
@@ -4763,7 +4772,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
               </div>
             </div>
           ))}
-        </div>
+        </div>}
         {/* row 3 — VIEWING DAY: scopes the leads table + Contacted count + SmartReach export */}
         <div style={{display:'flex',alignItems:'center',gap:10,fontSize:12.5,marginTop:12,flexWrap:'wrap'}}>
           <span style={{color:'#d4d4d8',fontWeight:600}}>🗓 Viewing</span>
