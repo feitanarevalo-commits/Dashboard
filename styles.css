@@ -796,6 +796,11 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px var(--accent-l
 /* Toasts: slide up + fade, gentle */
 .toast { animation: toastIn .26s var(--ease-spring); }
 @keyframes toastIn { from { opacity:0; transform: translateY(14px) scale(.98); } to { opacity:1; transform: translateY(0) scale(1); } }
+/* Exit: slide off toward the right edge + fade + slight shrink, held to the end so
+   the row doesn't pop before it's removed from the DOM. */
+.toast.exiting { animation: toastOut .42s var(--ease) forwards; pointer-events: none; }
+@keyframes toastOut { from { opacity:1; transform: translateX(0) scale(1); } to { opacity:0; transform: translateX(52px) scale(.95); } }
+@media (prefers-reduced-motion: reduce) { .toast.exiting { animation: toastFade .3s ease forwards; } @keyframes toastFade { to { opacity:0; } } }
 
 /* Command palette & context menu: soften */
 .cmdk { animation: modalPop .18s var(--ease-spring); }
