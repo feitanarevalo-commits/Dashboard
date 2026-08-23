@@ -4669,10 +4669,6 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   // ── Redesigned rep header (compact dark top zone) ──
   const SG="'Space Grotesk',sans-serif";
   const [menuOpen,setMenuOpen]=useState(false);
-  // Reps asked for more room to work leads — let them collapse the stats strip so
-  // the table gets that height back. Remembered per browser.
-  const [metricsCollapsed,setMetricsCollapsed]=useState(()=>{ try{ return localStorage.getItem('repMetricsCollapsed')==='1'; }catch(e){ return false; } });
-  const toggleMetrics=()=>setMetricsCollapsed(v=>{ const n=!v; try{ localStorage.setItem('repMetricsCollapsed',n?'1':'0'); }catch(e){} return n; });
   // The rep's profile + stats get portalled UP into the shared top bar (same dark
   // hero background), so the rep identity/numbers sit alongside the global search
   // and bell instead of in a second stacked bar. The slot lives in App's topbar.
@@ -4731,7 +4727,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
                 <div style={{fontFamily:SG,fontSize:14.5,fontWeight:700,color:'#fff',lineHeight:1.15,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{rep}'s Dashboard</div>
                 <div style={{fontSize:10.5,color:'#a1a1ac',whiteSpace:'nowrap'}}>{total} lead{total!==1?'s':''} · {contacted} contacted{(isLeadgen||handedOffCount>0)?` · ${handedOffCount} handed off`:''}</div>
               </div>
-              {!metricsCollapsed && <div style={{display:'flex',minWidth:0,overflow:'hidden',background:'#141419',border:'1px solid #23232c',borderRadius:10}}>
+              <div style={{display:'flex',minWidth:0,overflow:'hidden',background:'#141419',border:'1px solid #23232c',borderRadius:10}}>
                 {stripMetrics.map((m,i)=>(
                   <div key={m.label} title={m.title||''} style={{flexShrink:0,padding:'3px 10px',borderRight:i<stripMetrics.length-1?'1px solid #1f1f27':'none'}}>
                     <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:1}}>
@@ -4741,7 +4737,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
                     <div style={{fontFamily:SG,fontSize:14,fontWeight:700,color:m.val,lineHeight:1}}>{m.value}</div>
                   </div>
                 ))}
-              </div>}
+              </div>
             </React.Fragment>,
             topSlot
           )}
@@ -4761,11 +4757,6 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
           </div>
           <div style={{width:1,height:22,background:'#2a2a34',margin:'0 2px'}}></div>
           {/* action group */}
-          <button onClick={toggleMetrics}
-            title={metricsCollapsed?'Show the stats panel':'Hide the stats panel — more room to work your leads'}
-            style={{display:'flex',alignItems:'center',gap:6,background:'#17171f',border:'1px solid #26262f',color:'#d4d4d8',fontSize:12.5,fontWeight:500,padding:'0 11px',height:32,borderRadius:8,cursor:'pointer',fontFamily:'inherit'}}>
-            <span style={{fontSize:11,lineHeight:0}}>{metricsCollapsed?'▾':'▴'}</span> {metricsCollapsed?'Stats':'Hide stats'}
-          </button>
           <button onClick={()=>setShowAdd(true)} title={`Manually add a lead under ${rep}`}
             style={{display:'flex',alignItems:'center',gap:6,background:'#4f46e5',border:'none',color:'#fff',fontSize:12.5,fontWeight:600,padding:'0 14px',height:32,borderRadius:8,cursor:'pointer',fontFamily:'inherit'}}>
             <span style={{fontSize:15,lineHeight:0}}>+</span> Add Lead
