@@ -4721,24 +4721,17 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
               bg) so they sit next to the global search/bell. Rendered here only as a
               portal — this row keeps just the rep-specific actions, pushed right. */}
           {topSlot && ReactDOM.createPortal(
-            <React.Fragment>
-              <RepAvatar rep={rep} config={config} size={30} bgOverride={repColor}/>
-              <div style={{minWidth:0,flexShrink:0}}>
-                <div style={{fontFamily:SG,fontSize:14.5,fontWeight:700,color:'#fff',lineHeight:1.15,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{rep}'s Dashboard</div>
-                <div style={{fontSize:10.5,color:'#a1a1ac',whiteSpace:'nowrap'}}>{total} lead{total!==1?'s':''} · {contacted} contacted{(isLeadgen||handedOffCount>0)?` · ${handedOffCount} handed off`:''}</div>
-              </div>
-              <div style={{display:'flex',minWidth:0,overflow:'hidden',background:'#141419',border:'1px solid #23232c',borderRadius:10}}>
-                {stripMetrics.map((m,i)=>(
-                  <div key={m.label} title={m.title||''} style={{flexShrink:0,padding:'3px 10px',borderRight:i<stripMetrics.length-1?'1px solid #1f1f27':'none'}}>
-                    <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:1}}>
-                      <span style={{width:6,height:6,borderRadius:2,background:m.chip,flexShrink:0}}></span>
-                      <span style={{fontSize:8.5,textTransform:'uppercase',letterSpacing:'.04em',color:'#8b8b96',whiteSpace:'nowrap'}}>{m.label}</span>
-                    </div>
-                    <div style={{fontFamily:SG,fontSize:14,fontWeight:700,color:m.val,lineHeight:1}}>{m.value}</div>
+            <div style={{display:'flex',minWidth:0,overflow:'hidden',background:'#141419',border:'1px solid #23232c',borderRadius:10}}>
+              {stripMetrics.map((m,i)=>(
+                <div key={m.label} title={m.title||''} style={{flexShrink:0,padding:'3px 10px',borderRight:i<stripMetrics.length-1?'1px solid #1f1f27':'none'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:1}}>
+                    <span style={{width:6,height:6,borderRadius:2,background:m.chip,flexShrink:0}}></span>
+                    <span style={{fontSize:8.5,textTransform:'uppercase',letterSpacing:'.04em',color:'#8b8b96',whiteSpace:'nowrap'}}>{m.label}</span>
                   </div>
-                ))}
-              </div>
-            </React.Fragment>,
+                  <div style={{fontFamily:SG,fontSize:14,fontWeight:700,color:m.val,lineHeight:1}}>{m.value}</div>
+                </div>
+              ))}
+            </div>,
             topSlot
           )}
           <span style={{color:'#d4d4d8',fontWeight:600,fontSize:12.5,whiteSpace:'nowrap'}}>🗓 Viewing</span>
