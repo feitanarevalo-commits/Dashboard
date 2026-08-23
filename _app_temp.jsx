@@ -3275,7 +3275,12 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
                         :'30 DAYS TO '+anchor.toLocaleDateString(undefined,{month:'short',day:'numeric'}).toUpperCase());
 
   // ── Team hero ─────────────────────────────────────────────
-  const T=S.team, TP=P.team;
+  // A logged-in rep sees their OWN numbers only (not the team's): the hero,
+  // campaign cards and rep grid all read the rep's own buckets. Admins see the team.
+  const repB  = lockedRep ? (S.byRep[lockedRep]||{}) : null;
+  const repBP = lockedRep ? (P.byRep[lockedRep]||{}) : null;
+  const T  = lockedRep ? (repB._all||EMPTY())  : S.team;
+  const TP = lockedRep ? (repBP._all||EMPTY()) : P.team;
   const heroDelta=deltaOf(T.potentials,TP.potentials);
   // The hero is dark even in light mode, so the delta can't use the light tokens.
   const heroDeltaFg = heroDelta.v>0 ? H.good : heroDelta.v<0 ? H.bad : H.label;
@@ -3518,7 +3523,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
           {/* campaign cards */}
           <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.max(1,Math.min(3,campDefs.length))}, minmax(0,1fr))`,gap:16}} className="lp-camps">
             {campDefs.map(c=>{
-              const o=S.byCamp[c.id]||EMPTY(), po=P.byCamp[c.id]||EMPTY();
+              const o=(lockedRep?repB[c.id]:S.byCamp[c.id])||EMPTY(), po=(lockedRep?repBP[c.id]:P.byCamp[c.id])||EMPTY();
               const d=deltaOf(o.potentials,po.potentials);
               const base=Math.max(1,o.contacted+o.pending+o.toWork);
               return (
@@ -4669,11 +4674,6 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   // ── Redesigned rep header (compact dark top zone) ──
   const SG="'Space Grotesk',sans-serif";
   const [menuOpen,setMenuOpen]=useState(false);
-  // The rep's profile + stats get portalled UP into the shared top bar (same dark
-  // hero background), so the rep identity/numbers sit alongside the global search
-  // and bell instead of in a second stacked bar. The slot lives in App's topbar.
-  const [topSlot,setTopSlot]=useState(null);
-  useEffect(()=>{ setTopSlot(document.getElementById('topbar-repslot')); return ()=>setTopSlot(null); },[]);
   const menuRef=useRef(null);
   useEffect(()=>{
     if(!menuOpen) return;
@@ -4715,25 +4715,8 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
       <header className="no-print" style={{background:'var(--hero-bg)',color:'#fff',padding:'11px 24px',flexShrink:0}}>
-        {/* single compact control row (profile + stats are portalled to the top bar) */}
+        {/* single compact control row — stats moved to Home (rep-scoped) */}
         <div style={{display:'flex',alignItems:'center',gap:9,flexWrap:'wrap'}}>
-          {/* Profile + stats are portalled UP into the shared top bar (same dark hero
-              bg) so they sit next to the global search/bell. Rendered here only as a
-              portal — this row keeps just the rep-specific actions, pushed right. */}
-          {topSlot && ReactDOM.createPortal(
-            <div style={{display:'flex',minWidth:0,overflow:'hidden',background:'#141419',border:'1px solid #23232c',borderRadius:10}}>
-              {stripMetrics.map((m,i)=>(
-                <div key={m.label} title={m.title||''} style={{flexShrink:0,padding:'3px 10px',borderRight:i<stripMetrics.length-1?'1px solid #1f1f27':'none'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:1}}>
-                    <span style={{width:6,height:6,borderRadius:2,background:m.chip,flexShrink:0}}></span>
-                    <span style={{fontSize:8.5,textTransform:'uppercase',letterSpacing:'.04em',color:'#8b8b96',whiteSpace:'nowrap'}}>{m.label}</span>
-                  </div>
-                  <div style={{fontFamily:SG,fontSize:14,fontWeight:700,color:m.val,lineHeight:1}}>{m.value}</div>
-                </div>
-              ))}
-            </div>,
-            topSlot
-          )}
           <span style={{color:'#d4d4d8',fontWeight:600,fontSize:12.5,whiteSpace:'nowrap'}}>🗓 Viewing</span>
           <span style={{color:'#71717a',fontSize:12.5,whiteSpace:'nowrap'}}>{isDayView?`${quotaDay===todayStr?'today':quotaDay} · ${tableLeads.length} shown`:`all dates · ${tableLeads.length} lead${tableLeads.length!==1?'s':''}`}</span>
           <div style={{flex:1,minWidth:12}}></div>
@@ -10310,10 +10293,7 @@ function App() {
           style={{marginLeft:10,opacity:canBack?1:.35,cursor:canBack?'pointer':'default'}}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
-        {/* Slot the rep dashboard portals its profile + stats into, so on a rep
-            view the top bar carries the rep identity + numbers alongside the
-            global search/bell. Empty (and zero-width) on every other screen. */}
-        <div id="topbar-repslot" style={{flex:1,minWidth:0,display:'flex',alignItems:'center',gap:12,overflow:'hidden',margin:'0 14px'}}/>
+        <div style={{flex:1}}/>
         <div className="topbar-right">
           <button className="topbar-icon-btn" data-tour="tb-search" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
