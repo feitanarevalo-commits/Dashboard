@@ -8347,6 +8347,9 @@ function App() {
   const supabaseHadLeadsRef=useRef(false);
   const leadsSyncRef=useRef({});                       // {id: JSON} last synced
   const leadVersionsRef=useRef({});                    // {id: DB version} — base for optimistic-concurrency writes
+  const [syncRetryTick,setSyncRetryTick]=useState(0);  // bumped to re-attempt a save that failed on the network/RPC
+  const saveFailingRef=useRef(false);                  // true while a lead save is failing (so we can guard reloads)
+  const saveFailToastRef=useRef(0);                    // throttles the "couldn't save" toast
   // {id: ms} when each lead was last changed locally. The 15s poll compares this
   // against the moment its OWN fetch started: if a lead was edited while that
   // fetch was in flight, the response is stale for that lead and must not win.
@@ -9652,7 +9655,19 @@ function App() {
         // "dirty", so the 15s refresh poll can't read stale rows mid-write and
         // revert a just-made edit. On failure we leave the snapshot old so it retries.
         syncLeadsToSupabase(changed, leadVersionsRef.current).then(res=>{
-          if(!res || !res.ok) return;   // network/RPC error → keep snapshot old, retry next tick
+          if(!res || !res.ok){
+            // Network/RPC failure (e.g. the server is overloaded). DON'T drop the
+            // edit: the snapshot isn't advanced, so these leads stay "dirty" and
+            // will re-send. The effect only re-runs on a leads change otherwise, so
+            // ACTIVELY retry after a short delay — a failed save must never just sit
+            // unsent — and tell the rep (throttled) so they know it isn't saved yet.
+            saveFailingRef.current=true;
+            const t=Date.now();
+            if(t - saveFailToastRef.current > 20000){ saveFailToastRef.current=t; addToast('Couldn’t save your last change yet — the server may be busy. Keeping it and retrying…','error'); }
+            setTimeout(()=>setSyncRetryTick(x=>x+1), 5000);
+            return;
+          }
+          saveFailingRef.current=false;   // a save got through — clear the failing flag
           // Accepted writes: advance our known version so the next edit isn't rejected.
           (res.accepted||[]).forEach(a=>{ leadVersionsRef.current[String(a.id)]=a.version; });
           // Rejected = the row moved on while we were writing. DON'T throw the rep's
@@ -9738,7 +9753,22 @@ function App() {
       }
     }, 1000);
     return ()=>clearTimeout(h);
-  },[leads,leadsReady]);
+  },[leads,leadsReady,syncRetryTick]);
+
+  // Last-resort data-loss guard: if a save is actively failing AND there are still
+  // unsynced changes, warn before the tab unloads — a reload would drop the edit
+  // that hasn't reached the server yet. Only fires during a real failure, so it
+  // never nags on a normal (fast) save.
+  useEffect(()=>{
+    const onBeforeUnload=(e)=>{
+      if(!saveFailingRef.current) return;
+      const s=leadsSyncRef.current||{};
+      const dirty=(leads||[]).some(l=>stableStringify(l)!==(s[String(l.id)]||'~none~'));
+      if(dirty){ e.preventDefault(); e.returnValue=''; return ''; }
+    };
+    window.addEventListener('beforeunload',onBeforeUnload);
+    return ()=>window.removeEventListener('beforeunload',onBeforeUnload);
+  },[leads]);
 
   // Live cross-user sync: every 30s (only while the tab is visible) pull the shared leads table and merge, so one
   // rep's additions/edits (and cross-rep DUPLICATES) show up for everyone without
