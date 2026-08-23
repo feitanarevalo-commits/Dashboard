@@ -338,6 +338,8 @@ input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; c
 
 /* ── TOOLBAR ── */
 .toolbar { background: var(--card); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
+.toolbar input[type="date"] { color-scheme: light; }
+html[data-dark] .toolbar input[type="date"] { color-scheme: dark; }
 .search-field { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 11px; padding: 8px 14px; font-size: 13px; transition: border-color .15s, box-shadow .15s; }
 .search-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(91,91,214,.12); }
 .search-field input { border: none; background: transparent; color: var(--text); font-size: 13px; font-family: inherit; outline: none; width: 200px; }
