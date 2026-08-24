@@ -1497,8 +1497,9 @@ const isPoolCandidate=l=>!!l.pool&&!l.assignedTo&&(l.campaigns||[]).length===0;c
 // channel key (a lead always falls to the same rep, stable across reloads).
 // Admins see the whole pool; a user outside the trio sees it unfiltered.
 // The sales-floor reps who split the MSN/VIRALS pool — every 'employee' (so
-// Bella/Mica and future hires are included automatically, same as Chase/etc).
-const POOL_REPS=(config.users||[]).filter(u=>u.role==='employee').map(u=>u.name);// Per-pool rep lists. VIRALS is ALSO worked by JC (on top of High Ticket), so it
+// Bella/Mica and future hires are included automatically, same as Chase/etc),
+// EXCEPT the Demo account (tutorial/testing only — it must never hold real leads).
+const POOL_REPS=(config.users||[]).filter(u=>u.role==='employee'&&u.name!=='Demo account').map(u=>u.name);// Per-pool rep lists. VIRALS is ALSO worked by JC (on top of High Ticket), so it
 // splits 4 ways (employees + JC); MSN stays the employees only.
 const poolRepsFor=pid=>pid==='virals'&&!POOL_REPS.includes('JC')?POOL_REPS.concat(['JC']):POOL_REPS;const poolShareRep=(l,reps)=>{reps=reps&&reps.length?reps:POOL_REPS;if(!reps.length)return null;const k=leadKey(l)||String(l.id||'');let h=0;for(let i=0;i<k.length;i++)h=(h<<5)-h+k.charCodeAt(i)|0;return reps[Math.abs(h)%reps.length];};// JC works ONLY the High Ticket pool; the three reps (+ everyone else) work
 // MSN/VIRALS and never see High Ticket. Admins see every pool for oversight.
