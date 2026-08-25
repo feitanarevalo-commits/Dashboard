@@ -1028,8 +1028,6 @@ html[data-dark] .kbl-tile-edit:hover { border-color:#5b5bd6 !important; backgrou
 .wo-stack{ display:flex; align-items:center; gap:6px; }
 .wo-ava{ position:relative; border-radius:50%; transition:transform .2s var(--ease); }
 .wo-btn:hover .wo-ava{ transform:translateY(-2px); }
-.wo-count{ font-size:12px; font-weight:800; line-height:1; padding:3px 8px; border-radius:999px; background:rgba(255,255,255,.14); font-variant-numeric:tabular-nums; transition:background .2s var(--ease); }
-.wo-btn:hover .wo-count{ background:rgba(255,255,255,.24); }
 @media (prefers-reduced-motion: reduce){ .wo-live-dot{ animation:none; } .wo-ava{ transition:none; } }
 .bell-btn{position:relative;font-size:15px;padding:6px 10px;background:rgba(255,255,255,.06)!important;color:#fff!important;border:1px solid rgba(255,255,255,.14)!important;border-radius:10px!important;}
 .bell-btn:hover{background:rgba(91,91,214,.32)!important;border-color:rgba(166,166,255,.5)!important;}
