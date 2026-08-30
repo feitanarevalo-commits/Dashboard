@@ -623,10 +623,17 @@ function leadToRow(l){return{id:String(l.id),lead_key:leadKey(l),assigned_to:l.a
 // leads_page RPC is the scale path once the UI migrates to it.)
 // Returns {items, versions}: the lead objects plus a {id: version} map used as
 // the base for optimistic-concurrency writes (sync_leads rejects stale versions).
-async function all(){const PAGE=1000,out=[],versions={};let from=0;for(let i=0;i<1000;i++){// hard safety cap = 1,000,000 rows
+async function all(){const PAGE=1000,out=[],versions={};let from=0,cursor='';for(let i=0;i<1000;i++){// hard safety cap = 1,000,000 rows
 // Archived leads are excluded from the active set (kept small = fast at
 // scale). They live on and are fetched on demand in the Archive view.
-const{data,error}=await SB.from('leads').select('id,data,version').eq('archived',false).range(from,from+PAGE-1);if(error||!data){if(i===0){reportError('loadLeads',error||'no data');return null;}break;}data.forEach(r=>{if(r.data){out.push(r.data);versions[String(r.id)]=r.version;}});if(data.length<PAGE)break;from+=PAGE;}return{items:out,versions};}return all().catch(e=>{reportError('loadLeads',e);return null;});}// Archiving = a recoverable soft-remove. archived=true drops a lead from the
+// updated_at is returned so the 30s poll can fetch ONLY rows changed since,
+// instead of re-downloading the whole table each time (the egress + the
+// "everyone re-pulls at once" spike). Every write bumps updated_at (the
+// bump_lead_version trigger), so it's a reliable cursor.
+const{data,error}=await SB.from('leads').select('id,data,version,updated_at').eq('archived',false).range(from,from+PAGE-1);if(error||!data){if(i===0){reportError('loadLeads',error||'no data');return null;}break;}data.forEach(r=>{if(r.data){out.push(r.data);versions[String(r.id)]=r.version;if(r.updated_at&&r.updated_at>cursor)cursor=r.updated_at;}});if(data.length<PAGE)break;from+=PAGE;}return{items:out,versions,cursor:cursor||null};}return all().catch(e=>{reportError('loadLeads',e);return null;});}// Incremental load: only the active leads changed since `cursor` (an updated_at ISO
+// string). Same {items, versions, cursor} shape. Powers the cheap 30s poll — a full
+// re-pull only runs as an occasional backstop / on focus.
+function loadLeadsSince(cursor){if(!SB||!cursor)return Promise.resolve(null);async function go(){const PAGE=1000,out=[],versions={};let from=0,maxU=cursor;for(let i=0;i<200;i++){const{data,error}=await SB.from('leads').select('id,data,version,updated_at').eq('archived',false).gt('updated_at',cursor).order('updated_at',{ascending:true}).range(from,from+PAGE-1);if(error||!data){if(i===0)return null;break;}data.forEach(r=>{if(r.data){out.push(r.data);versions[String(r.id)]=r.version;if(r.updated_at&&r.updated_at>maxU)maxU=r.updated_at;}});if(data.length<PAGE)break;from+=PAGE;}return{items:out,versions,cursor:maxU};}return go().catch(()=>null);}// Archiving = a recoverable soft-remove. archived=true drops a lead from the
 // active load (and thus from every view + the 15s live-sync); restore flips it
 // back. Only the Archive view and these helpers ever touch the flag.
 function archiveLeadsInSupabase(ids){if(!SB||!ids||!ids.length)return Promise.resolve(false);return SB.from('leads').update({archived:true,updated_at:new Date().toISOString()}).in('id',ids.map(String)).then(({error})=>{if(error)console.warn('[leads] archive failed',error.message);return!error;}).catch(()=>false);}function unarchiveLeadsInSupabase(ids){if(!SB||!ids||!ids.length)return Promise.resolve(false);return SB.from('leads').update({archived:false,updated_at:new Date().toISOString()}).in('id',ids.map(String)).then(({error})=>{if(error)console.warn('[leads] unarchive failed',error.message);return!error;}).catch(()=>false);}function loadArchivedFromSupabase(){if(!SB)return Promise.resolve(null);async function all(){const PAGE=1000,out=[];let from=0;for(let i=0;i<1000;i++){const{data,error}=await SB.from('leads').select('id,data').eq('archived',true).range(from,from+PAGE-1);if(error||!data){if(i===0)return null;break;}out.push(...data.map(r=>r.data).filter(Boolean));if(data.length<PAGE)break;from+=PAGE;}return out;}return all().catch(()=>null);}// Just the channel keys of archived leads (not the full objects) — cheap payload
@@ -1040,6 +1047,7 @@ const ownerLeads=leads.filter(l=>leadKey(l)&&!keys.includes(leadKey(l))&&l.assig
 function App(){const[tab,setTab]=useState('home');const[leads,setLeads]=useState(SAMPLE_LEADS);const[leadsReady,setLeadsReady]=useState(false);// Supabase leads loaded
 const supabaseHadLeadsRef=useRef(false);const leadsSyncRef=useRef({});// {id: JSON} last synced
 const leadVersionsRef=useRef({});// {id: DB version} — base for optimistic-concurrency writes
+const leadsCursorRef=useRef(null);// max updated_at seen — the 30s poll fetches only rows changed AFTER this (incremental), so it stops re-downloading the whole table every tick
 const[syncRetryTick,setSyncRetryTick]=useState(0);// bumped to re-attempt a save that failed on the network/RPC
 const saveFailingRef=useRef(false);// true while a lead save is failing (so we can guard reloads)
 const saveFailToastRef=useRef(0);// throttles the "couldn't save" toast
@@ -1321,7 +1329,9 @@ useEffect(()=>{if(!currentUser||!(config.repliesWebhook||'').trim())return;loadR
 useEffect(()=>{if(!SB||!isAdmin){setSrSends([]);return;}let stop=false;const load=()=>{try{SB.from('activity_log').select('id,created_at,actor,text').ilike('text','SmartReach:%').order('created_at',{ascending:false}).limit(40).then(({data})=>{if(stop||!Array.isArray(data))return;setSrSends(data.map(r=>({id:'sr_'+r.id,rep:r.actor||'',text:r.text||'',when:r.created_at})));},()=>{});}catch(e){}};load();const t=setInterval(load,120000);return()=>{stop=true;clearInterval(t);};},[isAdmin]);function loadFromClose(opts){opts=opts||{};const wh=(config.closeLoadWebhook||'').trim();if(!wh||wh.includes('your-')){if(!opts.silent)addToast('Set the Close Load Webhook in ⚙ Customize','info');return;}setCloseSyncing(true);if(!opts.silent)addToast('Loading leads from Close…','info');fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text();}).then(text=>{if(!text||!text.trim()){if(!opts.silent)addToast('Close returned no leads','info');return;}let data;try{data=JSON.parse(text);}catch(e){addToast('Close load: response was not JSON','error');return;}const arr=Array.isArray(data)?data:data.leads||data.results||data.data||[];const loaded=arr.map(normalizeLead).map(l=>({...l,fromClose:true}));// tag for the Close Leads Data tab
 setLeads(loaded);autoFileAgencies(loaded);const agencyCount=loaded.filter(l=>l.agency).length;if(agencyCount)logH('🏢',`Auto-filed ${agencyCount} agency lead(s) into Agency folders`);logH('☁️',`Loaded ${loaded.length} lead(s) from Close`);if(!opts.silent)addToast(`✓ Loaded ${loaded.length} lead(s) from Close`,'success');}).catch(e=>{if(!opts.silent)addToast('Close load failed: '+e.message,'error');reportError('loadFromClose',e);}).finally(()=>setCloseSyncing(false));}function saveToClose(){const wh=(config.closeWebhook||'').trim();if(!wh||wh.includes('your-')){addToast('Set the Close Save Webhook in ⚙ Customize','info');return;}if(!leads.length){addToast('No leads to save','info');return;}setCloseSyncing(true);addToast(`Saving ${leads.length} lead(s) to Close…`,'info');fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'close.create',rep:null,leads:leads.map(toCloseLeadItem)})}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text();}).then(text=>{// Optional: Close returns [{id, closeLeadId}] so we can update without duplicating next time.
 let data=null;try{data=text&&text.trim()?JSON.parse(text):null;}catch(e){}const idMap=Array.isArray(data)?data:data&&Array.isArray(data.saved)?data.saved:null;if(idMap){const byId={};idMap.forEach(m=>{if(m&&m.id!=null)byId[m.id]=m.closeLeadId||m.close_id;});setLeads(ls=>ls.map(l=>byId[l.id]?{...l,closeLeadId:byId[l.id]}:l));}logH('☁️',`Saved ${leads.length} lead(s) to Close`);addToast(`✓ Saved ${leads.length} lead(s) to Close`,'success');}).catch(e=>{addToast('Close save failed: '+e.message,'error');reportError('closeSave',e);}).finally(()=>setCloseSyncing(false));}// Load shared LEADS from Supabase once on start (the team source of truth).
-useEffect(()=>{loadLeadsFromSupabase().then(res=>{const loaded=res&&res.items;if(loaded&&loaded.length){supabaseHadLeadsRef.current=true;const snap={};loaded.forEach(l=>snap[String(l.id)]=stableStringify(l));leadsSyncRef.current=snap;leadVersionsRef.current=res&&res.versions||{};setLeads(loaded);}setLeadsReady(true);});// Load the archived channel keys so scraper/import dedup stays archive-aware.
+useEffect(()=>{loadLeadsFromSupabase().then(res=>{const loaded=res&&res.items;if(loaded&&loaded.length){supabaseHadLeadsRef.current=true;const snap={};loaded.forEach(l=>snap[String(l.id)]=stableStringify(l));leadsSyncRef.current=snap;leadVersionsRef.current=res&&res.versions||{};setLeads(loaded);}// Seed the incremental-poll cursor with the newest updated_at from this full
+// load, so the very first poll fetches only rows changed since page-open.
+if(res&&res.cursor)leadsCursorRef.current=res.cursor;setLeadsReady(true);});// Load the archived channel keys so scraper/import dedup stays archive-aware.
 loadArchivedKeysFromSupabase().then(keys=>{if(Array.isArray(keys))archivedKeysRef.current=new Set(keys);});// Load the shared, persisted activity history (team-wide) so the History tab
 // shows real activity instead of an empty in-memory list.
 // Undo now survives a reload (the payload used to be session-only, which
@@ -1379,28 +1389,36 @@ useEffect(()=>{const onBeforeUnload=e=>{if(!saveFailingRef.current)return;const 
 // rep's additions/edits (and cross-rep DUPLICATES) show up for everyone without
 // a manual reload. Local unsaved edits are preserved; leads another rep deleted
 // are dropped. Returns the SAME array reference when nothing changed (no churn).
-useEffect(()=>{if(!SB||!leadsReady)return;let stop=false,tick=0;const pullAndMerge=()=>{if(stop)return;// EGRESS GUARD: a backgrounded tab re-downloading the whole leads table
-// every interval was the bulk of Supabase egress. Skip the pull while the
-// tab is hidden — the on-focus handler below pulls fresh the moment the rep
-// returns, so they never work from stale data.
-if(typeof document!=='undefined'&&document.hidden)return;// Every ~2min refresh the archived-keys set too, so an archive done by
-// another admin propagates (keeps re-scrapes of it skipped everywhere).
-if(tick++%4===0){loadArchivedKeysFromSupabase().then(keys=>{if(!stop&&Array.isArray(keys))archivedKeysRef.current=new Set(keys);});}// When THIS fetch began. Anything the DB tells us reflects the world at
-// roughly this instant, so a lead edited after it is newer than the answer.
-const fetchStartedAt=Date.now();loadLeadsFromSupabase().then(res=>{const remote=res&&res.items;const remoteVersions=res&&res.versions||{};if(stop||!Array.isArray(remote))return;const remoteById={};remote.forEach(l=>remoteById[String(l.id)]=l);setLeads(local=>{const synced=leadsSyncRef.current||{};const localIds=new Set(local.map(l=>String(l.id)));const out=[];local.forEach(l=>{const id=String(l.id),r=remoteById[id];const dirty=stableStringify(l)!==synced[id];// local edit not yet pushed
-// Edited while this fetch was in flight → the response predates the
-// edit and cannot be trusted for this lead, even though it's already
-// been marked synced. This is what was reverting Pending→Potential.
-const staleForThisLead=(writeStampRef.current[id]||0)>=fetchStartedAt;if(r===undefined){if(!(id in synced)||dirty||staleForThisLead)out.push(l);/* else: deleted by another rep */}// Adopting the shared row: track its version AND mark it synced. Skipping
+useEffect(()=>{if(!SB||!leadsReady)return;let stop=false,tick=0;// Merge a batch of remote rows into local state. isFull=true means `remote` is
+// the COMPLETE active set, so a local lead missing from it was archived/deleted
+// elsewhere and should drop (with the dirty/unsynced guards). isFull=false (the
+// incremental poll) only updates/adds — a lead's absence just means "unchanged".
+const applyRemote=(remote,remoteVersions,fetchStartedAt,isFull)=>{const remoteById={};remote.forEach(l=>remoteById[String(l.id)]=l);setLeads(local=>{const synced=leadsSyncRef.current||{};const localIds=new Set(local.map(l=>String(l.id)));const out=[];local.forEach(l=>{const id=String(l.id),r=remoteById[id];const dirty=stableStringify(l)!==synced[id];// local edit not yet pushed
+// Edited while this fetch was in flight → the response predates the edit
+// and can't be trusted for this lead (this guarded Pending→Potential reverts).
+const staleForThisLead=(writeStampRef.current[id]||0)>=fetchStartedAt;if(r===undefined){// Incremental batch: unchanged → always keep. Full batch: gone from the
+// active set (archived/deleted) → drop, unless it's a local/unsaved edit.
+if(!isFull||!(id in synced)||dirty||staleForThisLead)out.push(l);}// Adopting the shared row: track its version AND mark it synced. Skipping
 // the synced-snapshot update made the next debounce treat every adopted row
 // as a local edit and re-push it — two tabs then ping-pong forever, churning
 // versions and REJECTING reps' real tags (the "tag keeps reverting" storm).
 else{const take=dirty||staleForThisLead?l:r;out.push(take);if(take===r){leadVersionsRef.current[id]=remoteVersions[id];leadsSyncRef.current[id]=stableStringify(r);}}});remote.forEach(l=>{const id=String(l.id);if(!localIds.has(id)){out.push(l);leadVersionsRef.current[id]=remoteVersions[id];leadsSyncRef.current[id]=stableStringify(l);}});// new from other reps → track version + mark synced
 if(out.length===local.length){const lm={};local.forEach(l=>lm[String(l.id)]=stableStringify(l));if(out.every(l=>lm[String(l.id)]===stableStringify(l)))return local;// no change → no churn
-}return out;});}).catch(()=>{});};const iv=setInterval(pullAndMerge,30000);// Refresh-on-focus: a tab that was backgrounded (or the laptop asleep) holds
-// stale leads; pull fresh the moment the rep returns so they edit from current
-// data. With the version guard this just means fewer conflict-refreshes.
-const onVisible=()=>{if(document.visibilityState==='visible')pullAndMerge();};document.addEventListener('visibilitychange',onVisible);window.addEventListener('focus',onVisible);return()=>{stop=true;clearInterval(iv);document.removeEventListener('visibilitychange',onVisible);window.removeEventListener('focus',onVisible);};},[leadsReady]);// New-build detection: if the deployed page changes (a new deploy), this tab is
+}return out;});};// FULL sync: pull the entire active table and merge — authoritative, so it also
+// drops archived/deleted leads and re-seeds the incremental cursor. Runs on focus
+// and every 5 min as a backstop; the frequent 30s poll below is incremental.
+const fullSync=()=>{if(stop||typeof document!=='undefined'&&document.hidden)return;const fetchStartedAt=Date.now();loadLeadsFromSupabase().then(res=>{if(stop||!res||!Array.isArray(res.items))return;if(res.cursor)leadsCursorRef.current=res.cursor;applyRemote(res.items,res.versions||{},fetchStartedAt,true);}).catch(()=>{});};// INCREMENTAL poll (every 30s): fetch ONLY rows changed since the cursor — the
+// cheap common case that replaces re-downloading the whole ~21MB table each tick
+// (that mass re-pull, team-wide at once, was the load spike). Archives/deletes and
+// any boundary miss are reconciled by fullSync (≤5 min, or instantly on focus).
+const incSync=()=>{if(stop||typeof document!=='undefined'&&document.hidden)return;// Every ~2min refresh the archived-keys set too, so an archive done by another
+// admin propagates (keeps re-scrapes of it skipped everywhere).
+if(tick++%4===0){loadArchivedKeysFromSupabase().then(keys=>{if(!stop&&Array.isArray(keys))archivedKeysRef.current=new Set(keys);});}const cursor=leadsCursorRef.current;if(!cursor){fullSync();return;}// no cursor yet → establish one with a full pull
+const fetchStartedAt=Date.now();loadLeadsSince(cursor).then(res=>{if(stop||!res||!Array.isArray(res.items))return;if(res.cursor)leadsCursorRef.current=res.cursor;if(res.items.length)applyRemote(res.items,res.versions||{},fetchStartedAt,false);}).catch(()=>{});};const ivInc=setInterval(incSync,30000);const ivFull=setInterval(fullSync,300000);// 5-min authoritative backstop
+// Refresh-on-focus: a tab that was backgrounded (or the laptop asleep) holds
+// stale leads; a FULL pull the moment the rep returns gives them current data
+// (including any archives/deletes) before they edit.
+const onVisible=()=>{if(document.visibilityState==='visible')fullSync();};document.addEventListener('visibilitychange',onVisible);window.addEventListener('focus',onVisible);return()=>{stop=true;clearInterval(ivInc);clearInterval(ivFull);document.removeEventListener('visibilitychange',onVisible);window.removeEventListener('focus',onVisible);};},[leadsReady]);// New-build detection: if the deployed page changes (a new deploy), this tab is
 // running old code — surface a Reload banner so nobody unknowingly stays on a
 // stale build (pre-fix builds could still clobber). When a newer build is known
 // and the tab is hidden with nothing unsaved, reload quietly so it's fresh on
