@@ -637,17 +637,25 @@ function leadToRow(l){return{id:String(l.id),lead_key:leadKey(l),assigned_to:l.a
 // leads_page RPC is the scale path once the UI migrates to it.)
 // Returns {items, versions}: the lead objects plus a {id: version} map used as
 // the base for optimistic-concurrency writes (sync_leads rejects stale versions).
-async function all(){const PAGE=1000,out=[],versions={};let from=0,cursor='';for(let i=0;i<1000;i++){// hard safety cap = 1,000,000 rows
+async function all(){// Collect by id (a Map) so the SAME lead can never end up in the array twice.
+// Without a stable sort, offset pagination is unstable: when rows are UPDATED
+// mid-pull they shift between pages, so some come back twice and others are
+// skipped — that silently duplicated ~2k leads in memory AND dropped others
+// (reps saw phantom "duplicates" and a lower-than-real count). `.order('id')`
+// (id is immutable) makes pagination stable; the Map is the belt-and-suspenders.
+const PAGE=1000,byId=new Map();let from=0,cursor='';for(let i=0;i<1000;i++){// hard safety cap = 1,000,000 rows
 // Archived leads are excluded from the active set (kept small = fast at
 // scale). They live on and are fetched on demand in the Archive view.
 // updated_at is returned so the 30s poll can fetch ONLY rows changed since,
 // instead of re-downloading the whole table each time (the egress + the
 // "everyone re-pulls at once" spike). Every write bumps updated_at (the
 // bump_lead_version trigger), so it's a reliable cursor.
-const{data,error}=await SB.from('leads').select('id,data,version,updated_at').eq('archived',false).range(from,from+PAGE-1);if(error||!data){if(i===0){reportError('loadLeads',error||'no data');return null;}break;}data.forEach(r=>{if(r.data){out.push(r.data);versions[String(r.id)]=r.version;if(r.updated_at&&r.updated_at>cursor)cursor=r.updated_at;}});if(data.length<PAGE)break;from+=PAGE;}return{items:out,versions,cursor:cursor||null};}return all().catch(e=>{reportError('loadLeads',e);return null;});}// Incremental load: only the active leads changed since `cursor` (an updated_at ISO
+const{data,error}=await SB.from('leads').select('id,data,version,updated_at').eq('archived',false).order('id',{ascending:true}).range(from,from+PAGE-1);if(error||!data){if(i===0){reportError('loadLeads',error||'no data');return null;}break;}data.forEach(r=>{if(r.data){byId.set(String(r.id),{data:r.data,version:r.version});if(r.updated_at&&r.updated_at>cursor)cursor=r.updated_at;}});if(data.length<PAGE)break;from+=PAGE;}const out=[],versions={};byId.forEach((v,id)=>{out.push(v.data);versions[id]=v.version;});return{items:out,versions,cursor:cursor||null};}return all().catch(e=>{reportError('loadLeads',e);return null;});}// Incremental load: only the active leads changed since `cursor` (an updated_at ISO
 // string). Same {items, versions, cursor} shape. Powers the cheap 30s poll — a full
 // re-pull only runs as an occasional backstop / on focus.
-function loadLeadsSince(cursor){if(!SB||!cursor)return Promise.resolve(null);async function go(){const PAGE=1000,out=[],versions={};let from=0,maxU=cursor;for(let i=0;i<200;i++){const{data,error}=await SB.from('leads').select('id,data,version,updated_at').eq('archived',false).gt('updated_at',cursor).order('updated_at',{ascending:true}).range(from,from+PAGE-1);if(error||!data){if(i===0)return null;break;}data.forEach(r=>{if(r.data){out.push(r.data);versions[String(r.id)]=r.version;if(r.updated_at&&r.updated_at>maxU)maxU=r.updated_at;}});if(data.length<PAGE)break;from+=PAGE;}return{items:out,versions,cursor:maxU};}return go().catch(()=>null);}// Archiving = a recoverable soft-remove. archived=true drops a lead from the
+function loadLeadsSince(cursor){if(!SB||!cursor)return Promise.resolve(null);async function go(){// Same by-id Map + stable secondary sort (id) as the full load, so an
+// incremental batch never returns the same lead twice.
+const PAGE=1000,byId=new Map();let from=0,maxU=cursor;for(let i=0;i<200;i++){const{data,error}=await SB.from('leads').select('id,data,version,updated_at').eq('archived',false).gt('updated_at',cursor).order('updated_at',{ascending:true}).order('id',{ascending:true}).range(from,from+PAGE-1);if(error||!data){if(i===0)return null;break;}data.forEach(r=>{if(r.data){byId.set(String(r.id),{data:r.data,version:r.version});if(r.updated_at&&r.updated_at>maxU)maxU=r.updated_at;}});if(data.length<PAGE)break;from+=PAGE;}const out=[],versions={};byId.forEach((v,id)=>{out.push(v.data);versions[id]=v.version;});return{items:out,versions,cursor:maxU};}return go().catch(()=>null);}// Archiving = a recoverable soft-remove. archived=true drops a lead from the
 // active load (and thus from every view + the 15s live-sync); restore flips it
 // back. Only the Archive view and these helpers ever touch the flag.
 function archiveLeadsInSupabase(ids){if(!SB||!ids||!ids.length)return Promise.resolve(false);return SB.from('leads').update({archived:true,updated_at:new Date().toISOString()}).in('id',ids.map(String)).then(({error})=>{if(error)console.warn('[leads] archive failed',error.message);return!error;}).catch(()=>false);}function unarchiveLeadsInSupabase(ids){if(!SB||!ids||!ids.length)return Promise.resolve(false);return SB.from('leads').update({archived:false,updated_at:new Date().toISOString()}).in('id',ids.map(String)).then(({error})=>{if(error)console.warn('[leads] unarchive failed',error.message);return!error;}).catch(()=>false);}function loadArchivedFromSupabase(){if(!SB)return Promise.resolve(null);async function all(){const PAGE=1000,out=[];let from=0;for(let i=0;i<1000;i++){const{data,error}=await SB.from('leads').select('id,data').eq('archived',true).range(from,from+PAGE-1);if(error||!data){if(i===0)return null;break;}out.push(...data.map(r=>r.data).filter(Boolean));if(data.length<PAGE)break;from+=PAGE;}return out;}return all().catch(()=>null);}// Just the channel keys of archived leads (not the full objects) — cheap payload
@@ -1431,7 +1439,12 @@ if(!isFull||!(id in synced)||dirty||staleForThisLead)out.push(l);}// Adopting th
 // as a local edit and re-push it — two tabs then ping-pong forever, churning
 // versions and REJECTING reps' real tags (the "tag keeps reverting" storm).
 else{const take=dirty||staleForThisLead?l:r;out.push(take);if(take===r){leadVersionsRef.current[id]=remoteVersions[id];leadsSyncRef.current[id]=stableStringify(r);}}});remote.forEach(l=>{const id=String(l.id);if(!localIds.has(id)){out.push(l);leadVersionsRef.current[id]=remoteVersions[id];leadsSyncRef.current[id]=stableStringify(l);}});// new from other reps → track version + mark synced
-if(out.length===local.length){const lm={};local.forEach(l=>lm[String(l.id)]=stableStringify(l));if(out.every(l=>lm[String(l.id)]===stableStringify(l)))return local;// no change → no churn
+// SELF-HEAL: never let the same id sit in the array twice. If `local` was
+// already corrupted (a lead duplicated + another evicted — the phantom-
+// "duplicates" + undercount bug from unstable pagination), collapse the
+// duplicates here so open tabs recover on the next sync without a reload.
+// A fullSync also re-adds any evicted lead (it's in remote, not in localIds).
+if(new Set(out.map(l=>String(l.id))).size!==out.length){const seen=new Set(),ded=[];for(const l of out){const id=String(l.id);if(!seen.has(id)){seen.add(id);ded.push(l);}}return ded;}if(out.length===local.length){const lm={};local.forEach(l=>lm[String(l.id)]=stableStringify(l));if(out.every(l=>lm[String(l.id)]===stableStringify(l)))return local;// no change → no churn
 }return out;});};// FULL sync: pull the entire active table and merge — authoritative, so it also
 // drops archived/deleted leads and re-seeds the incremental cursor. Runs on focus
 // and every 5 min as a backstop; the frequent 30s poll below is incremental.
