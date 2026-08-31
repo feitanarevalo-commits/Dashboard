@@ -232,7 +232,21 @@ let platform=item.platform||fallbackPlatform||'';if(!platform||platform==='All')
 // so a scraped result (has channelId) matches a lead that only has the channel
 // URL (e.g. an imported/manual Pending lead). Falls back to channelId > URL >
 // name for non-YouTube leads.
-function leadKey(l){if(!l)return'';const cid=String(l.channelId||'').trim();if(/^UC[\w-]{20,}$/i.test(cid))return cid.toLowerCase();const m=String(l.url||'').match(/UC[\w-]{20,}/i);if(m)return m[0].toLowerCase();return String(l.channelId||l.url||l.channelName||'').trim().toLowerCase();}// 32-bit string hash with an avalanche finalizer so `hash % n` is UNIFORM even for
+// A YouTube channel id (UC…) found anywhere in a string, lowercased. Globally
+// unique, so matching on it is zero-false-positive.
+function _ucId(s){const m=String(s||'').match(/UC[\w-]{20,}/i);return m?m[0].toLowerCase():'';}// Canonical channel HANDLE/path from a URL — only real channel-identity forms
+// (@handle, /c/Name, /user/Name, /channel/…). URL-decoded + unicode-safe so
+// "@Comentários…" isn't truncated at the first non-ASCII char, and case/host/
+// trailing-slash variants of the SAME channel collapse to one key. Returns '' for
+// non-channel URLs (e.g. /watch?v=…) so distinct videos never merge.
+function _channelHandle(u){let s=String(u||'');try{s=decodeURIComponent(s);}catch(e){}s=s.trim().toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/^m\.youtube\.com/,'youtube.com');let m;if(m=s.match(/\/@([^\s/?#]+)/))return'@'+m[1];if(m=s.match(/\/(c|user|channel)\/([^\s/?#]+)/))return m[1]+'/'+m[2];if(m=s.match(/^@([^\s/?#]+)/))return'@'+m[1];return'';}function leadKey(l){if(!l)return'';// 1) YouTube channel id (UC…) — from channelId, then anywhere in url/channelUrl
+//    or a links[] entry. This is the strongest identity and never false-matches.
+const cid=String(l.channelId||'').trim();if(/^UC[\w-]{20,}$/i.test(cid))return cid.toLowerCase();let uc=_ucId(l.url)||_ucId(l.channelUrl)||_ucId(cid);if(!uc&&Array.isArray(l.links))for(const x of l.links){uc=_ucId(x&&(x.url||x));if(uc)break;}if(uc)return uc;// 2) Canonical channel handle/path — collapses URL-format variants of the same
+//    channel (trailing slash, /videos, case, %-encoding) that the raw-URL fallback
+//    used to miss, letting a real duplicate slip through as "distinct".
+const hnd=_channelHandle(l.url)||_channelHandle(l.channelUrl);if(hnd)return hnd;// 3) Full normalized URL (query PRESERVED, so different videos stay distinct),
+//    then channel name as the last resort for leads with no id/url at all.
+const nu=String(l.url||l.channelUrl||'').trim().toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\/+$/,'');if(nu)return nu;return String(l.channelId||l.channelName||'').trim().toLowerCase();}// 32-bit string hash with an avalanche finalizer so `hash % n` is UNIFORM even for
 // small n. A plain ×31 polynomial hash is ≡ 1 mod 5 AND mod 6 (both divide 30), which
 // collapses it to a char-sum that clusters for similar strings (e.g. all "uc…" ids) —
 // that made the pool/recycle splits hand some reps 0 (VIRALS: Chase/Layla/Joy got
