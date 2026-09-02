@@ -246,12 +246,14 @@ const cid=String(l.channelId||'').trim();if(/^UC[\w-]{20,}$/i.test(cid))return c
 //    used to miss, letting a real duplicate slip through as "distinct".
 const hnd=_channelHandle(l.url)||_channelHandle(l.channelUrl);if(hnd)return hnd;// 3) Full normalized URL (query PRESERVED, so different videos stay distinct),
 //    then channel name as the last resort for leads with no id/url at all.
-const nu=String(l.url||l.channelUrl||'').trim().toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\/+$/,'');if(nu)return nu;return String(l.channelId||l.channelName||'').trim().toLowerCase();}// 32-bit string hash with an avalanche finalizer so `hash % n` is UNIFORM even for
-// small n. A plain ×31 polynomial hash is ≡ 1 mod 5 AND mod 6 (both divide 30), which
-// collapses it to a char-sum that clusters for similar strings (e.g. all "uc…" ids) —
-// that made the pool/recycle splits hand some reps 0 (VIRALS: Chase/Layla/Joy got
-// nothing). The finalizer scrambles the low bits so the modulo distributes evenly.
-function strHash32(s){s=String(s||'');let h=0;for(let i=0;i<s.length;i++)h=Math.imul(h,31)+s.charCodeAt(i)|0;h^=h>>>16;h=Math.imul(h,0x45d9f3b);h^=h>>>16;h=Math.imul(h,0x45d9f3b);h^=h>>>16;return h>>>0;}// Parse the pipe-delimited Close description we write on push back into fields,
+const nu=String(l.url||l.channelUrl||'').trim().toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\/+$/,'');if(nu)return nu;return String(l.channelId||l.channelName||'').trim().toLowerCase();}// String hash used to split the MSN/VIRALS/recycle pools evenly across reps via
+// `hash % repCount`. Uses cyrb53 (two independent 32-bit lanes → a 53-bit result).
+// WHY not the old ×31 + fmix32: that finalizer still left a mod-5 correlation for
+// our near-sequential "uc…" channel-id keys, so `%5` collapsed 117 MSN pool leads
+// onto just 2 of 5 reps (60/54/1/1/1). cyrb53 %n is verified uniform on that same
+// data (≈24 each). Keep the name (only the two pool-share funcs consume it).
+function strHash32(s){const str=String(s||'');let h1=0xdeadbeef,h2=0x41c6ce57;for(let i=0;i<str.length;i++){const ch=str.charCodeAt(i);h1=Math.imul(h1^ch,2654435761);h2=Math.imul(h2^ch,1597334677);}h1=Math.imul(h1^h1>>>16,2246822507);h1^=Math.imul(h2^h2>>>13,3266489909);h2=Math.imul(h2^h2>>>16,2246822507);h2^=Math.imul(h1^h1>>>13,3266489909);return 4294967296*(2097151&h2)+(h1>>>0);// 53-bit unsigned; `%n` is uniform
+}// Parse the pipe-delimited Close description we write on push back into fields,
 // e.g. "URL: x | Platform: YouTube | Niche: Fit | Followers: 90K | Status: Potential
 // | Campaign: MSN | Rep: Pen | Assigned: 2026-06-23". Skips empty/null values.
 function parseCloseDescription(desc){const out={};if(typeof desc!=='string'||!desc)return out;desc.split('|').forEach(part=>{const idx=part.indexOf(':');if(idx<0)return;const k=part.slice(0,idx).trim().toLowerCase();const v=part.slice(idx+1).trim();if(!v||v.toLowerCase()==='null'||v.toLowerCase()==='undefined')return;if(['url','platform','niche','followers','status','campaign','rep','assigned'].includes(k))out[k]=v;});return out;}// Cross-tab duplicate index: leadKey -> [{id, rep, contacted}] for every channel
