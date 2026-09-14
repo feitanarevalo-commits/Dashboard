@@ -233,8 +233,8 @@
       <label class="fld">
         <span>Length</span>
         <select id="length">
-          <option value="5">Short — about 5 minutes</option>
-          <option value="15" selected>Full — as long as matches allow</option>
+          <option value="5">About 5 minutes</option>
+          <option value="10" selected>About 10 minutes</option>
         </select>
       </label>
       <label class="fld">
@@ -380,7 +380,7 @@ function renderPreview(topic, j){
         ${destIsPublic()
           ? 'This renders the reel and posts it <strong>public</strong> to @PETFLIXnnCHILL.'
           : 'This renders the reel and uploads it <strong>private</strong> for your review.'}
-        Only clips you haven’t used before are included, so it won’t repeat past videos.
+        Your reel leads with these matches, then fills to about ${(document.querySelector('#length')||{}).value||'10'} minutes with more fresh clips from your library. It won’t repeat clips from past videos.
       </p>
     </div>`;
   results.appendChild(p);
