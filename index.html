@@ -1483,7 +1483,8 @@ if(new Set(out.map(l=>String(l.id))).size!==out.length){const seen=new Set(),ded
 }return out;});};// FULL sync: pull the entire active table and merge — authoritative, so it also
 // drops archived/deleted leads and re-seeds the incremental cursor. Runs on focus
 // and every 5 min as a backstop; the frequent 30s poll below is incremental.
-const fullSync=()=>{if(stop||typeof document!=='undefined'&&document.hidden)return;const fetchStartedAt=Date.now();loadLeadsFromSupabase().then(res=>{if(stop||!res||!Array.isArray(res.items))return;if(res.cursor)leadsCursorRef.current=res.cursor;applyRemote(res.items,res.versions||{},fetchStartedAt,true);}).catch(()=>{});};// INCREMENTAL poll (every 30s): fetch ONLY rows changed since the cursor — the
+let lastFullAt=Date.now();// the initial load counts as a full pull
+const fullSync=()=>{if(stop||typeof document!=='undefined'&&document.hidden)return;lastFullAt=Date.now();const fetchStartedAt=lastFullAt;loadLeadsFromSupabase().then(res=>{if(stop||!res||!Array.isArray(res.items))return;if(res.cursor)leadsCursorRef.current=res.cursor;applyRemote(res.items,res.versions||{},fetchStartedAt,true);}).catch(()=>{});};// INCREMENTAL poll (every 30s): fetch ONLY rows changed since the cursor — the
 // cheap common case that replaces re-downloading the whole ~21MB table each tick
 // (that mass re-pull, team-wide at once, was the load spike). Archives/deletes and
 // any boundary miss are reconciled by fullSync (≤5 min, or instantly on focus).
@@ -1491,10 +1492,12 @@ const incSync=()=>{if(stop||typeof document!=='undefined'&&document.hidden)retur
 // admin propagates (keeps re-scrapes of it skipped everywhere).
 if(tick++%4===0){loadArchivedKeysFromSupabase().then(keys=>{if(!stop&&Array.isArray(keys))archivedKeysRef.current=new Set(keys);});}const cursor=leadsCursorRef.current;if(!cursor){fullSync();return;}// no cursor yet → establish one with a full pull
 const fetchStartedAt=Date.now();loadLeadsSince(cursor).then(res=>{if(stop||!res||!Array.isArray(res.items))return;if(res.cursor)leadsCursorRef.current=res.cursor;if(res.items.length)applyRemote(res.items,res.versions||{},fetchStartedAt,false);}).catch(()=>{});};const ivInc=setInterval(incSync,30000);const ivFull=setInterval(fullSync,300000);// 5-min authoritative backstop
-// Refresh-on-focus: a tab that was backgrounded (or the laptop asleep) holds
-// stale leads; a FULL pull the moment the rep returns gives them current data
-// (including any archives/deletes) before they edit.
-const onVisible=()=>{if(document.visibilityState==='visible')fullSync();};document.addEventListener('visibilitychange',onVisible);window.addEventListener('focus',onVisible);return()=>{stop=true;clearInterval(ivInc);clearInterval(ivFull);document.removeEventListener('visibilitychange',onVisible);window.removeEventListener('focus',onVisible);};},[leadsReady]);// New-build detection: if the deployed page changes (a new deploy), this tab is
+// Refresh-on-focus: a tab that was backgrounded holds stale leads. Do a CHEAP
+// incremental sync (only rows changed since the cursor) on every focus — a FULL
+// re-pull of all active leads on every tab switch was the main source of
+// slowness once the active set grew large (23k+). Only fall back to a full pull
+// after a long absence (>5 min) so archives/deletes are still reconciled.
+const onVisible=()=>{if(document.visibilityState!=='visible')return;if(Date.now()-lastFullAt>300000)fullSync();else incSync();};document.addEventListener('visibilitychange',onVisible);window.addEventListener('focus',onVisible);return()=>{stop=true;clearInterval(ivInc);clearInterval(ivFull);document.removeEventListener('visibilitychange',onVisible);window.removeEventListener('focus',onVisible);};},[leadsReady]);// New-build detection: if the deployed page changes (a new deploy), this tab is
 // running old code — surface a Reload banner so nobody unknowingly stays on a
 // stale build (pre-fix builds could still clobber). When a newer build is known
 // and the tab is hidden with nothing unsaved, reload quietly so it's fresh on
