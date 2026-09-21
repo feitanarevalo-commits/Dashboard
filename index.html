@@ -941,7 +941,7 @@ const scopeAll=isAdmin&&repFilter?inCampaign.filter(l=>l.assignedTo===repFilter)
 function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onClearAll,onAutoAssignJC,onVerifyUrls,addToast,config,jcPlan=null,soloRep=null}){const[repView,setRepView]=useState('');const[jcPrev,setJcPrev]=useState(false);const[jcShowLeads,setJcShowLeads]=useState({});// per-rep expanded lead list in the preview
 const[jcManualOpen,setJcManualOpen]=useState(false);const[jcUseManual,setJcUseManual]=useState(false);// follow the manual numbers on auto-assign
 const[jcManual,setJcManual]=useState({HT:{},MSN:{},VIRALS:{}});// {cat:{rep:count}}
-const JC_REPS=['Rein','Chase','Mikka','Bella'];const JC_CATS=[{key:'HT',label:'High-Ticket'},{key:'MSN',label:'MSN'},{key:'VIRALS',label:'VIRALS'}];const feats=config.features||{};const campColorMap={};(config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);// Solo mode (a rep viewing only their own leads): no per-rep filter buttons.
+const JC_REPS=['Rein','Chase','Mikka','Bella','Joy','Layla'];const JC_CATS=[{key:'HT',label:'High-Ticket'},{key:'MSN',label:'MSN'},{key:'VIRALS',label:'VIRALS'}];const feats=config.features||{};const campColorMap={};(config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);// Solo mode (a rep viewing only their own leads): no per-rep filter buttons.
 const all=soloRep?[]:config.salesReps||[];// Lead Management = the working pool of leads NOT yet sorted into a dedicated
 // status tab (Pending Qualification / Contacted / For Recycle). Once tagged,
 // they live in that tab instead of cluttering this list.
@@ -1255,7 +1255,7 @@ const JC_MSN_TO_REIN=20;// Rein's fixed MSN allocation on top of all High-Ticket
 function jcAssignPlan(manual){const valid=new Set((config.salesReps||[]).concat((config.users||[]).map(u=>u.name)));// Skip anyone on an approved leave that covers today — don't hand leads to a
 // rep who's out of office. Their share falls through to whoever's available.
 const onLeave=repsOnLeave(leaves);const avail=r=>valid.has(r)&&!onLeave.has(r);const HT_REP=avail('Rein')?'Rein':null;const REST_REPS=['Chase','Mikka'].filter(avail);// the rest splits between whoever's available
-const excludedOnLeave=['Rein','Chase','Mikka'].filter(r=>valid.has(r)&&onLeave.has(r));const targets=jcPotentialLeads();// Match the dashboard's High-Ticket count exactly: the 'HT' tag (with the
+const excludedOnLeave=['Rein','Chase','Mikka','Bella','Joy','Layla'].filter(r=>valid.has(r)&&onLeave.has(r));const targets=jcPotentialLeads();// Match the dashboard's High-Ticket count exactly: the 'HT' tag (with the
 // High-Ticket pool as a fallback). NOT follower-based — that over-counted.
 const isHT=l=>(l.tags||[]).includes('HT')||l.pool==='highticket';const isVirals=l=>l.pool==='virals'||(l.campaigns||[]).some(c=>/viral/i.test(String(c)));const catOf=l=>isHT(l)?'HT':isVirals(l)?'VIRALS':'MSN';const ht=targets.filter(isHT);const rest=targets.filter(l=>!isHT(l));const virals=rest.filter(isVirals);const msn=rest.filter(l=>!isVirals(l));// MSN + anything else
 const map={};const tally={};const inc=(r,l)=>{if(!r)return;map[l.id]=r;tally[r]=(tally[r]||0)+1;};// fresh & imported balanced independently across a rep list
