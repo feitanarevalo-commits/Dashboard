@@ -172,20 +172,22 @@ function leadOrigin(lead){
 // Convenience: a Fresh lead is one not yet on Close.
 function isFresh(lead){ return leadOrigin(lead)==='Fresh'; }
 // Where a lead ENTERED the system:
-//   'import'  — Google-Sheet / agency import (source:'import')
+//   'import'  — Google-Sheet / agency import (source:'import') OR a MANUAL add
+//               (source:'manual'). A hand-typed lead isn't scraped — it's manual data
+//               entry, so it belongs with Sheet import, not Scraper.
 //   'pool'    — a Lead Pool (HighTicket/MSN/VIRALS) filled by the automated scraper;
 //               `l.pool` persists even after a rep claims it, so it's the reliable mark
-//   'scraper' — the in-dashboard Scraper tool (source:'scraper') or a manual add
+//   'scraper' — the in-dashboard Scraper tool (source:'scraper') ONLY
 //   'other'   — no provenance (e.g. loaded straight from Close, very old records)
 // Falls back to the lead's first 'scraped' history event for records that pre-date the tags.
 function leadSource(l){
   if(!l) return 'other';
-  if(l.source==='import') return 'import';
+  if(l.source==='import'||l.source==='manual') return 'import';
   if(l.pool==='highticket'||l.pool==='msn'||l.pool==='virals') return 'pool';
-  if(l.source==='scraper'||l.source==='manual') return 'scraper';
+  if(l.source==='scraper') return 'scraper';
   const sc=(l.history||[]).find(e=>e && e.type==='scraped');
   if(sc){ const v=String(sc.via||'').toLowerCase();
-    if(v.includes('import')) return 'import';
+    if(v.includes('import')||v.includes('manual')) return 'import';   // 'added manually' counts as import
     if(v.includes('pool')) return 'pool';
     return 'scraper';
   }
@@ -534,13 +536,56 @@ function mapDiscoveryResult(item, fallbackPlatform, i){
 // so a scraped result (has channelId) matches a lead that only has the channel
 // URL (e.g. an imported/manual Pending lead). Falls back to channelId > URL >
 // name for non-YouTube leads.
+// A YouTube channel id (UC…) found anywhere in a string, lowercased. Globally
+// unique, so matching on it is zero-false-positive.
+function _ucId(s){ const m=String(s||'').match(/UC[\w-]{20,}/i); return m?m[0].toLowerCase():''; }
+// Canonical channel HANDLE/path from a URL — only real channel-identity forms
+// (@handle, /c/Name, /user/Name, /channel/…). URL-decoded + unicode-safe so
+// "@Comentários…" isn't truncated at the first non-ASCII char, and case/host/
+// trailing-slash variants of the SAME channel collapse to one key. Returns '' for
+// non-channel URLs (e.g. /watch?v=…) so distinct videos never merge.
+function _channelHandle(u){
+  let s=String(u||'');
+  try{ s=decodeURIComponent(s); }catch(e){}
+  s=s.trim().toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/^m\.youtube\.com/,'youtube.com');
+  let m;
+  if(m=s.match(/\/@([^\s/?#]+)/)) return '@'+m[1];
+  if(m=s.match(/\/(c|user|channel)\/([^\s/?#]+)/)) return m[1]+'/'+m[2];
+  if(m=s.match(/^@([^\s/?#]+)/)) return '@'+m[1];
+  return '';
+}
 function leadKey(l){
   if(!l) return '';
+  // 1) YouTube channel id (UC…) — from channelId, then anywhere in url/channelUrl
+  //    or a links[] entry. This is the strongest identity and never false-matches.
   const cid=String(l.channelId||'').trim();
   if(/^UC[\w-]{20,}$/i.test(cid)) return cid.toLowerCase();
-  const m=String(l.url||'').match(/UC[\w-]{20,}/i);
-  if(m) return m[0].toLowerCase();
-  return String(l.channelId || l.url || l.channelName || '').trim().toLowerCase();
+  let uc=_ucId(l.url)||_ucId(l.channelUrl)||_ucId(cid);
+  if(!uc && Array.isArray(l.links)) for(const x of l.links){ uc=_ucId(x&&(x.url||x)); if(uc) break; }
+  if(uc) return uc;
+  // 2) Canonical channel handle/path — collapses URL-format variants of the same
+  //    channel (trailing slash, /videos, case, %-encoding) that the raw-URL fallback
+  //    used to miss, letting a real duplicate slip through as "distinct".
+  const hnd=_channelHandle(l.url)||_channelHandle(l.channelUrl);
+  if(hnd) return hnd;
+  // 3) Full normalized URL (query PRESERVED, so different videos stay distinct),
+  //    then channel name as the last resort for leads with no id/url at all.
+  const nu=String(l.url||l.channelUrl||'').trim().toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\/+$/,'');
+  if(nu) return nu;
+  return String(l.channelId || l.channelName || '').trim().toLowerCase();
+}
+// String hash used to split the MSN/VIRALS/recycle pools evenly across reps via
+// `hash % repCount`. Uses cyrb53 (two independent 32-bit lanes → a 53-bit result).
+// WHY not the old ×31 + fmix32: that finalizer still left a mod-5 correlation for
+// our near-sequential "uc…" channel-id keys, so `%5` collapsed 117 MSN pool leads
+// onto just 2 of 5 reps (60/54/1/1/1). cyrb53 %n is verified uniform on that same
+// data (≈24 each). Keep the name (only the two pool-share funcs consume it).
+function strHash32(s){
+  const str=String(s||''); let h1=0xdeadbeef, h2=0x41c6ce57;
+  for(let i=0;i<str.length;i++){ const ch=str.charCodeAt(i); h1=Math.imul(h1^ch,2654435761); h2=Math.imul(h2^ch,1597334677); }
+  h1=Math.imul(h1^(h1>>>16),2246822507); h1^=Math.imul(h2^(h2>>>13),3266489909);
+  h2=Math.imul(h2^(h2>>>16),2246822507); h2^=Math.imul(h1^(h1>>>13),3266489909);
+  return 4294967296*(2097151&h2)+(h1>>>0);   // 53-bit unsigned; `%n` is uniform
 }
 // Parse the pipe-delimited Close description we write on push back into fields,
 // e.g. "URL: x | Platform: YouTube | Niche: Fit | Followers: 90K | Status: Potential
@@ -861,7 +906,7 @@ function exportPDF(repName) {
 // ─── TOAST ────────────────────────────────────────────────
 function Toast({toasts}) {
   const icons = {success:'✅',error:'❌',info:'ℹ️'};
-  return <div className="toasts">{toasts.map(t=><div key={t.id} className={`toast ${t.type}`}><span>{icons[t.type]}</span>{t.msg}</div>)}</div>;
+  return <div className="toasts">{toasts.map(t=><div key={t.id} className={`toast ${t.type}${t.exiting?' exiting':''}`}><span>{icons[t.type]}</span>{t.msg}</div>)}</div>;
 }
 
 // ─── TAG BADGE ────────────────────────────────────────────
@@ -1396,7 +1441,20 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, co
 }
 
 // ─── INLINE EMAIL (paste/edit email directly in the table) ──
-function InlineEmail({emails, onSave}) {
+// ZeroBounce status → small badge shown next to the email. Only the clearly-bad
+// and the "risky" states get a badge; valid/unknown stay clean.
+function EmailStatusBadge({status}){
+  const s=String(status||'').toLowerCase();
+  if(!s || s==='valid' || s==='unknown') return null;
+  const bad = s==='invalid' || s==='spamtrap' || s==='abuse' || s==='do_not_mail';
+  const label = s==='invalid' ? '⚠ Invalid' : (s==='catch-all' ? 'Catch-all' : ('⚠ '+s.replace(/_/g,' ')));
+  const style = bad
+    ? {background:'var(--danger-light,#FFEBE6)',color:'var(--danger,#DE350B)',border:'1px solid var(--danger,#DE350B)'}
+    : {background:'var(--warn-light,#FFF4E5)',color:'var(--warn,#B25E00)',border:'1px solid var(--warn,#FF8B00)'};
+  return <span title={`ZeroBounce: ${s}`} onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}
+    style={{marginLeft:6,fontSize:10,fontWeight:700,padding:'1px 6px',borderRadius:20,whiteSpace:'nowrap',cursor:'default',...style}}>{label}</span>;
+}
+function InlineEmail({emails, status, onSave}) {
   const [editing,setEditing]=useState(false);
   const [val,setVal]=useState('');
   const list=Array.isArray(emails)?emails:[];
@@ -1417,6 +1475,7 @@ function InlineEmail({emails, onSave}) {
         ? <span className="inline-email">{list[0]}</span>
         : <span className="inline-email-empty">+ email</span>}
       {list.length>1 && <span className="more-emails">+{list.length-1}</span>}
+      {list[0] && <EmailStatusBadge status={status}/>}
     </span>
   );
 }
@@ -1532,10 +1591,37 @@ function LeadHistoryModal({lead,onClose}){
         </div>
 
         {/* the two facts that matter, up front */}
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:1,background:'var(--border)',border:'1px solid var(--border)',borderRadius:12,overflow:'hidden',marginBottom:16}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:1,background:'var(--border)',border:'1px solid var(--border)',borderRadius:12,overflow:'hidden',marginBottom:12}}>
           <Fact icon="◎" label="Scraped by" ev={scraped} fallbackWho={humanScraper(lead)}/>
           <Fact icon="🏷" label="Qualified (Potential) by" ev={qualified} fallbackWho=""/>
         </div>
+
+        {/* Where the lead ENTERED the system — derived from durable fields (source /
+            pool / first 'scraped' event), so it shows even for leads created before
+            per-event history logging (which otherwise start at "Assigned to …"). */}
+        {(()=>{
+          const src=leadSource(lead);
+          const poolName={highticket:'High Ticket',msn:'MSN',virals:'VIRALS'}[lead.pool]||'';
+          const M={
+            pool:   {icon:'🗂', text:'Lead pool'+(poolName?` · ${poolName}`:''), color:'#8B5CF6'},
+            scraper:{icon:'🔍', text:'Scraper',              color:'#2563EB'},
+            import: (lead.source==='manual' || (lead.history||[]).some(e=>e&&e.type==='scraped'&&/manual/i.test(String(e.via||''))))
+                      ? {icon:'✍', text:'Manual add', color:'#059669'}
+                      : {icon:'📄', text:'Sheet / agency import', color:'#059669'},
+            other:  (lead.fromClose||lead.closeLeadId)
+                      ? {icon:'☁', text:'Loaded from Close',   color:'#64748B'}
+                      : {icon:'•', text:'Origin not recorded (older lead)', color:'var(--text-light)'},
+          }[src];
+          return (
+            <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',border:'1px solid var(--border)',borderRadius:12,marginBottom:16,background:'var(--bg)'}}>
+              <span style={{fontSize:10.5,fontWeight:800,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text-dim)'}}>Came from</span>
+              <span style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:13.5,fontWeight:700,color:M.color}}>
+                <span style={{fontSize:14}}>{M.icon}</span>{M.text}
+              </span>
+              {leadSource(lead)!=='other' && lead.scrapedBy && <span style={{fontSize:11.5,color:'var(--text-light)'}}>· by {lead.scrapedBy}</span>}
+            </div>
+          );
+        })()}
 
         {hist.length===0 ? (
           <div style={{textAlign:'center',padding:'28px 12px',color:'var(--text-dim)',fontSize:13}}>
@@ -1585,11 +1671,13 @@ function LeadHistoryModal({lead,onClose}){
   );
 }
 
-function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,searchValue=null,onSearchChange=null,searchFilters=true,searchAlsoLeads=[],searchPlaceholder='Search channels, niches, platforms...',smartReachSend=null,closeSend=null,hideExport=false,hideRepFilter=false,onClaim=null,claimLabel='⚡ Claim to me',claimTitle='Assign the selected leads to you and move them into your queue',onDateFilterChange=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
+function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBulkAssign,showAssigned=false,showCampaign=true,showOrigin=false,onRowOpen=null,embedded=false,toolbarStart=null,toolbarAfterSearch=null,toolbarEnd=null,searchValue=null,onSearchChange=null,searchFilters=true,searchAlsoLeads=[],searchPlaceholder='Search channels, niches, platforms...',hideSearch=false,smartReachSend=null,closeSend=null,hideExport=false,hideRepFilter=false,onClaim=null,claimLabel='⚡ Claim to me',claimTitle='Assign the selected leads to you and move them into your queue',onDateFilterChange=null,repFilterField='assignedTo',repBreakdown=null,breakdownField=null,config,feats,campColorMap,filename='leads',printTitle='Lead Report'}) {
   const adminCtx = React.useContext(AdminContext)||{};
   const qaAdmin = !!adminCtx.isAdmin;
   const [sel,setSel] = useState([]);
-  const dupIndex = React.useContext(DupContext) || {};
+  const _dupCtx = React.useContext(DupContext) || {};
+  const dupIndex = _dupCtx.dupIndex || {};
+  const emailDupSet = _dupCtx.emailDupIds || null;   // ids in a same-email·same-campaign group
   const [searchState,setSearchState] = useState('');
   // When the parent provides search control (e.g. Scraper uses it as the
   // scrape keyword), the box is controlled by the parent; otherwise local.
@@ -1643,7 +1731,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
       // Search matches the whole lead, not just channel/niche/platform — reps
       // routinely paste an email or a channel URL to find a lead, and those
       // returned nothing before. Include emails, url, handle and assignee too.
-      const hay=[l.channelName,l.niche,l.platform,l.url,l.channelId,l.handle,l.assignedTo,...(l.emails||[])]
+      const hay=[l.channelName,l.niche,l.platform,l.url,l.channelId,l.handle,l.assignedTo,l.scrapedBy,...(l.emails||[])]
         .map(v=>String(v==null?'':v).toLowerCase());
       if(!hay.some(h=>h.includes(s))) return false;
     }
@@ -1654,6 +1742,11 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
     if(skipCol!=='assignedTo' && cf.assignedTo){
       if(cf.assignedTo==='Unassigned'){ if(l.assignedTo) return false; }
       else if(l.assignedTo!==cf.assignedTo) return false;
+    }
+    // Filter by who scraped the lead (used by the Unassigned tab, which is divided
+    // per-scraper). Separate from the assignedTo filter above.
+    if(skipCol!=='scrapedBy' && cf.scrapedBy){
+      if(l.scrapedBy!==cf.scrapedBy) return false;
     }
     if(skipCol!=='campaign' && cf.campaign){
       if(cf.campaign==='None'){ if((l.campaigns||[]).length>0) return false; }
@@ -1838,18 +1931,18 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
     <div className={embedded?'lt-embedded':''} style={embedded?{display:'flex',flexDirection:'column'}:{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
       <div className="toolbar no-print">
         {toolbarStart}
-        <div className="search-field">
+        {!hideSearch && <div className="search-field">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           <input placeholder={searchPlaceholder} value={search} onChange={e=>setSearch(e.target.value)}/>
-        </div>
+        </div>}
         {toolbarAfterSearch}
         <select value={colFilter.tags||''} onChange={e=>setColFilterValue('tags',e.target.value)}>
           <option value="">All Status</option>
           {statusOptions(config).map(s=><option key={s} value={s}>{s==='HT'?'HT (High Ticket)':s}</option>)}
         </select>
         {showAssigned && !hideRepFilter && (
-          <select value={colFilter.assignedTo||''} onChange={e=>setColFilterValue('assignedTo',e.target.value)}>
-            <option value="">All Reps</option>
+          <select value={colFilter[repFilterField]||''} onChange={e=>setColFilterValue(repFilterField,e.target.value)}>
+            <option value="">{repFilterField==='scrapedBy'?'All Scrapers':'All Reps'}</option>
             {allReps.map(r=><option key={r}>{r}</option>)}
           </select>
         )}
@@ -1858,7 +1951,35 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
           {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={()=>exportCSV(filtered,`${filename}.csv`)}>⬇ CSV</button>}
           {feats.exportPDF && <button className="btn btn-outline btn-sm" onClick={()=>exportPDF()}>🖨 PDF</button>}
         </div>}
+        {toolbarEnd && <div className="no-print" style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>{toolbarEnd}</div>}
       </div>
+
+      {/* Per-rep workload strip (admin monitoring). Shows how many leads in this
+          tab fall to each person, so you can watch whether reps are clearing their
+          pile. When breakdownField is set the chips also filter the table. */}
+      {repBreakdown && repBreakdown.length>0 && (
+        <div className="no-print" style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',padding:'9px 20px',borderBottom:'1px solid var(--border)',background:'var(--bg)'}}>
+          <span style={{fontSize:10.5,fontWeight:800,letterSpacing:'.07em',color:'var(--text-dim)',textTransform:'uppercase'}}>Per rep · to clear</span>
+          {breakdownField && colFilter[breakdownField] && (
+            <button onClick={()=>setColFilterValue(breakdownField,'')} title="Show everyone"
+              style={{fontSize:11.5,fontWeight:600,color:'var(--accent)',background:'none',border:'none',cursor:'pointer',fontFamily:'inherit',padding:'0 2px'}}>← All</button>
+          )}
+          {repBreakdown.map(r=>{
+            const active = !!breakdownField && colFilter[breakdownField]===r.name;
+            const clickable = !!breakdownField;
+            return (
+              <button key={r.name} disabled={!clickable}
+                onClick={clickable?()=>setColFilterValue(breakdownField, active?'':r.name):undefined}
+                title={clickable?`Show only leads scraped by ${r.name} (${r.count})`:`${r.name}: ${r.count} lead${r.count!==1?'s':''} to clear`}
+                style={{display:'inline-flex',alignItems:'center',gap:7,padding:'4px 11px 4px 5px',borderRadius:999,border:`1px solid ${active?'var(--accent)':'var(--border)'}`,background:active?'var(--accent-light)':'var(--card)',color:'var(--text)',fontSize:12,fontWeight:600,cursor:clickable?'pointer':'default',fontFamily:'inherit'}}>
+                <RepAvatar rep={r.name} config={config} size={18} bgOverride="var(--card)"/>
+                {r.name}
+                <span style={{fontWeight:800,fontVariantNumeric:'tabular-nums',color:active?'var(--accent)':'var(--text-dim)'}}>{r.count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* What's actually filtering the table, in one place. A column's ● dot can
           scroll off-screen on a wide table, so filters were effectively invisible
@@ -1890,15 +2011,11 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
           </>}
           <div className="toolbar-sep"/>
           <span className="bulk-panel-label">Tags</span>
-          <div className="bulk-chip">
-            {statusOptions(config).map(t=>{
-              const on=bulkTags.includes(t);
-              const c=TAG_COLORS[t]||{bg:'#F0F2F5',color:'#68737D'};
-              return<span key={t} className={`bulk-chip-item${on?' active':''}`}
-                style={on?{background:c.bg,color:c.color}:{}}
-                onClick={()=>toggleBulkTag(t)}>{t==='HT'?'⚡ HT':t}</span>;
-            })}
-          </div>
+          <select value={bulkTags[0]||''} onChange={e=>setBulkTags(e.target.value?[e.target.value]:[])}
+            title="Set a status tag on the selected leads" style={{fontSize:12.5,padding:'5px 10px',minWidth:160}}>
+            <option value="">— none —</option>
+            {statusOptions(config).map(t=><option key={t} value={t}>{t==='HT'?'⚡ HT':t}</option>)}
+          </select>
           <div className="toolbar-sep"/>
           <span className="bulk-panel-label">Campaign</span>
           <div className="bulk-chip">
@@ -1956,12 +2073,8 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
               onClick={()=>{ if(window.confirm(`Archive ${sel.length} selected lead(s)?\n\nThey move out of the active dashboard into the Archive to keep things fast. You can restore them anytime from History or the Archive view.`)){ onArchive(sel); setSel([]); } }}
               title="Move the selected leads to the Archive (recoverable)">🗄 Archive {sel.length}</button>
           </>)}
-          {(onBulkDelete||onDelete)&&(<>
-            <div className="toolbar-sep"/>
-            <button className="btn btn-sm" style={{background:'#DE350B',color:'#fff',borderColor:'#DE350B'}}
-              onClick={()=>{ if(window.confirm(`Delete ${sel.length} selected lead(s)?\n\nThis removes them from the dashboard and the shared database. This cannot be undone.`)){ (onBulkDelete||((ids)=>ids.forEach(onDelete)))(sel); setSel([]); } }}
-              title="Permanently delete the selected leads">🗑 Delete {sel.length}</button>
-          </>)}
+          {/* Bulk Delete removed — deletion is per-lead via the row Actions (🗑), to
+              avoid accidental mass deletes from the selection bar. */}
           <button className="btn btn-ghost btn-sm" onClick={()=>{setSel([]);setBulkRep('');setBulkTags([]);setBulkCamps([]);setSrCampaign('');}}>✕ Clear</button>
         </div>
       )}
@@ -2028,6 +2141,9 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                           const label=otherReps.join(', ');
                           return <span className={`dup-flag${crossRep?' dup-flag-cross':''}`} title={`Same channel also worked by: ${label}`}>⚠ dup</span>;
                         })()}
+                        {emailDupSet && emailDupSet.has(String(lead.id)) && <span className="dup-flag"
+                          style={{background:'var(--warn-light,#FFF4E5)',color:'var(--warn,#B25E00)',borderColor:'var(--warn,#FF8B00)'}}
+                          title="Another of your leads in this campaign has the SAME email — SmartReach will merge them into one prospect. Fix the wrong email before sending.">✉ shared email</span>}
                         {(()=>{
                           // A teammate contacted this same channel and it's still
                           // inside its recycle window — emailing it now double-touches
@@ -2066,7 +2182,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                   {cols.followers && <td><span className="followers-val">{lead.followers}</span></td>}
                   {cols.emails && (
                     <td className="email-cell">
-                      <InlineEmail emails={lead.emails||[]} onSave={arr=>patchLead(lead.id,{emails:arr})}/>
+                      <InlineEmail emails={lead.emails||[]} status={lead.emailStatus} onSave={arr=>patchLead(lead.id,{emails:arr})}/>
                     </td>
                   )}
                   {cols.tags && (
@@ -2589,7 +2705,7 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
   const [query,setQuery]=useState(''); const [cat,setCat]=useState('All');
   const isManual = view==='manual';
   const isLegend = view==='legend';
-  const SG="'Space Grotesk',sans-serif";
+  const SG="Verdana,sans-serif";
   const scrollRef=useRef(null);
   // Reset filter + scroll when switching modes or opening/closing an article.
   useEffect(()=>{ setQuery(''); setCat('All'); if(scrollRef.current) scrollRef.current.scrollTop=0; },[view, selected && selected.id]);
@@ -2598,7 +2714,7 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
   if(selected){
     const chapColor=CHAPTER_COLORS[selected.chapter]||accent;
     return (
-      <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",color:S.pageText,background:S.pageBg}}>
+      <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"Verdana,system-ui,sans-serif",color:S.pageText,background:S.pageBg}}>
         <div style={{position:'relative',overflow:'hidden',background:'#15131f',color:'#fff',padding:'28px 0 60px'}}>
           <div style={{position:'absolute',width:560,height:380,borderRadius:'50%',top:-200,right:-80,background:`radial-gradient(circle, ${chapColor} 0%, transparent 70%)`,filter:'blur(80px)',opacity:.45,pointerEvents:'none'}}/>
           <div style={{position:'relative',maxWidth:840,margin:'0 auto',padding:'0 40px'}}>
@@ -2653,7 +2769,7 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
     const CO={blue:'#3B82F6',violet:'#8B5CF6',teal:'#14B8A6',good:'#22A559',warn:'#E8912D',bad:'#E0552F',dim:S.textFaint,
       pActive:'#22A559',pIdle:'#E6B800',pAway:'#E8912D'};
     return (
-      <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",color:S.pageText,background:S.pageBg}}>
+      <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"Verdana,system-ui,sans-serif",color:S.pageText,background:S.pageBg}}>
         <div style={{position:'relative',overflow:'hidden',background:'#15131f',color:'#fff',padding:'40px 0 48px'}}>
           <div style={{position:'absolute',width:560,height:380,borderRadius:'50%',top:-160,right:-80,background:`radial-gradient(circle, ${accent} 0%, transparent 70%)`,filter:'blur(80px)',opacity:.5,pointerEvents:'none'}}/>
           <div style={{position:'relative',maxWidth:1040,margin:'0 auto',padding:'0 40px'}}>
@@ -2759,7 +2875,7 @@ function KbLaunchpad({tools,articles,view,onView,selected,onSelect,onBack,isAdmi
   const heroSub=isManual?'The full Sales Operations Manual — company, services, the 18-step sales process, tools, and commissions.':'Search, filter, and jump straight into any platform in the stack.';
   const searchPh=isManual?'Search the manual…':'Search tools…';
   return (
-    <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",color:S.pageText,background:S.pageBg}}>
+    <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',fontFamily:"Verdana,system-ui,sans-serif",color:S.pageText,background:S.pageBg}}>
       <div style={{position:'relative',overflow:'hidden',background:'#15131f',color:'#fff',padding:'40px 0 48px'}}>
         <div style={{position:'absolute',width:560,height:380,borderRadius:'50%',top:-160,right:-80,background:`radial-gradient(circle, ${accent} 0%, transparent 70%)`,filter:'blur(80px)',opacity:.5,pointerEvents:'none'}}/>
         <div style={{position:'relative',maxWidth:1040,margin:'0 auto',padding:'0 40px'}}>
@@ -2942,7 +3058,7 @@ function GuidedTour({onClose,onNav}){
         <span style={{fontSize:11,fontWeight:800,letterSpacing:'.06em',color:'var(--accent)'}}>🧭 TOUR · {idx+1}/{steps.length}</span>
         <button className="btn btn-ghost btn-sm" onClick={onClose} style={{fontSize:12.5,padding:'2px 8px'}}>Skip ✕</button>
       </div>
-      <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:16.5,fontWeight:800,marginBottom:7,letterSpacing:'-.01em'}}>{step.title}</div>
+      <div style={{fontFamily:"Verdana,sans-serif",fontSize:16.5,fontWeight:800,marginBottom:7,letterSpacing:'-.01em'}}>{step.title}</div>
       <div style={{fontSize:13,lineHeight:1.6,color:'var(--text-dim)'}}>{step.body}</div>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:16,gap:10}}>
         <div style={{display:'flex',gap:5,flexWrap:'wrap',maxWidth:160}}>{steps.map((_,k)=><span key={k} onClick={()=>setIdx(k)} style={{width:k===idx?16:6,height:6,borderRadius:999,background:k===idx?'var(--accent)':'var(--border)',cursor:'pointer'}}/>)}</div>
@@ -3028,46 +3144,66 @@ function mergeQuotas(def, stored){
   return out;
 }
 
-// Live "Who's online" presence strip — shown on the admin Home AND every rep's
-// own dashboard, so reps (not just admins) can see who's on and what screen each
-// person is currently on. Reads the shared PresenceContext; renders nothing when
-// nobody is online.
-function WhosOnline({config}){
+// Live "Who's online" presence — a COMPACT top-bar widget (avatar stack + count)
+// that sits alongside the global search / bell, on every view. Clicking it opens a
+// dropdown with the full detail (status + last-active + which screen each person is
+// on). Reads the shared PresenceContext; renders nothing when nobody is online.
+function WhosOnlineTopbar({config}){
   const presence = React.useContext(PresenceContext);
   const onlineUsers = presence.online || [];
+  const [open,setOpen]=useState(false);
   if(!onlineUsers.length) return null;
-  const card={background:'var(--card)',border:'1px solid var(--border)',borderRadius:20,boxShadow:'0 1px 2px rgba(19,19,24,.05)'};
+  const shown=onlineUsers.slice(0,4);
+  const HERO='var(--hero-bg)';
   return (
-    <div style={{...card,padding:'14px 18px',marginBottom:16}}>
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
-        <span style={{width:9,height:9,borderRadius:999,background:'#22A559',boxShadow:'0 0 0 3px rgba(34,165,89,.18)'}}/>
-        <span style={{fontSize:13.5,fontWeight:800,letterSpacing:'.01em'}}>Who’s online</span>
-        <span style={{fontSize:12,color:'var(--text-dim)'}}>· {onlineUsers.length} on the dashboard right now</span>
-        <span style={{marginLeft:'auto',fontSize:10.5,color:'var(--text-light)',display:'inline-flex',gap:12,flexWrap:'wrap'}}>
-          <span><span style={{color:'#22A559',fontWeight:800}}>●</span> Active</span>
-          <span><span style={{color:'#E6B800',fontWeight:800}}>●</span> Idle (3m+)</span>
-          <span><span style={{color:'#E8912D',fontWeight:800}}>●</span> Away (10m+)</span>
-        </span>
-      </div>
-      <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
-        {onlineUsers.map(u=>{ const s=presenceStatus(u); return (
-          <div key={u.name} style={{display:'flex',alignItems:'center',gap:9,padding:'7px 13px 7px 8px',borderRadius:999,background:'var(--bg)',border:'1px solid var(--border)'}}>
-            <span style={{position:'relative'}}>
-              <RepAvatar rep={u.name} config={config} size={30} bgOverride="var(--bg)"/>
-              <span title={s.label} style={{position:'absolute',bottom:-1,right:-1,width:10,height:10,borderRadius:'50%',background:s.color,border:'2px solid var(--bg)'}}/>
+    <div className="bell-wrap">
+      <button className="wo-btn" onClick={()=>setOpen(o=>!o)} aria-label="Who's online" aria-expanded={open}
+        title={`${onlineUsers.length} on the dashboard right now`}>
+        <span className="wo-live-dot"/>
+        <span className="wo-stack">
+          {shown.map((u,i)=>{ const s=presenceStatus(u); return (
+            <span key={u.name} className="wo-ava" style={{zIndex:10-i}}>
+              <RepAvatar rep={u.name} config={config} size={22} bgOverride={HERO}/>
+              <span style={{position:'absolute',bottom:-1,right:-1,width:8,height:8,borderRadius:'50%',background:s.color,border:`2px solid ${HERO}`}}/>
             </span>
-            <div style={{lineHeight:1.25}}>
-              <div style={{fontSize:13,fontWeight:700}}>{u.name}{u.name===presence.me && <span style={{fontSize:10,fontWeight:700,color:'var(--text-light)',marginLeft:5}}>(you)</span>}</div>
-              <div style={{fontSize:11,fontWeight:600,color:s.color,display:'flex',alignItems:'center',gap:5}}>
-                {s.label}{s.key!=='active' && <span style={{color:'var(--text-light)',fontWeight:500}}>· active {fmtAgo(s.idleMs)}</span>}
-              </div>
-              {u.activity && <div title={`Currently on: ${u.activity}`} style={{fontSize:10.5,fontWeight:600,color:'var(--text-dim)',marginTop:2,display:'flex',alignItems:'center',gap:4,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                <span style={{fontSize:9,opacity:.8}}>📍</span>{u.activity}
-              </div>}
-            </div>
+          );})}
+        </span>
+      </button>
+      {open && <>
+        <div className="bell-backdrop" onClick={()=>setOpen(false)}/>
+        <div className="bell-dropdown" style={{width:300,maxHeight:400}}>
+          <div className="bell-head">
+            <span style={{display:'flex',alignItems:'center',gap:7}}>
+              <span style={{width:9,height:9,borderRadius:999,background:'#22A559',boxShadow:'0 0 0 3px rgba(34,165,89,.18)'}}/>
+              Who’s online · {onlineUsers.length}
+            </span>
+            <span style={{fontSize:10,color:'var(--text-light)',display:'inline-flex',gap:9}}>
+              <span><span style={{color:'#22A559',fontWeight:800}}>●</span> Active</span>
+              <span><span style={{color:'#E6B800',fontWeight:800}}>●</span> Idle</span>
+              <span><span style={{color:'#E8912D',fontWeight:800}}>●</span> Away</span>
+            </span>
           </div>
-        );})}
-      </div>
+          <div style={{padding:6,overflowY:'auto',display:'flex',flexDirection:'column',gap:1}}>
+            {onlineUsers.map(u=>{ const s=presenceStatus(u); return (
+              <div key={u.name} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 9px',borderRadius:10}}>
+                <span style={{position:'relative',flexShrink:0}}>
+                  <RepAvatar rep={u.name} config={config} size={30} bgOverride="var(--card)"/>
+                  <span title={s.label} style={{position:'absolute',bottom:-1,right:-1,width:10,height:10,borderRadius:'50%',background:s.color,border:'2px solid var(--card)'}}/>
+                </span>
+                <div style={{lineHeight:1.3,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>{u.name}{u.name===presence.me && <span style={{fontSize:10,fontWeight:700,color:'var(--text-light)',marginLeft:5}}>(you)</span>}</div>
+                  <div style={{fontSize:11,fontWeight:600,color:s.color,display:'flex',alignItems:'center',gap:5}}>
+                    {s.label}{s.key!=='active' && <span style={{color:'var(--text-light)',fontWeight:500}}>· active {fmtAgo(s.idleMs)}</span>}
+                  </div>
+                  {u.activity && <div title={`Currently on: ${u.activity}`} style={{fontSize:10.5,fontWeight:600,color:'var(--text-dim)',marginTop:1,display:'flex',alignItems:'center',gap:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                    <span style={{fontSize:9,opacity:.8}}>📍</span>{u.activity}
+                  </div>}
+                </div>
+              </div>
+            );})}
+          </div>
+        </div>
+      </>}
     </div>
   );
 }
@@ -3078,7 +3214,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const onlineUsers = presence.online || [];
   // Non-admins only ever see THEIR own row.
   const lockedRep = (currentUser && currentUser.role!=='admin') ? currentUser.name : null;
-  const SG="'Space Grotesk',sans-serif";
+  const SG="Verdana,sans-serif";
   const MONO="'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace";
 
   const [period,setPeriod]=useState('daily');
@@ -3094,6 +3230,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const [detail,setDetail]=useState('');   // rep whose performance report is open
   const [heatSeries,setHeatSeries]=useState('contacted');   // sparkline + heatmap series
   const [heatMonthOffset,setHeatMonthOffset]=useState(0);   // month heatmap: 0=current, -1=prev…
+  const [showContrib,setShowContrib]=useState(false);       // Lead Sources: reveal top contributors per source
   React.useEffect(()=>{ setHeatMonthOffset(0); },[detail]); // reset to current month each time a rep report opens
 
   const campDefs=(config.campaigns||[]).map(c=>({id:c.id,label:c.label,color:c.color,logo:c.logo||''}));
@@ -3341,7 +3478,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const srcCount=(list,k)=>list.filter(l=>leadSource(l)===k && isProductiveLead(l)).length;
   // Three headline categories the user cares about + a muted 'other' residual.
   const srcCats=[
-    {key:'import', label:'📄 Sheet import', color:'#3B82F6', w:srcCount(srcWinLeads,'import'),  a:srcCount(srcScope,'import')},
+    {key:'import', label:'📄 Sheet / manual', color:'#3B82F6', w:srcCount(srcWinLeads,'import'),  a:srcCount(srcScope,'import')},
     {key:'pool',   label:'🗂 Lead pools',   color:'#8B5CF6', w:srcCount(srcWinLeads,'pool'),    a:srcCount(srcScope,'pool')},
     {key:'scraper',label:'🔎 Scraper',      color:'#14B8A6', w:srcCount(srcWinLeads,'scraper'), a:srcCount(srcScope,'scraper')},
   ];
@@ -3349,13 +3486,20 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
   const atOther=srcCount(srcScope,'other');
   const srcAll=srcCats.reduce((s,c)=>s+c.w,0)+srcOther;
   const atAll=srcCats.reduce((s,c)=>s+c.a,0)+atOther;
+  // Top contributors for a source (by who scraped/sourced each lead) in the window.
+  // Only CURRENT roster reps — excludes people who've left (e.g. Pen/Mica) whose old
+  // leads still carry their scrapedBy, and the 'Make Scraper' bot. Shows everyone on
+  // the roster who actually contributed (no fixed top-N cap), biggest first.
+  const contribRoster=new Set(config.salesReps||[]);
+  const topContributors=(list,k)=>{
+    const m={};
+    list.filter(l=>leadSource(l)===k && isProductiveLead(l)).forEach(l=>{ const who=(l.scrapedBy||'').trim(); if(!who||!contribRoster.has(who)) return; m[who]=(m[who]||0)+1; });
+    return Object.entries(m).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
+  };
 
   return (
     <div className="home-content" style={{fontFamily:SG,color:'var(--text)',padding:'22px 24px 60px'}}>
       <div style={{width:'100%',maxWidth:1320,margin:'0 auto'}}>
-
-        {/* ── Who's online (live presence) ── */}
-        <WhosOnline config={config}/>
 
         {/* ── Header: title + day nav + period ── */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,flexWrap:'wrap',marginBottom:20}}>
@@ -3447,6 +3591,35 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
               {srcCats.map(c=><div key={c.key} style={{background:c.color,width:pct(c.w,srcAll)+'%'}} title={`${c.label}: ${c.w}`}/>)}
               <div style={{background:'var(--border)',width:pct(srcOther,srcAll)+'%'}} title={`Other: ${srcOther}`}/>
             </div>}
+            {/* Top contributors per source — admin-only, opt-in reveal. Ranks reps by
+                who scraped/sourced each lead in the window. */}
+            {isAdmin && srcAll>0 && (
+              <button onClick={()=>setShowContrib(v=>!v)}
+                style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:12,background:'none',border:'none',padding:0,cursor:'pointer',fontFamily:'inherit',fontSize:11.5,fontWeight:700,color:'var(--accent)'}}>
+                <span style={{fontSize:9,transform:showContrib?'rotate(90deg)':'none',transition:'transform .18s',display:'inline-block'}}>▶</span>
+                {showContrib?'Hide top contributors':'Top contributors'}
+              </button>
+            )}
+            {isAdmin && srcAll>0 && showContrib && (
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:14,marginTop:12}}>
+                {srcCats.map(c=>{
+                  const top=topContributors(srcWinLeads,c.key);
+                  return (
+                    <div key={c.key} style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:12,padding:'11px 13px'}}>
+                      <div style={{fontSize:10.5,fontWeight:800,letterSpacing:'.04em',color:c.color,marginBottom:8,textTransform:'uppercase'}}>{c.label.replace(/^[^ ]+ /,'')} <span style={{color:'var(--text-light)',fontWeight:700}}>· {fmt(c.w)}</span></div>
+                      {top.length ? top.map((t,i)=>(
+                        <div key={t.name} style={{display:'flex',alignItems:'center',gap:8,marginTop:i?7:0}}>
+                          <span style={{fontSize:10,fontWeight:800,color:i===0?c.color:'var(--text-light)',width:12,textAlign:'center',fontVariantNumeric:'tabular-nums'}}>{i+1}</span>
+                          <RepAvatar rep={t.name} config={config} size={20}/>
+                          <span style={{fontSize:12.5,fontWeight:i===0?800:600,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.name}</span>
+                          <span style={{marginLeft:'auto',fontSize:12.5,fontWeight:800,fontVariantNumeric:'tabular-nums',color:'var(--text-dim)'}}>{fmt(t.count)}</span>
+                        </div>
+                      )) : <div style={{fontSize:11.5,color:'var(--text-light)'}}>No leads {periodWord}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {/* all-time total across every current lead */}
             <div style={{marginTop:srcAll>0?14:10,paddingTop:12,borderTop:'1px solid var(--border)',fontSize:11.5,color:'var(--text-light)',display:'flex',gap:16,flexWrap:'wrap',alignItems:'center'}}>
               <span style={{fontWeight:800,letterSpacing:'.05em',color:'var(--text-dim)',fontSize:10.5}}>ALL-TIME</span>
@@ -3926,10 +4099,10 @@ class ErrorBoundary extends React.Component {
   render(){
     if(!this.state.hasError) return this.props.children;
     var box={maxWidth:440,textAlign:'center',background:'#fff',border:'1px solid #ebeaf0',borderRadius:18,padding:'36px 32px',boxShadow:'0 18px 40px -18px rgba(20,18,40,.22)'};
-    return React.createElement('div',{style:{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:24,fontFamily:"'Plus Jakarta Sans',system-ui,sans-serif",background:'#f4f4f8'}},
+    return React.createElement('div',{style:{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:24,fontFamily:"Verdana,system-ui,sans-serif",background:'#f4f4f8'}},
       React.createElement('div',{style:box},
         React.createElement('div',{style:{fontSize:40,marginBottom:10}},'⚠️'),
-        React.createElement('div',{style:{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:20,color:'#1f1d2b',marginBottom:8}},'Something went wrong'),
+        React.createElement('div',{style:{fontFamily:"Verdana,sans-serif",fontWeight:700,fontSize:20,color:'#1f1d2b',marginBottom:8}},'Something went wrong'),
         React.createElement('div',{style:{fontSize:13.5,color:'#6b6878',lineHeight:1.55,marginBottom:6}},'This screen hit an error and couldn’t load. It’s been reported to the team automatically.'),
         React.createElement('div',{style:{fontSize:11.5,color:'#9c99a8',marginBottom:20,wordBreak:'break-word'}}, this.state.msg),
         React.createElement('button',{onClick:function(){ try{ location.reload(); }catch(e){} }, style:{padding:'11px 22px',fontSize:14,fontWeight:700,color:'#fff',background:'#5b5bd6',border:'none',borderRadius:12,cursor:'pointer'}},'↻ Reload dashboard')
@@ -4004,19 +4177,53 @@ function loadLeadsFromSupabase(){
   // Returns {items, versions}: the lead objects plus a {id: version} map used as
   // the base for optimistic-concurrency writes (sync_leads rejects stale versions).
   async function all(){
-    const PAGE=1000, out=[], versions={}; let from=0;
+    // Collect by id (a Map) so the SAME lead can never end up in the array twice.
+    // Without a stable sort, offset pagination is unstable: when rows are UPDATED
+    // mid-pull they shift between pages, so some come back twice and others are
+    // skipped — that silently duplicated ~2k leads in memory AND dropped others
+    // (reps saw phantom "duplicates" and a lower-than-real count). `.order('id')`
+    // (id is immutable) makes pagination stable; the Map is the belt-and-suspenders.
+    const PAGE=1000, byId=new Map(); let from=0, cursor='';
     for(let i=0;i<1000;i++){   // hard safety cap = 1,000,000 rows
       // Archived leads are excluded from the active set (kept small = fast at
       // scale). They live on and are fetched on demand in the Archive view.
-      const {data,error}=await SB.from('leads').select('id,data,version').eq('archived',false).range(from,from+PAGE-1);
+      // updated_at is returned so the 30s poll can fetch ONLY rows changed since,
+      // instead of re-downloading the whole table each time (the egress + the
+      // "everyone re-pulls at once" spike). Every write bumps updated_at (the
+      // bump_lead_version trigger), so it's a reliable cursor.
+      const {data,error}=await SB.from('leads').select('id,data,version,updated_at').eq('archived',false).order('id',{ascending:true}).range(from,from+PAGE-1);
       if(error||!data){ if(i===0){ reportError('loadLeads', error||'no data'); return null; } break; }
-      data.forEach(r=>{ if(r.data){ out.push(r.data); versions[String(r.id)]=r.version; } });
+      data.forEach(r=>{ if(r.data){ byId.set(String(r.id),{data:r.data,version:r.version}); if(r.updated_at&&r.updated_at>cursor) cursor=r.updated_at; } });
       if(data.length<PAGE) break;
       from+=PAGE;
     }
-    return {items:out, versions};
+    const out=[], versions={};
+    byId.forEach((v,id)=>{ out.push(v.data); versions[id]=v.version; });
+    return {items:out, versions, cursor:cursor||null};
   }
   return all().catch(e=>{ reportError('loadLeads', e); return null; });
+}
+// Incremental load: only the active leads changed since `cursor` (an updated_at ISO
+// string). Same {items, versions, cursor} shape. Powers the cheap 30s poll — a full
+// re-pull only runs as an occasional backstop / on focus.
+function loadLeadsSince(cursor){
+  if(!SB||!cursor) return Promise.resolve(null);
+  async function go(){
+    // Same by-id Map + stable secondary sort (id) as the full load, so an
+    // incremental batch never returns the same lead twice.
+    const PAGE=1000, byId=new Map(); let from=0, maxU=cursor;
+    for(let i=0;i<200;i++){
+      const {data,error}=await SB.from('leads').select('id,data,version,updated_at').eq('archived',false).gt('updated_at',cursor).order('updated_at',{ascending:true}).order('id',{ascending:true}).range(from,from+PAGE-1);
+      if(error||!data){ if(i===0) return null; break; }
+      data.forEach(r=>{ if(r.data){ byId.set(String(r.id),{data:r.data,version:r.version}); if(r.updated_at&&r.updated_at>maxU) maxU=r.updated_at; } });
+      if(data.length<PAGE) break;
+      from+=PAGE;
+    }
+    const out=[], versions={};
+    byId.forEach((v,id)=>{ out.push(v.data); versions[id]=v.version; });
+    return {items:out, versions, cursor:maxU};
+  }
+  return go().catch(()=>null);
 }
 // Archiving = a recoverable soft-remove. archived=true drops a lead from the
 // active load (and thus from every view + the 15s live-sync); restore flips it
@@ -4093,7 +4300,13 @@ function deleteLeadFromSupabase(id){
 }
 function deleteLeadsFromSupabase(ids){
   if(!SB||!ids||!ids.length) return;
-  try{ SB.from('leads').delete().in('id',ids.map(String)).then(()=>{}); }catch(e){}
+  const all=ids.map(String);
+  // Chunk the delete so a large batch (e.g. a one-click de-dupe of thousands)
+  // doesn't build a request URL past the length limit and 414.
+  for(let i=0;i<all.length;i+=200){
+    const chunk=all.slice(i,i+200);
+    try{ SB.from('leads').delete().in('id',chunk).then(()=>{}); }catch(e){}
+  }
 }
 function clearAllLeadsFromSupabase(){
   if(!SB) return Promise.resolve();
@@ -4581,7 +4794,7 @@ function AddLeadModal({rep,config,onAdd,onClose}) {
   );
 }
 
-function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssign,onBack,onImportClose,onImportSmartReach,onAddLead,isLeadgen}) {
+function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssign,onValidateEmails,onCheckClose,onBack,canBack=false,onImportClose,onImportSmartReach,onAddLead,isLeadgen}) {
   function importToClose(r,ls){
     if(onImportClose) onImportClose(r,ls);
   }
@@ -4676,7 +4889,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
 
   const repColor=(config.repColors||{})[rep]||'#5b5bd6';
   // ── Redesigned rep header (compact dark top zone) ──
-  const SG="'Space Grotesk',sans-serif";
+  const SG="Verdana,sans-serif";
   const [menuOpen,setMenuOpen]=useState(false);
   const menuRef=useRef(null);
   useEffect(()=>{
@@ -4716,51 +4929,48 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   // so it is deliberately NOT day-scoped and doesn't carry the scope caption.
   if(isLeadgen||handedOffCount>0) stripMetrics.push({label:'Handed Off',chip:'#a78bfa',val:'#ddd6fe',value:handedOffCount,scoped:false,title:`Leads ${rep} qualified & handed to the sales team — all time, credited to ${rep} even after reassignment`});
   const srFilename=`${rep}${srCsvCampaign?'_'+srCsvCampaign.replace(/[^\w]+/g,''):''}${isDayView?'_'+quotaDay:''}_smartreach.csv`;
+  // The rep header now lives INSIDE the LeadsTable toolbar (one single line):
+  //   [← Back] = toolbarStart (left, replaces the table search),
+  //   [Close search · date · Add · Actions] = toolbarEnd (right).
+  // Only shown when there's a previous view to return to; goes to that view (not always Home).
+  const backBtn = canBack ? (
+    <button className="btn btn-outline btn-sm" onClick={onBack} title="Back to your previous page"
+      style={{display:'flex',alignItems:'center',gap:6}}>
+      <span style={{fontSize:14,lineHeight:0}}>←</span> Back
+    </button>
+  ) : null;
+  const repActions = (
+    <>
+      {!isLeadgen && (config.closeSearchWebhook||'').trim() && <MiniCloseSearch config={config}/>}
+      <input type="date" value={quotaDay} max={todayStr} onChange={e=>setQuotaDay(e.target.value)}
+        title="Pick a day to see only the leads assigned that day"
+        style={{border:`1px solid ${isDayView?'var(--accent)':'var(--border)'}`,borderRadius:10,padding:'6px 10px',fontSize:12.5,color:'var(--text)',background:'var(--card)',fontFamily:'inherit',cursor:'pointer'}}/>
+      <button className={quotaDay===todayStr?'btn btn-primary btn-sm':'btn btn-outline btn-sm'} onClick={()=>setQuotaDay(todayStr)}>Today</button>
+      <button className={!isDayView?'btn btn-primary btn-sm':'btn btn-outline btn-sm'} onClick={()=>setQuotaDay('')} title="Show every day's leads">All dates</button>
+      <div className="toolbar-sep"/>
+      <button className="btn btn-primary btn-sm" onClick={()=>setShowAdd(true)} title={`Manually add a lead under ${rep}`}>+ Add Lead</button>
+      <div style={{position:'relative'}} ref={menuRef}>
+        <button className="btn btn-outline btn-sm" onClick={()=>setMenuOpen(o=>!o)} aria-label="More actions" aria-expanded={menuOpen}>
+          Actions <span style={{fontSize:11,color:'var(--text-dim)'}}>▾</span>
+        </button>
+        {menuOpen && (
+          <div style={{position:'absolute',top:'calc(100% + 8px)',right:0,background:'#1b1b23',border:'1px solid #2f2f3a',borderRadius:12,boxShadow:'0 16px 40px -12px rgba(0,0,0,.5)',padding:6,minWidth:214,zIndex:60,display:'flex',flexDirection:'column',gap:1}}>
+            {!isLeadgen && menuRow('⬆',`Send ${fresh} to Close.io`,()=>{ if(!window.confirm(`Send ${fresh} fresh lead${fresh!==1?'s':''} to Close?\n\nThis pushes ${fresh!==1?'them':'it'} into the Close CRM and marks ${fresh!==1?'them':'it'} as Imported.`)) return; importToClose(rep,freshPotential); },{disabled:!fresh})}
+            {onValidateEmails && menuRow('✅',`Validate emails (${tableLeads.filter(l=>(l.emails&&l.emails.length)||l.email).length})`,()=>onValidateEmails(tableLeads))}
+            {onCheckClose && menuRow('☁',`Check Close status (${tableLeads.filter(l=>(l.tags||[]).includes('Potential')||(l.tags||[]).includes('HT')||(l.tags||[]).includes('High-Ticket')).length})`,()=>onCheckClose(tableLeads))}
+            {feats.exportCSV && menuRow('⬇','Export CSV',()=>exportCSV(myLeads,`${rep}_leads.csv`))}
+            {feats.exportPDF && menuRow('🖨','Export PDF',()=>exportPDF(rep))}
+          </div>
+        )}
+      </div>
+    </>
+  );
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
-      <header className="no-print" style={{background:'var(--hero-bg)',color:'#fff',padding:'11px 24px',flexShrink:0}}>
-        {/* single compact control row — stats moved to Home (rep-scoped) */}
-        <div style={{display:'flex',alignItems:'center',gap:9,flexWrap:'wrap'}}>
-          <span style={{color:'#d4d4d8',fontWeight:600,fontSize:12.5,whiteSpace:'nowrap'}}>🗓 Viewing</span>
-          <span style={{color:'#71717a',fontSize:12.5,whiteSpace:'nowrap'}}>{isDayView?`${quotaDay===todayStr?'today':quotaDay} · ${tableLeads.length} shown`:`all dates · ${tableLeads.length} lead${tableLeads.length!==1?'s':''}`}</span>
-          <div style={{flex:1,minWidth:12}}></div>
-          {!isLeadgen && (config.closeSearchWebhook||'').trim() && <MiniCloseSearch config={config}/>}
-          {/* date group */}
-          <div style={{display:'flex',alignItems:'center',gap:5}}>
-            <input type="date" value={quotaDay} max={todayStr} onChange={e=>setQuotaDay(e.target.value)}
-              title="Pick a day to see only the leads assigned that day"
-              style={{background:'#17171f',border:`1px solid ${isDayView?'#4f46e5':'#26262f'}`,borderRadius:8,padding:'0 10px',height:32,color:isDayView?'#f4f4f5':'#8b8b96',fontSize:12.5,fontFamily:'inherit',colorScheme:'dark',cursor:'pointer'}}/>
-            <button onClick={()=>setQuotaDay(todayStr)} disabled={quotaDay===todayStr}
-              style={{background:quotaDay===todayStr?'#4f46e5':'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'0 12px',height:32,color:quotaDay===todayStr?'#fff':'#d4d4d8',fontSize:12.5,fontWeight:600,fontFamily:'inherit',cursor:quotaDay===todayStr?'default':'pointer'}}>Today</button>
-            <button onClick={()=>setQuotaDay('')} disabled={!isDayView} title="Show every day's leads"
-              style={{background:!isDayView?'#4f46e5':'#17171f',border:'1px solid #26262f',borderRadius:8,padding:'0 12px',height:32,color:!isDayView?'#fff':'#d4d4d8',fontSize:12.5,fontWeight:600,fontFamily:'inherit',cursor:!isDayView?'default':'pointer'}}>All dates</button>
-          </div>
-          <div style={{width:1,height:22,background:'#2a2a34',margin:'0 2px'}}></div>
-          {/* action group */}
-          <button onClick={()=>setShowAdd(true)} title={`Manually add a lead under ${rep}`}
-            style={{display:'flex',alignItems:'center',gap:6,background:'#4f46e5',border:'none',color:'#fff',fontSize:12.5,fontWeight:600,padding:'0 14px',height:32,borderRadius:8,cursor:'pointer',fontFamily:'inherit'}}>
-            <span style={{fontSize:15,lineHeight:0}}>+</span> Add Lead
-          </button>
-          <div style={{position:'relative'}} ref={menuRef}>
-            <button onClick={()=>setMenuOpen(o=>!o)} aria-label="More actions" aria-expanded={menuOpen}
-              style={{display:'flex',alignItems:'center',gap:6,background:menuOpen?'#1f1f29':'#17171f',border:'1px solid #26262f',color:'#d4d4d8',fontSize:12.5,fontWeight:500,padding:'0 12px',height:32,borderRadius:8,cursor:'pointer',fontFamily:'inherit'}}>
-              Actions <span style={{fontSize:11,color:'#71717a'}}>▾</span>
-            </button>
-            {menuOpen && (
-              <div style={{position:'absolute',top:'calc(100% + 8px)',right:0,background:'#1b1b23',border:'1px solid #2f2f3a',borderRadius:12,boxShadow:'0 16px 40px -12px rgba(0,0,0,.5)',padding:6,minWidth:214,zIndex:60,display:'flex',flexDirection:'column',gap:1}}>
-                {!isLeadgen && menuRow('⬆',`Send ${fresh} to Close.io`,()=>{ if(!window.confirm(`Send ${fresh} fresh lead${fresh!==1?'s':''} to Close?\n\nThis pushes ${fresh!==1?'them':'it'} into the Close CRM and marks ${fresh!==1?'them':'it'} as Imported.`)) return; importToClose(rep,freshPotential); },{disabled:!fresh})}
-                {feats.exportCSV && menuRow('⬇','Export CSV',()=>exportCSV(myLeads,`${rep}_leads.csv`))}
-                {feats.exportPDF && menuRow('🖨','Export PDF',()=>exportPDF(rep))}
-                <div style={{height:1,background:'#2f2f3a',margin:'5px 4px'}}></div>
-                {menuRow('←','Back to Home',onBack)}
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
       <LeadsTable
         leads={tableLeads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onBulkAssign={onBulkAssign}
         showAssigned showCampaign showOrigin hideRepFilter config={config} feats={feats} campColorMap={campColorMap}
+        hideSearch toolbarStart={backBtn} toolbarEnd={repActions}
         /* SmartReach API auto-send (re-enabled 2026-07-28). owner_id is set to the
            rep on the edge function, so a NEW prospect is owned correctly. Known
            SmartReach limitation: a re-push of an email that already exists keeps
@@ -5905,10 +6115,55 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
 // Surfaces channels that exist in more than one lead record — e.g. when two
 // reps import the same channel from their own sheets. Each group lists every
 // copy with its rep, so an admin can reassign or remove the extras.
-function DuplicatesView({groups,config,onSave,onDelete,addToast}) {
+function DuplicatesView({groups,config,isAdmin,onSave,onDelete,onBulkDelete,addToast}) {
   const reps=config.salesReps||[];
-  const crossRep=groups.filter(g=>g.reps.length>=2).length;
-  const totalRecords=groups.reduce((s,g)=>s+g.leads.length,0);
+  const crossRep=groups.filter(g=>g.kind!=='email' && g.reps.length>=2).length;
+  const totalRecords=groups.filter(g=>g.kind!=='email').reduce((s,g)=>s+g.leads.length,0);
+  const [confirmClear,setConfirmClear]=React.useState(false);
+
+  // Score a record so the MOST-worked copy is the one we KEEP — a de-dupe must
+  // never silently drop a contacted / partner / qualified lead in favour of a raw
+  // duplicate. Ties fall to the earliest-added record (the original).
+  const workScore=(l)=>{
+    let s=0;
+    if(isPartnerLead(l)) s+=32;
+    if(isContacted(l)) s+=16;
+    if(isQualifiedLead(l) || (l.tags||[]).some(t=>/potential|high[\s-]*ticket|\bHT\b/i.test(String(t)))) s+=8;
+    if(hasStatusTag(l)) s+=4;
+    if((l.campaigns||[]).length) s+=2;
+    if(l.assignedTo) s+=1;
+    if(l.inClose) s+=1;
+    return s;
+  };
+  // Every EXTRA copy across all groups: keep the top-ranked record per channel,
+  // mark the rest for removal. Memoised so it only recomputes when groups change.
+  // Bulk-remove only ever targets CHANNEL duplicates (true same-channel repeats).
+  // EMAIL-duplicate groups are DIFFERENT channels that share an email — deleting one
+  // would lose a real lead (the fix is usually correcting the wrong email), so they
+  // are flagged but never auto-removed. Reps resolve them per-row.
+  const emailGroups=groups.filter(g=>g.kind==='email');
+  const channelGroups=groups.filter(g=>g.kind!=='email');
+  // Corruption guard (2026-08-31 incident): a "duplicate" whose copies share the
+  // SAME id is one lead loaded twice into memory, not two records — deleting the
+  // "extra" deletes the real row. Count ids seen more than once; if any exist the
+  // in-memory view is untrustworthy and the bulk remove is disabled.
+  const loadedTwice=React.useMemo(()=>{
+    const seen=new Set(), twice=new Set();
+    channelGroups.forEach(g=>g.leads.forEach(l=>{ const k=String(l.id); if(seen.has(k)) twice.add(k); else seen.add(k); }));
+    return twice.size;
+  },[groups]);
+  const removePairs=React.useMemo(()=>{
+    const pairs=[];
+    channelGroups.forEach(g=>{
+      const ranked=[...g.leads].sort((a,b)=> (workScore(b)-workScore(a)) || ((leadAddedMs(a)||Infinity)-(leadAddedMs(b)||Infinity)));
+      const keepId=String(ranked[0].id);
+      ranked.slice(1).forEach(l=>{ if(String(l.id)!==keepId) pairs.push({id:String(l.id),keepId}); });   // keep ranked[0], remove the rest
+    });
+    return pairs;
+  },[groups]);
+  const removeIds=removePairs.map(p=>p.id);
+  React.useEffect(()=>{ setConfirmClear(false); },[groups]);   // reset the confirm if the list changes
+  function clearAllDuplicates(){ if(onBulkDelete && removePairs.length && !loadedTwice) onBulkDelete(removePairs); setConfirmClear(false); }
 
   if(groups.length===0){
     return (
@@ -5928,12 +6183,49 @@ function DuplicatesView({groups,config,onSave,onDelete,addToast}) {
   return (
     <div className="home-content">
       <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:4}}>
-        <div className="stat-card red"><div className="stat-label">Duplicate Channels</div><div className="stat-value">{groups.length}</div><div className="stat-sub">{totalRecords} lead records</div></div>
+        <div className="stat-card red"><div className="stat-label">Duplicate Channels</div><div className="stat-value">{channelGroups.length}</div><div className="stat-sub">{totalRecords} lead records</div></div>
         <div className="stat-card orange"><div className="stat-label">Cross-Rep Conflicts</div><div className="stat-value">{crossRep}</div><div className="stat-sub">held by 2+ reps</div></div>
+        {emailGroups.length>0 && <div className="stat-card orange"><div className="stat-label">Same-Email Conflicts</div><div className="stat-value">{emailGroups.length}</div><div className="stat-sub">same email · same campaign</div></div>}
       </div>
       <div style={{padding:'10px 14px',borderRadius:10,background:'var(--warn-light,#FFF4E5)',color:'var(--warn,#B25E00)',fontSize:13,fontWeight:500}}>
-        ⚠ These channels appear under more than one record. Reassign them to a single rep or remove the extras so two reps don't work the same lead.
+        ⚠ These channels appear under more than one record. Reassign them to a single rep or remove the extras so two reps don't work the same lead.{emailGroups.length>0 && ' Same-email groups are different channels sharing one email in a campaign — SmartReach merges them into one prospect, so fix the wrong email (don’t delete the channel).'}
       </div>
+
+      {/* Admin one-click de-dupe: keep the most-complete record of each channel and
+          remove all the extra copies in a single action. Undoable from History. */}
+      {isAdmin && loadedTwice>0 && (
+        <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',padding:'12px 14px',borderRadius:10,
+          background:'var(--warn-light,#FFF4E5)',border:'1px solid var(--warn,#B25E00)',color:'var(--warn,#B25E00)',fontSize:13,fontWeight:600}}>
+          <span style={{fontSize:15,lineHeight:1}}>⚠</span>
+          <span>{loadedTwice} lead{loadedTwice===1?' is':'s are'} loaded twice in this tab, so some of these "duplicates" aren't real. Bulk remove is turned off — reload the page (Ctrl+Shift+R) and check again.</span>
+        </div>
+      )}
+      {isAdmin && removeIds.length>0 && !loadedTwice && (
+        <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',padding:'12px 14px',borderRadius:10,
+          background:'var(--danger-light,#FFEBE6)',border:'1px solid var(--danger,#DE350B)'}}>
+          <span style={{fontSize:15,lineHeight:1}}>🧹</span>
+          <span style={{fontSize:13,fontWeight:600,color:'var(--danger,#DE350B)'}}>
+            {removeIds.length} extra cop{removeIds.length===1?'y':'ies'} across {channelGroups.length} channel{channelGroups.length===1?'':'s'} can be cleared — the most complete record of each is kept.{emailGroups.length>0 && ' (Same-email conflicts are left for you to fix by hand.)'}
+          </span>
+          {!confirmClear
+            ? <button onClick={()=>setConfirmClear(true)}
+                style={{marginLeft:'auto',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,fontSize:12.5,
+                  cursor:'pointer',fontFamily:'inherit',background:'var(--danger,#DE350B)',color:'#fff'}}>
+                Remove all duplicates
+              </button>
+            : <span style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                <span style={{fontSize:12.5,fontWeight:600,color:'var(--danger,#DE350B)'}}>Remove {removeIds.length} cop{removeIds.length===1?'y':'ies'}? You can undo from History.</span>
+                <button onClick={clearAllDuplicates}
+                  style={{border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,fontSize:12.5,cursor:'pointer',fontFamily:'inherit',background:'var(--danger,#DE350B)',color:'#fff'}}>
+                  Confirm remove
+                </button>
+                <button onClick={()=>setConfirmClear(false)}
+                  style={{border:'1px solid var(--border)',borderRadius:8,padding:'8px 14px',fontWeight:600,fontSize:12.5,cursor:'pointer',fontFamily:'inherit',background:'var(--card,#fff)',color:'var(--text)'}}>
+                  Cancel
+                </button>
+              </span>}
+        </div>
+      )}
 
       {groups.map(g=>{
         const head=g.leads[0];
@@ -5945,22 +6237,36 @@ function DuplicatesView({groups,config,onSave,onDelete,addToast}) {
         return (
           <div className="card" key={g.key} style={{borderLeft:`3px solid ${conflict?'var(--danger,#DE350B)':'var(--warn,#FF8B00)'}`}}>
             <div className="card-header" style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-              <div className="card-title" style={{display:'flex',alignItems:'center',gap:8}}>
-                {head.thumbnail
-                  ? <img src={head.thumbnail} alt="" style={{width:26,height:26,borderRadius:'50%',objectFit:'cover'}}/>
-                  : <div style={{width:26,height:26,borderRadius:'50%',background:'var(--accent-light)',color:'var(--accent)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700}}>{avatarLetter(head.channelName)}</div>}
-                {head.channelName}
-                <span style={{fontSize:12,fontWeight:500,color:'var(--text-dim)'}}>{PLATFORM_ICON[head.platform]||''} {head.platform} · {head.followers||'—'} followers</span>
-                {/* WHY these records are grouped — the shared identity. Records can
-                    look unrelated (different URLs, different emails) while still
-                    being the same channel: YouTube's channel ID is the truth. */}
-                <span title="These records share this identity — they are the same channel even if their URLs or emails differ"
-                  style={{fontSize:11,fontWeight:600,color:'var(--text-light)',background:'var(--bg)',border:'1px solid var(--border)',padding:'2px 8px',borderRadius:20,fontFamily:'ui-monospace,monospace'}}>
-                  {/^uc[\w-]{20,}$/i.test(g.key)?`same channel ID · ${g.key.slice(0,12)}…`:(/^https?:/i.test(g.key)?'same URL':'same channel name')}
-                </span>
-              </div>
+              {g.kind==='email' ? (
+                <div className="card-title" style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                  <span style={{width:26,height:26,borderRadius:'50%',background:'var(--warn-light,#FFF4E5)',color:'var(--warn,#B25E00)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,flexShrink:0}}>✉</span>
+                  <span style={{fontFamily:'ui-monospace,monospace'}}>{g.email}</span>
+                  <span style={{fontSize:12,fontWeight:500,color:'var(--text-dim)'}}>· {g.leads.length} different channels, one owner</span>
+                  <span title="Same email + same owner + same campaign — SmartReach merges these into ONE prospect. Fix the wrong email (don't delete the channel)."
+                    style={{fontSize:11,fontWeight:700,color:'var(--warn,#B25E00)',background:'var(--warn-light,#FFF4E5)',border:'1px solid var(--warn,#FF8B00)',padding:'2px 8px',borderRadius:20,fontFamily:'ui-monospace,monospace'}}>
+                    same email · {g.campaign}
+                  </span>
+                </div>
+              ) : (
+                <div className="card-title" style={{display:'flex',alignItems:'center',gap:8}}>
+                  {head.thumbnail
+                    ? <img src={head.thumbnail} alt="" style={{width:26,height:26,borderRadius:'50%',objectFit:'cover'}}/>
+                    : <div style={{width:26,height:26,borderRadius:'50%',background:'var(--accent-light)',color:'var(--accent)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700}}>{avatarLetter(head.channelName)}</div>}
+                  {head.channelName}
+                  <span style={{fontSize:12,fontWeight:500,color:'var(--text-dim)'}}>{PLATFORM_ICON[head.platform]||''} {head.platform} · {head.followers||'—'} followers</span>
+                  {/* WHY these records are grouped — the shared identity. Records can
+                      look unrelated (different URLs, different emails) while still
+                      being the same channel: YouTube's channel ID is the truth. */}
+                  <span title="These records share this identity — they are the same channel even if their URLs or emails differ"
+                    style={{fontSize:11,fontWeight:600,color:'var(--text-light)',background:'var(--bg)',border:'1px solid var(--border)',padding:'2px 8px',borderRadius:20,fontFamily:'ui-monospace,monospace'}}>
+                    {/^uc[\w-]{20,}$/i.test(g.key)?`same channel ID · ${g.key.slice(0,12)}…`:(/^https?:/i.test(g.key)?'same URL':'same channel name')}
+                  </span>
+                </div>
+              )}
               <div style={{marginLeft:'auto',display:'flex',gap:6,alignItems:'center'}}>
-                {conflict
+                {g.kind==='email'
+                  ? <span style={{fontSize:11,fontWeight:700,color:'var(--warn,#B25E00)',background:'var(--warn-light,#FFF4E5)',padding:'3px 8px',borderRadius:20}}>✉ {g.leads.length} channels</span>
+                  : conflict
                   ? <span style={{fontSize:11,fontWeight:700,color:'var(--danger,#DE350B)',background:'var(--danger-light,#FFEBE6)',padding:'3px 8px',borderRadius:20}}>⚠ {g.reps.length} reps</span>
                   : <span style={{fontSize:11,fontWeight:700,color:'var(--warn,#B25E00)',background:'var(--warn-light,#FFF4E5)',padding:'3px 8px',borderRadius:20}}>{g.leads.length} copies</span>}
               </div>
@@ -6012,9 +6318,21 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
   // own leads here, admins see the whole team's. Without this a rep opening MSN
   // was looking at everyone's book.
   const mine=isAdmin?leads:leads.filter(l=>!!currentUser && l.assignedTo===currentUser.name);
-  const filtered=mine.filter(l=>l.campaigns.includes(campaign.id) && isWorkable(l));
+  const inCampaign=mine.filter(l=>l.campaigns.includes(campaign.id));
+  // Default = the workable "to-contact" queue (Potential/HT) so a rep's daily list
+  // stays clean. The toggle reveals EVERY status in the campaign (incl. Contacted /
+  // Partner) so the FULL book is visible in one place — a rep's 43 Potential reading
+  // as their whole MSN book (really ~90 incl. contacted) kept looking like "missing".
+  const [showAll,setShowAll]=useState(false);
+  const workable=inCampaign.filter(isWorkable);
+  const filtered=showAll?inCampaign:workable;
   const [repFilter,setRepFilter]=useState('');
   const display=(isAdmin&&repFilter)?filtered.filter(l=>l.assignedTo===repFilter):filtered;
+  // How many non-workable (Contacted/Partner/…) leads the toggle would reveal, scoped
+  // to the selected rep so the "+N" reads as that rep's hidden leads, not the team's.
+  const scopeAll=(isAdmin&&repFilter)?inCampaign.filter(l=>l.assignedTo===repFilter):inCampaign;
+  const scopeWork=(isAdmin&&repFilter)?workable.filter(l=>l.assignedTo===repFilter):workable;
+  const otherCount=scopeAll.length-scopeWork.length;
   const feats=config.features||{};
   const campColorMap={};
   (config.campaigns||[]).forEach(c=>campColorMap[c.id]=c.color);
@@ -6036,6 +6354,12 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
           </> : (
             <span className="count-label">{filtered.length} of your {campaign.label} lead{filtered.length!==1?'s':''}</span>
           )}
+          {otherCount>0 && (
+            <button className={`btn btn-sm ${showAll?'btn-primary':'btn-outline'}`} onClick={()=>setShowAll(s=>!s)}
+              title={showAll?'Back to just the to-contact (Potential/HT) queue':'Also show Contacted / Partner / other statuses in this campaign'}>
+              {showAll?'✓ All statuses':`Show all statuses (+${otherCount})`}
+            </button>
+          )}
         </div>
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
           {feats.exportCSV && <button className="btn btn-outline btn-sm" onClick={doExportCSV}>⬇ CSV</button>}
@@ -6055,7 +6379,7 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
   const [jcManualOpen,setJcManualOpen]=useState(false);
   const [jcUseManual,setJcUseManual]=useState(false);       // follow the manual numbers on auto-assign
   const [jcManual,setJcManual]=useState({HT:{},MSN:{},VIRALS:{}});   // {cat:{rep:count}}
-  const JC_REPS=['Rein','Chase','Mikka','Bella'];
+  const JC_REPS=['Rein','Chase','Mikka','Bella','Layla'];
   const JC_CATS=[{key:'HT',label:'High-Ticket'},{key:'MSN',label:'MSN'},{key:'VIRALS',label:'VIRALS'}];
   const feats=config.features||{};
   const campColorMap={};
@@ -6144,7 +6468,12 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
                           style={{width:56,padding:'4px 6px',textAlign:'center',border:'1px solid var(--border)',borderRadius:7,background:jcOnLeave.has(rep)?'var(--bg)':'var(--card)',color:'var(--text)',fontFamily:"'IBM Plex Mono',monospace",opacity:jcOnLeave.has(rep)?.4:1}}/>
                       </td>
                     ))}
-                    <td style={{padding:'6px 10px',textAlign:'right',fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:over?'var(--danger)':'var(--text)'}} title={over?`Over by ${rowT-jcAvail[cat.key]} — only ${jcAvail[cat.key]} available, extras will be skipped`:''}>{rowT}{over?' ⚠':''}</td>
+                    {(()=>{ const under=Math.max(0,jcAvail[cat.key]-rowT); return (
+                    <td style={{padding:'6px 10px',textAlign:'right',fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:over?'var(--danger)':'var(--text)'}}
+                      title={over?`Over by ${rowT-jcAvail[cat.key]} — only ${jcAvail[cat.key]} available, extras will be skipped`:(under>0?`${under} ${cat.label} lead(s) not allocated — they'll STAY with JC`:'all allocated')}>
+                      {rowT}{over?' ⚠':(under>0?<span style={{color:'#C77700',fontWeight:600,fontSize:11}}> · {under} left</span>:'')}
+                    </td>
+                    );})()}
                   </tr>
                 );})}
                 <tr style={{borderTop:'2px solid var(--border)'}}>
@@ -6156,6 +6485,16 @@ function LeadMgmtView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign
               </tbody>
             </table>
           </div>
+          {(()=>{ const totalAvail=JC_CATS.reduce((s,c)=>s+jcAvail[c.key],0);
+            if(totalAvail===0) return null;   // nothing to distribute — skip the summary
+            const totalAssigned=JC_CATS.reduce((s,c)=>s+Math.min(jcRowTotal(c.key),jcAvail[c.key]),0);
+            const stay=totalAvail-totalAssigned;
+            return (
+            <div style={{fontSize:12,fontWeight:700,marginTop:9,display:'inline-flex',alignItems:'center',gap:8,padding:'6px 11px',borderRadius:8,background:stay>0?'#FFF4E5':'#E3FCEF',color:stay>0?'#8a5a00':'#006644'}}>
+              {stay>0 ? `⚠ ${totalAssigned} of JC's ${totalAvail} leads would be assigned — ${stay} stay with JC (not covered by these numbers). Raise the “left” rows or click ⟳ Rule defaults to distribute all.`
+                      : `✓ All ${totalAvail} of JC's leads are covered by these numbers.`}
+            </div>
+            );})()}
           <div style={{fontSize:11,color:'var(--text-light)',marginTop:8}}>
             {jcUseManual ? 'Auto-assign will follow these exact numbers.' : 'Tick “Follow these numbers” above to make auto-assign use them (otherwise the rule split applies).'} Fresh &amp; imported stay balanced within each rep's take; anything above “available” is skipped. Turn on 🔍 Preview split to see the resulting names.
           </div>
@@ -6763,25 +7102,35 @@ function ErrorLogView({addToast}) {
 // everything else 30) into here, unassigned — so whoever gets to it first picks
 // it up. Picking up re-tags the lead Potential and drops it into that rep's
 // queue, which is the whole point: a lead that went cold gets another run.
-function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,onClaim,onAutoDistribute,isAdmin,config,campColorMap}) {
+function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,onClaim,onAutoDistribute,isAdmin,shareRep=null,breakdownReps=null,config,campColorMap}) {
   const today=ymdLocal(new Date());
   // Pull the Close status for every recycle lead that's in Close and drop the ones
   // already WON (Distributor Partner / Closed Won / Customer …) — a signed partner
   // must never be re-worked. They're also re-tagged Partner so they move to Already
   // Partner for good and don't age back into recycle.
   const [wonIds,setWonIds]=useState(()=>new Set());
+  const [staleIds,setStaleIds]=useState(()=>new Set());   // Close shows a recent contact → NOT due
   const closeIdsKey=[...new Set(leads.map(l=>l.closeLeadId).filter(Boolean))].sort().join(',');
   useEffect(()=>{
     if(!closeIdsKey) return;
     const base=(config.supabaseUrl||'').trim(); if(!base) return;
     fetch(base+'/functions/v1/close-last-contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leadIds:closeIdsKey.split(',')})})
-      .then(r=>r.json()).then(res=>{ if(!res||!res.ok) return; const wonMap=res.won||{}; const st=res.statuses||{};
+      .then(r=>r.json()).then(res=>{ if(!res||!res.ok) return; const wonMap=res.won||{}; const st=res.statuses||{}; const contacts=res.contacts||{};
         const isWon=l=>!!l.closeLeadId && (wonMap[l.closeLeadId]===true || isWonCloseStatus(st[l.closeLeadId]));
-        const won=new Set(); leads.forEach(l=>{ if(isWon(l)) won.add(l.id); });
-        setWonIds(won);
+        // STRICT rule: if Close's real last contact falls inside the lead's recycle
+        // window (30d, or 90d MSN/MCN) the lead is still being worked in Close, so
+        // recycling it would double-contact. Returns the YYYY-MM-DD to sync, or null.
+        const closeRecent=l=>{ const d=l.closeLeadId?contacts[l.closeLeadId]:''; if(!d) return null; const days=(Date.now()-new Date(d).getTime())/86400000; return days < recycleThresholdDays(l) ? String(d).slice(0,10) : null; };
+        const won=new Set(), stale=new Set();
+        leads.forEach(l=>{ if(isWon(l)) won.add(l.id); else if(closeRecent(l)) stale.add(l.id); });
+        setWonIds(won); setStaleIds(stale);
         if(onEdit){ let n=0; for(const l of leads){ if(n>=200) break;
           if(isWon(l) && !(l.tags||[]).includes('Partner')){
             onEdit({...l, tags:[...(l.tags||[]).filter(t=>t!=='For Recycle'&&t!=='Contacted'), 'Partner']}); n++; continue;
+          }
+          const cd=isWon(l)?null:closeRecent(l);
+          if(cd){ // sync Close's date + pull it out of recycle (back to Contacted)
+            onEdit({...l, tags:[...new Set([...(l.tags||[]).filter(t=>t!=='For Recycle'),'Contacted'])], lastContactDate:cd, contactDateManual:false}); n++; continue;
           }
           // Backfill the Close status so the "rejected in Close" badge shows here too.
           const cs=l.closeLeadId?(st[l.closeLeadId]||''):''; if(cs && cs!==(l.closeStatus||'')){ onEdit({...l, closeStatus:cs}); n++; }
@@ -6789,7 +7138,9 @@ function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,
       }).catch(()=>{});
   },[closeIdsKey]);
   const hiddenWon=leads.filter(l=>wonIds.has(l.id)).length;
-  const shownLeads=leads.filter(l=>!wonIds.has(l.id));   // never show/recycle a won-in-Close lead
+  const hiddenStale=leads.filter(l=>staleIds.has(l.id)).length;
+  // Never show a lead that's won in Close OR was contacted again within its recycle window.
+  const shownLeads=leads.filter(l=>!wonIds.has(l.id) && !staleIds.has(l.id));
   const freeAgents=shownLeads.filter(l=>!l.assignedTo).length;
   const releasedToday=shownLeads.filter(l=>l.recycledAt===today).length;
   const msn=shownLeads.filter(l=>{const c=(l.campaigns||[]).join(' ').toUpperCase();return c.includes('MSN')||c.includes('MCN');}).length;
@@ -6816,8 +7167,9 @@ function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,
         </div>
         <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',margin:'11px 2px 0'}}>
           <div style={{fontSize:12,color:'var(--text-dim)',lineHeight:1.6,flex:1,minWidth:260}}>
-            These leads finished their recycle period and were released back to the team &mdash; nobody owns them.
-            Select the ones you want and hit <b>♻ Pick up &amp; re-qualify</b>, or an admin can auto-split the whole pool.
+            {isAdmin
+              ? <>These leads finished their recycle period and were released back to the team &mdash; nobody owns them. Select the ones you want and hit <b>♻ Pick up &amp; re-qualify</b>, or auto-split the whole pool.</>
+              : <>Your share of the recycle pool &mdash; aged leads split evenly across the team, and never the ones you last worked. Select the ones you want and hit <b>♻ Pick up &amp; re-qualify</b> to add them to your queue.</>}
           </div>
           {onAutoDistribute && shownLeads.length>0 && (
             <button className="btn btn-sm" style={{background:'#3F7D74',color:'#fff',borderColor:'#3F7D74',whiteSpace:'nowrap'}}
@@ -6825,9 +7177,28 @@ function RecycleView({leads,onEdit,onDelete,onBulkDelete,onArchive,onBulkAssign,
               title="Split every recycle lead evenly across the sales team — each lead goes to a rep OTHER than the one who last worked it, and is re-tagged Potential">⚡ Auto-distribute {shownLeads.length} evenly</button>
           )}
         </div>
-        {hiddenWon>0 && (
+        {/* Admin monitoring: how the recycle pool currently divides per rep (each lead
+            assigned to a rep OTHER than its last handler). */}
+        {isAdmin && shareRep && shownLeads.length>0 && (()=>{
+          const m={}; (breakdownReps||[]).forEach(r=>m[r]=0);
+          shownLeads.forEach(l=>{ const r=shareRep(l); if(r) m[r]=(m[r]||0)+1; });
+          const rows=Object.entries(m).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
+          return (
+            <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',margin:'11px 2px 0'}}>
+              <span style={{fontSize:10.5,fontWeight:800,letterSpacing:'.06em',color:'var(--text-dim)',textTransform:'uppercase'}}>Divided per rep</span>
+              {rows.map(r=>(
+                <span key={r.name} title={`${r.name}: ${r.count} recycle lead${r.count!==1?'s':''} in their share`}
+                  style={{display:'inline-flex',alignItems:'center',gap:7,padding:'4px 11px 4px 5px',borderRadius:999,border:'1px solid var(--border)',background:'var(--card)',fontSize:12,fontWeight:600}}>
+                  <RepAvatar rep={r.name} config={config} size={18} bgOverride="var(--card)"/>
+                  {r.name}<span style={{fontWeight:800,fontVariantNumeric:'tabular-nums',color:'var(--text-dim)'}}>{r.count}</span>
+                </span>
+              ))}
+            </div>
+          );
+        })()}
+        {(hiddenWon>0||hiddenStale>0) && (
           <div style={{margin:'10px 2px 0',padding:'8px 12px',borderRadius:9,background:'#E3FCEF',color:'#006644',fontSize:12,fontWeight:600}}>
-            ✓ {hiddenWon} lead{hiddenWon!==1?'s':''} kept out of recycling — already Won / Distributor Partner in Close (moved to Already Partner).
+            ✓ {hiddenWon+hiddenStale} lead{(hiddenWon+hiddenStale)!==1?'s':''} kept out of recycling (checked against Close){hiddenWon>0?` · ${hiddenWon} already Won/Partner`:''}{hiddenStale>0?` · ${hiddenStale} contacted again recently — synced & un-recycled to avoid double-contact`:''}.
           </div>
         )}
       </div>
@@ -8327,6 +8698,7 @@ function App() {
   const supabaseHadLeadsRef=useRef(false);
   const leadsSyncRef=useRef({});                       // {id: JSON} last synced
   const leadVersionsRef=useRef({});                    // {id: DB version} — base for optimistic-concurrency writes
+  const leadsCursorRef=useRef(null);                   // max updated_at seen — the 30s poll fetches only rows changed AFTER this (incremental), so it stops re-downloading the whole table every tick
   const [syncRetryTick,setSyncRetryTick]=useState(0);  // bumped to re-attempt a save that failed on the network/RPC
   const saveFailingRef=useRef(false);                  // true while a lead save is failing (so we can guard reloads)
   const saveFailToastRef=useRef(0);                    // throttles the "couldn't save" toast
@@ -8433,6 +8805,7 @@ function App() {
   const [showBell,setShowBell]=useState(false);
   const [repliesLoading,setRepliesLoading]=useState(false);
   const [bellScope,setBellScope]=useState('mine'); // admins can flip to 'all' to see everyone's
+  const [bellRange,setBellRange]=useState('recent'); // 'recent' = latest few; '7d' = full last-7-days history
   // SmartReach-send alerts for ADMINS: every time a rep pushes leads to SmartReach
   // it's logged to activity_log ("SmartReach: N → campaign (rep)"); admins poll
   // those so it shows on the 🔔 bell. Reps don't need this, so it stays empty for them.
@@ -8583,7 +8956,11 @@ function App() {
   // Dedup: an identical toast already on screen isn't stacked again — a bulk
   // action that hits the same message N times (e.g. "Only Mikka or an admin can
   // edit this lead" for each non-owned lead) shows it once, not a wall of toasts.
-  function addToast(msg,type='info'){const id=++toastSeqRef.current;setToasts(t=> t.some(x=>x.msg===msg && x.type===type) ? t : [...t,{id,msg,type}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);}
+  function addToast(msg,type='info',ms=6000){const id=++toastSeqRef.current;setToasts(t=> t.some(x=>x.msg===msg && x.type===type) ? t : [...t,{id,msg,type}]);
+    // Two-phase dismiss: after `ms` visible, flag it `exiting` so the CSS slide-out
+    // animation plays, then remove it from the array once that animation finishes.
+    setTimeout(()=>setToasts(t=>t.map(x=>x.id===id?{...x,exiting:true}:x)),ms);
+    setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),ms+440);}
   function saveL(upd){
     const old=leads.find(l=>l.id===upd.id);
     // Employees may only edit leads that are unassigned or assigned to themselves.
@@ -8844,6 +9221,104 @@ function App() {
     addToast(`${ids.length} leads assigned to ${rep}`,'success');
     logH('✅',`Bulk: ${ids.length} leads → ${rep}`, before.length?{type:'revert',before,after}:null);
   }
+  // ZeroBounce email validation. Validates every email on the given leads via the
+  // zerobounce-validate edge function (key stays server-side), then stamps each lead
+  // with `emailStatus` (valid/invalid/catch-all/…) + `emailCheckedAt` so the table
+  // can badge invalid ones. One credit per unique email — we confirm the count first.
+  function validateEmails(targetLeads){
+    if(!SB){ addToast('Not connected','error'); return; }
+    const withEmail=(targetLeads||[]).filter(l=>l && ((l.emails&&l.emails.length)||l.email));
+    const emails=[...new Set(withEmail.flatMap(l=>((l.emails&&l.emails.length)?l.emails:[l.email]).map(e=>String(e||'').trim().toLowerCase()).filter(e=>e.includes('@'))))];
+    if(!emails.length){ addToast('No emails to validate','info'); return; }
+    if(!window.confirm(`Validate ${emails.length} email${emails.length===1?'':'s'} via ZeroBounce?\n\nThis uses ${emails.length} ZeroBounce credit${emails.length===1?'':'s'} and flags any invalid addresses on the affected leads.`)) return;
+    addToast(`Validating ${emails.length} email${emails.length===1?'':'s'} via ZeroBounce…`,'info');
+    SB.functions.invoke('zerobounce-validate',{body:{emails}}).then(({data,error})=>{
+      const res=data||{};
+      if(error||!res.ok){ addToast('ZeroBounce validation failed'+((res&&res.error)?`: ${res.error}`:''),'error'); return; }
+      const map=res.results||{};
+      const nowIso=new Date().toISOString();
+      let invalid=0, updated=0;
+      setLeads(ls=>ls.map(l=>{
+        const es=((l.emails&&l.emails.length)?l.emails:[l.email]).map(e=>String(e||'').trim().toLowerCase()).filter(e=>e.includes('@'));
+        if(!es.length) return l;
+        const statuses=es.map(e=>map[e]&&map[e].status).filter(Boolean);
+        if(!statuses.length) return l;
+        // Lead's status = its primary email's result (falls back to the first known).
+        const primary=es.find(e=>map[e])||es[0];
+        const st=(map[primary]&&map[primary].status)||statuses[0];
+        updated++; if(st==='invalid') invalid++;
+        return {...l, emailStatus:st, emailCheckedAt:nowIso};
+      }));
+      const creditNote=(res.credits!=null)?` · ${res.credits} credits left`:'';
+      addToast(`Validated ${updated} lead${updated===1?'':'s'} — ${invalid} invalid email${invalid===1?'':'s'} flagged${creditNote}`, invalid?'error':'success');
+      logH('✅',`ZeroBounce: validated ${updated} lead(s), ${invalid} invalid`);
+    }).catch(()=>addToast('ZeroBounce validation failed','error'));
+  }
+  // Check the rep's Potential leads against Close: resolve each in Close and read its
+  // lead status + opportunity (won/lost). WON → move to Already Partner; a
+  // rejected/not-interested/lost status → stamp closeStatus (the red Close badge shows
+  // on the row) and, on confirm, move to NQ so dead leads leave the working queue.
+  // Non-destructive first (records status + backfills closeLeadId); the MOVES are
+  // opt-in via a confirm and undoable from History.
+  function checkCloseStatus(targetLeads){
+    if(!SB){ addToast('Not connected','error'); return; }
+    const base=(config.supabaseUrl||'').trim();
+    const work=(targetLeads||[]).filter(l=>l && ((l.tags||[]).includes('Potential')||(l.tags||[]).includes('HT')||(l.tags||[]).includes('High-Ticket')));
+    if(!work.length){ addToast('No Potential leads to check','info'); return; }
+    const payload=work.map(l=>({id:l.id, closeLeadId:l.closeLeadId||'', channelName:l.channelName||'', url:l.url||'', email:(l.emails&&l.emails[0])||''}));
+    addToast(`Checking ${work.length} lead${work.length===1?'':'s'} against Close…`,'info');
+    SB.functions.invoke('close-status-check',{body:{leads:payload}}).then(({data,error})=>{
+      const res=data||{};
+      if(error||!res.ok){ addToast('Close status check failed'+((res&&res.error)?`: ${res.error}`:''),'error'); return; }
+      const map=res.results||{};
+      const nowIso=new Date().toISOString();
+      // Classify from the returned signals using the shared helpers.
+      const classify=r=>{
+        if(!r||!r.found) return 'none';
+        const won = r.oppWon || isWonCloseStatus(r.status);
+        if(won) return 'won';
+        const rej = isRejectedCloseStatus(r.status) || (r.oppLost && !r.oppActive && !r.oppWon);
+        return rej ? 'rejected' : 'open';
+      };
+      // Tally + decide moves off the checked set (`work` holds the leads as checked).
+      const toMove=[]; let won=0, rej=0, open=0, notfound=0; const wonNames=[], rejNames=[];
+      work.forEach(l=>{ const r=map[String(l.id)]; if(!r||!r.found){ notfound++; return; }
+        const k=classify(r);
+        if(k==='won'){ won++; if(wonNames.length<4) wonNames.push(l.channelName); toMove.push({id:l.id,to:'Partner'}); }
+        else if(k==='rejected'){ rej++; if(rejNames.length<4) rejNames.push(l.channelName); toMove.push({id:l.id,to:'NQ'}); }
+        else open++;
+      });
+      // Pass 1 (non-destructive): record Close status + backfill closeLeadId so the
+      // row's Close badge reflects reality even for leads we don't move.
+      setLeads(ls=>ls.map(l=>{
+        const r=map[String(l.id)]; if(!r||!r.found) return l;
+        const patch={closeCheckedAt:nowIso};
+        if(r.closeLeadId && !l.closeLeadId) patch.closeLeadId=r.closeLeadId;
+        const cs=r.status||r.oppLabel||''; if(cs && cs!==(l.closeStatus||'')) patch.closeStatus=cs;
+        return {...l,...patch};
+      }));
+      if(!toMove.length){ addToast(`Checked ${work.length-notfound} in Close — none Won or rejected${notfound?` · ${notfound} not found`:''}`,'success'); return; }
+      // Pass 2 (opt-in): move Won → Already Partner and rejected/not-interested → NQ.
+      const msg=`Close check on ${work.length-notfound} lead(s):\n\n`+
+        `• ${won} WON${wonNames.length?` (${wonNames.join(', ')}${won>4?'…':''})`:''} → Already Partner\n`+
+        `• ${rej} not-interested / rejected / lost${rejNames.length?` (${rejNames.join(', ')}${rej>4?'…':''})`:''} → NQ\n`+
+        `• ${open} still open (left as-is)${notfound?`\n• ${notfound} not found in Close`:''}\n\n`+
+        `Apply these moves out of Potential? (Undoable from History)`;
+      if(!window.confirm(msg)){ addToast(`Recorded Close status on ${work.length-notfound} lead(s) — no moves applied`,'info'); return; }
+      const moveMap={}; toMove.forEach(m=>moveMap[String(m.id)]=m.to);
+      const before=[], after=[];
+      setLeads(ls=>ls.map(l=>{
+        const to=moveMap[String(l.id)]; if(!to) return l;
+        before.push(undoSnap(l));
+        const keep=(l.tags||[]).filter(t=>!['Potential','HT','High-Ticket','Contacted','For Recycle','Awaiting Potential','NQ','Partner'].includes(t));
+        const next={...l, tags:[...keep, to]};
+        after.push(undoSnap(next));
+        return next;
+      }));
+      addToast(`Moved ${won} → Already Partner, ${rej} → NQ from Close status`, 'success');
+      logH('☁',`Close status check: ${won} → Already Partner, ${rej} → NQ (of ${work.length-notfound} checked)`, before.length?{type:'revert',before,after}:null);
+    }).catch(()=>addToast('Close status check failed','error'));
+  }
   // Pick up recycled leads. A lead that aged out of Contacted is unassigned and
   // sits in For Recycle for anyone to take — this claims the selected ones under
   // the current user AND re-qualifies them as Potential in one step, so they go
@@ -8935,7 +9410,7 @@ function App() {
     const avail = r => valid.has(r) && !onLeave.has(r);
     const HT_REP = avail('Rein') ? 'Rein' : null;
     const REST_REPS = ['Chase','Mikka'].filter(avail);    // the rest splits between whoever's available
-    const excludedOnLeave = ['Rein','Chase','Mikka'].filter(r=>valid.has(r) && onLeave.has(r));
+    const excludedOnLeave = ['Rein','Chase','Mikka','Bella','Layla'].filter(r=>valid.has(r) && onLeave.has(r));
     const targets = jcPotentialLeads();
     // Match the dashboard's High-Ticket count exactly: the 'HT' tag (with the
     // High-Ticket pool as a fallback). NOT follower-based — that over-counted.
@@ -9040,6 +9515,49 @@ function App() {
     if(!target.length){ addToast('You can only delete your own leads','error'); return; }
     const set=new Set(target); const deleted=leads.filter(l=>set.has(l.id)); setLeads(ls=>ls.filter(l=>!set.has(l.id))); deleteLeadsFromSupabase(target); logH('🗑',`Bulk: ${target.length} lead(s) deleted`,{type:'undelete',leads:deleted});
     addToast(`${target.length} lead(s) deleted`+(target.length<ids.length?` · ${ids.length-target.length} skipped (not yours)`:''),'error');
+  }
+  // Admin one-click de-dupe (Duplicates tab): remove every EXTRA copy of a
+  // duplicated channel, keeping the single most-complete record (the keeper is
+  // chosen in DuplicatesView by workScore — a contacted/partner/qualified copy is
+  // never dropped in favour of a raw one). Fully undoable: the removed records ride
+  // along as an 'undelete' payload in History, so an admin can restore them.
+  //
+  // Takes [{id, keepId}] pairs. Three guards stop a repeat of the 2026-08-31 mass
+  // delete (4,162 real leads removed because a corrupted in-memory list held each
+  // lead twice under the same id):
+  //  1. refuse outright if the in-memory list has any repeated id;
+  //  2. drop any pair where the copy IS the keeper (same id);
+  //  3. ask the DB first — only delete a copy when both it and its keeper exist as
+  //     separate rows. If that check fails for any reason, delete nothing.
+  async function removeDuplicateExtras(pairs){
+    if(!isAdmin){ addToast('Only admins can bulk-remove duplicates','error'); return; }
+    if(!pairs||!pairs.length) return;
+    const memIds=leads.map(l=>String(l.id));
+    if(new Set(memIds).size!==memIds.length){
+      addToast(`Not removed: ${memIds.length-new Set(memIds).size} lead(s) are loaded twice in this tab. Reload the page (Ctrl+Shift+R) and try again.`,'error');
+      return;
+    }
+    const inMem=new Set(memIds);
+    let todo=pairs.map(p=>({id:String(p.id),keepId:String(p.keepId)}))
+      .filter(p=>p.id!==p.keepId && inMem.has(p.id) && inMem.has(p.keepId));
+    if(!todo.length) return;
+    let inDb;
+    try{
+      if(!SB) throw new Error('offline');
+      const ask=[...new Set(todo.flatMap(p=>[p.id,p.keepId]))]; inDb=new Set();
+      for(let i=0;i<ask.length;i+=200){
+        const {data,error}=await SB.from('leads').select('id').in('id',ask.slice(i,i+200));
+        if(error||!data) throw error||new Error('no data');
+        data.forEach(r=>inDb.add(String(r.id)));
+      }
+    }catch(e){ addToast("Not removed: couldn't confirm the duplicates with the database. Nothing was deleted — try again in a minute.",'error'); return; }
+    const skipped=todo.filter(p=>!(inDb.has(p.id)&&inDb.has(p.keepId))).length;
+    todo=todo.filter(p=>inDb.has(p.id)&&inDb.has(p.keepId));
+    if(!todo.length){ addToast(`Nothing removed — none of the ${skipped} cop${skipped===1?'y':'ies'} could be confirmed in the database.`,'error'); return; }
+    const set=new Set(todo.map(p=>p.id)); const deleted=leads.filter(l=>set.has(String(l.id)));
+    setLeads(ls=>ls.filter(l=>!set.has(String(l.id)))); deleteLeadsFromSupabase(deleted.map(l=>l.id));
+    logH('🧹',`Removed ${deleted.length} duplicate cop${deleted.length===1?'y':'ies'} — kept 1 record per channel`,{type:'undelete',leads:deleted});
+    addToast(`Removed ${deleted.length} duplicate cop${deleted.length===1?'y':'ies'} — kept 1 per channel`+(skipped?` · ${skipped} skipped (not confirmed in database)`:''),'success');
   }
   // Auto-flag leads that already exist in the real Close DB. Runs in the
   // background after an import or manual add (the scraper already drops Close
@@ -9538,7 +10056,11 @@ function App() {
   useEffect(()=>{
     if(!SB || !isAdmin){ setSrSends([]); return; }
     let stop=false;
-    const load=()=>{ try{ SB.from('activity_log').select('id,created_at,actor,text').ilike('text','SmartReach:%').order('created_at',{ascending:false}).limit(40)
+    // Pull the last 7 days (cap 300) so the bell can show a full week of SmartReach
+    // history, not just the newest handful. The default view still shows only the
+    // recent few; the "7 days" toggle reveals the rest.
+    const since=new Date(Date.now()-7*864e5).toISOString();
+    const load=()=>{ try{ SB.from('activity_log').select('id,created_at,actor,text').ilike('text','SmartReach:%').gte('created_at',since).order('created_at',{ascending:false}).limit(300)
       .then(({data})=>{ if(stop||!Array.isArray(data)) return; setSrSends(data.map(r=>({id:'sr_'+r.id, rep:r.actor||'', text:r.text||'', when:r.created_at}))); },()=>{}); }catch(e){} };
     load();
     const t=setInterval(load, 120000);
@@ -9603,6 +10125,9 @@ function App() {
         leadVersionsRef.current=(res&&res.versions)||{};
         setLeads(loaded);
       }
+      // Seed the incremental-poll cursor with the newest updated_at from this full
+      // load, so the very first poll fetches only rows changed since page-open.
+      if(res&&res.cursor) leadsCursorRef.current=res.cursor;
       setLeadsReady(true);
     });
     // Load the archived channel keys so scraper/import dedup stays archive-aware.
@@ -9757,59 +10282,97 @@ function App() {
   useEffect(()=>{
     if(!SB || !leadsReady) return;
     let stop=false, tick=0;
-    const pullAndMerge=()=>{
-      if(stop) return;
-      // EGRESS GUARD: a backgrounded tab re-downloading the whole leads table
-      // every interval was the bulk of Supabase egress. Skip the pull while the
-      // tab is hidden — the on-focus handler below pulls fresh the moment the rep
-      // returns, so they never work from stale data.
-      if(typeof document!=='undefined' && document.hidden) return;
-      // Every ~2min refresh the archived-keys set too, so an archive done by
-      // another admin propagates (keeps re-scrapes of it skipped everywhere).
-      if((tick++ %4)===0){ loadArchivedKeysFromSupabase().then(keys=>{ if(!stop && Array.isArray(keys)) archivedKeysRef.current=new Set(keys); }); }
-      // When THIS fetch began. Anything the DB tells us reflects the world at
-      // roughly this instant, so a lead edited after it is newer than the answer.
-      const fetchStartedAt=Date.now();
-      loadLeadsFromSupabase().then(res=>{
-        const remote=res&&res.items;
-        const remoteVersions=(res&&res.versions)||{};
-        if(stop || !Array.isArray(remote)) return;
-        const remoteById={}; remote.forEach(l=>remoteById[String(l.id)]=l);
-        setLeads(local=>{
-          const synced=leadsSyncRef.current||{};
-          const localIds=new Set(local.map(l=>String(l.id)));
-          const out=[];
-          local.forEach(l=>{
-            const id=String(l.id), r=remoteById[id];
-            const dirty=stableStringify(l)!==synced[id];         // local edit not yet pushed
-            // Edited while this fetch was in flight → the response predates the
-            // edit and cannot be trusted for this lead, even though it's already
-            // been marked synced. This is what was reverting Pending→Potential.
-            const staleForThisLead=(writeStampRef.current[id]||0)>=fetchStartedAt;
-            if(r===undefined){ if(!(id in synced)||dirty||staleForThisLead) out.push(l); /* else: deleted by another rep */ }
-            // Adopting the shared row: track its version AND mark it synced. Skipping
-            // the synced-snapshot update made the next debounce treat every adopted row
-            // as a local edit and re-push it — two tabs then ping-pong forever, churning
-            // versions and REJECTING reps' real tags (the "tag keeps reverting" storm).
-            else { const take=(dirty||staleForThisLead)?l:r; out.push(take); if(take===r){ leadVersionsRef.current[id]=remoteVersions[id]; leadsSyncRef.current[id]=stableStringify(r); } }
-          });
-          remote.forEach(l=>{ const id=String(l.id); if(!localIds.has(id)){ out.push(l); leadVersionsRef.current[id]=remoteVersions[id]; leadsSyncRef.current[id]=stableStringify(l); } });   // new from other reps → track version + mark synced
-          if(out.length===local.length){
-            const lm={}; local.forEach(l=>lm[String(l.id)]=stableStringify(l));
-            if(out.every(l=>lm[String(l.id)]===stableStringify(l))) return local;  // no change → no churn
+    // Merge a batch of remote rows into local state. isFull=true means `remote` is
+    // the COMPLETE active set, so a local lead missing from it was archived/deleted
+    // elsewhere and should drop (with the dirty/unsynced guards). isFull=false (the
+    // incremental poll) only updates/adds — a lead's absence just means "unchanged".
+    const applyRemote=(remote, remoteVersions, fetchStartedAt, isFull)=>{
+      const remoteById={}; remote.forEach(l=>remoteById[String(l.id)]=l);
+      setLeads(local=>{
+        const synced=leadsSyncRef.current||{};
+        const localIds=new Set(local.map(l=>String(l.id)));
+        const out=[];
+        local.forEach(l=>{
+          const id=String(l.id), r=remoteById[id];
+          const dirty=stableStringify(l)!==synced[id];         // local edit not yet pushed
+          // Edited while this fetch was in flight → the response predates the edit
+          // and can't be trusted for this lead (this guarded Pending→Potential reverts).
+          const staleForThisLead=(writeStampRef.current[id]||0)>=fetchStartedAt;
+          if(r===undefined){
+            // Incremental batch: unchanged → always keep. Full batch: gone from the
+            // active set (archived/deleted) → drop, unless it's a local/unsaved edit.
+            if(!isFull || !(id in synced) || dirty || staleForThisLead) out.push(l);
           }
-          return out;
+          // Adopting the shared row: track its version AND mark it synced. Skipping
+          // the synced-snapshot update made the next debounce treat every adopted row
+          // as a local edit and re-push it — two tabs then ping-pong forever, churning
+          // versions and REJECTING reps' real tags (the "tag keeps reverting" storm).
+          else { const take=(dirty||staleForThisLead)?l:r; out.push(take); if(take===r){ leadVersionsRef.current[id]=remoteVersions[id]; leadsSyncRef.current[id]=stableStringify(r); } }
         });
+        remote.forEach(l=>{ const id=String(l.id); if(!localIds.has(id)){ out.push(l); leadVersionsRef.current[id]=remoteVersions[id]; leadsSyncRef.current[id]=stableStringify(l); } });   // new from other reps → track version + mark synced
+        // SELF-HEAL: never let the same id sit in the array twice. If `local` was
+        // already corrupted (a lead duplicated + another evicted — the phantom-
+        // "duplicates" + undercount bug from unstable pagination), collapse the
+        // duplicates here so open tabs recover on the next sync without a reload.
+        // A fullSync also re-adds any evicted lead (it's in remote, not in localIds).
+        if(new Set(out.map(l=>String(l.id))).size !== out.length){
+          const seen=new Set(), ded=[];
+          for(const l of out){ const id=String(l.id); if(!seen.has(id)){ seen.add(id); ded.push(l); } }
+          return ded;
+        }
+        if(out.length===local.length){
+          const lm={}; local.forEach(l=>lm[String(l.id)]=stableStringify(l));
+          if(out.every(l=>lm[String(l.id)]===stableStringify(l))) return local;  // no change → no churn
+        }
+        return out;
+      });
+    };
+    // FULL sync: pull the entire active table and merge — authoritative, so it also
+    // drops archived/deleted leads and re-seeds the incremental cursor. Runs on focus
+    // and every 5 min as a backstop; the frequent 30s poll below is incremental.
+    let lastFullAt=Date.now();   // the initial load counts as a full pull
+    const fullSync=()=>{
+      if(stop || (typeof document!=='undefined' && document.hidden)) return;
+      lastFullAt=Date.now();
+      const fetchStartedAt=lastFullAt;
+      loadLeadsFromSupabase().then(res=>{
+        if(stop || !res || !Array.isArray(res.items)) return;
+        if(res.cursor) leadsCursorRef.current=res.cursor;
+        applyRemote(res.items, res.versions||{}, fetchStartedAt, true);
       }).catch(()=>{});
     };
-    const iv=setInterval(pullAndMerge, 30000);
-    // Refresh-on-focus: a tab that was backgrounded (or the laptop asleep) holds
-    // stale leads; pull fresh the moment the rep returns so they edit from current
-    // data. With the version guard this just means fewer conflict-refreshes.
-    const onVisible=()=>{ if(document.visibilityState==='visible') pullAndMerge(); };
+    // INCREMENTAL poll (every 30s): fetch ONLY rows changed since the cursor — the
+    // cheap common case that replaces re-downloading the whole ~21MB table each tick
+    // (that mass re-pull, team-wide at once, was the load spike). Archives/deletes and
+    // any boundary miss are reconciled by fullSync (≤5 min, or instantly on focus).
+    const incSync=()=>{
+      if(stop || (typeof document!=='undefined' && document.hidden)) return;
+      // Every ~2min refresh the archived-keys set too, so an archive done by another
+      // admin propagates (keeps re-scrapes of it skipped everywhere).
+      if((tick++ %4)===0){ loadArchivedKeysFromSupabase().then(keys=>{ if(!stop && Array.isArray(keys)) archivedKeysRef.current=new Set(keys); }); }
+      const cursor=leadsCursorRef.current;
+      if(!cursor){ fullSync(); return; }   // no cursor yet → establish one with a full pull
+      const fetchStartedAt=Date.now();
+      loadLeadsSince(cursor).then(res=>{
+        if(stop || !res || !Array.isArray(res.items)) return;
+        if(res.cursor) leadsCursorRef.current=res.cursor;
+        if(res.items.length) applyRemote(res.items, res.versions||{}, fetchStartedAt, false);
+      }).catch(()=>{});
+    };
+    const ivInc=setInterval(incSync, 30000);
+    const ivFull=setInterval(fullSync, 300000);   // 5-min authoritative backstop
+    // Refresh-on-focus: a tab that was backgrounded holds stale leads. Do a CHEAP
+    // incremental sync (only rows changed since the cursor) on every focus — a FULL
+    // re-pull of all active leads on every tab switch was the main source of
+    // slowness once the active set grew large (23k+). Only fall back to a full pull
+    // after a long absence (>5 min) so archives/deletes are still reconciled.
+    const onVisible=()=>{
+      if(document.visibilityState!=='visible') return;
+      if(Date.now()-lastFullAt>300000) fullSync(); else incSync();
+    };
     document.addEventListener('visibilitychange',onVisible);
     window.addEventListener('focus',onVisible);
-    return ()=>{ stop=true; clearInterval(iv); document.removeEventListener('visibilitychange',onVisible); window.removeEventListener('focus',onVisible); };
+    return ()=>{ stop=true; clearInterval(ivInc); clearInterval(ivFull); document.removeEventListener('visibilitychange',onVisible); window.removeEventListener('focus',onVisible); };
   },[leadsReady]);
 
   // New-build detection: if the deployed page changes (a new deploy), this tab is
@@ -9933,31 +10496,45 @@ function App() {
     fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
       .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(resp=>{
+        const created=(resp&&typeof resp.created==='number')?resp.created:null;
+        const assigned=(resp&&typeof resp.assigned==='number')?resp.assigned:null;
+        const skipped=(resp&&Array.isArray(resp.skipped))?resp.skipped:[];
+        const rejected=skipped.filter(s=>/rejected by smartreach/i.test(String(s.reason||'')));
+        const noEmail=skipped.filter(s=>/no email|invalid email/i.test(String(s.reason||'')));
+        // SmartReach refused to CREATE the prospects and nothing landed — almost always
+        // the account's 50,000-prospect cap (its generic "contact support" error). Make
+        // that unmistakable and actionable instead of a silent skip / false success.
+        const cmsg=(resp&&resp.lastCreateError)?JSON.stringify(resp.lastCreateError).toLowerCase():JSON.stringify(rejected).toLowerCase();
+        const accountFull = (created===0) && (rejected.length>0 || !!(resp&&resp.lastCreateError))
+          && /contact support|create.?update prospect|limit|quota|maximum|exceed|full/i.test(cmsg);
+        if(accountFull){
+          addToast(`⛔ SmartReach won't accept new prospects — the account is at its 50,000 limit. Free up space or upgrade the plan in SmartReach, then resend. (0 of ${emailable.length} added.)`,'error',13000);
+          logH('✉',`SmartReach BLOCKED for ${rep} — account at 50k prospect limit (0 of ${emailable.length})`);
+          reportError('importToSmartReach:limit:'+rep, new Error('SmartReach prospect limit (50k) — '+cmsg.slice(0,200)));
+          return;
+        }
         if(resp && resp.ok===false){
-          // Surface the REAL reason. The edge fn returns {error} for hard fails and
-          // {errors:[{step,status,body}]} for per-chunk SmartReach errors — the old
-          // code threw a bare 'SmartReach error' and discarded the latter, so the log
-          // never said why. Now the detail lands in the toast AND error_logs.
-          const detail=resp.error||(Array.isArray(resp.errors)&&resp.errors.length?('SmartReach: '+JSON.stringify(resp.errors).slice(0,400)):'SmartReach error');
+          // Surface the REAL reason for any other hard failure.
+          const detail=resp.error||(Array.isArray(resp.errors)&&resp.errors.length?('SmartReach: '+JSON.stringify(resp.errors).slice(0,400)):(resp&&resp.lastCreateError?('SmartReach: '+JSON.stringify(resp.lastCreateError).slice(0,300)):'SmartReach error'));
           throw new Error(detail);
         }
-        const n=(resp&&typeof resp.assigned==='number'&&resp.assigned)?resp.assigned:emailable.length;
-        // Warn (don't fail) when leads were dropped for a bad/missing email — one bad
-        // address no longer sinks the whole push, but the rep should know it was skipped.
-        const skipped=(resp&&Array.isArray(resp.skipped))?resp.skipped:[];
-        if(skipped.length){ const names=skipped.slice(0,3).map(s=>s.name||s.email||'?').join(', '); addToast(`⚠ ${skipped.length} lead(s) skipped — no valid email: ${names}${skipped.length>3?'…':''}`,'info'); }
-        addToast(`✓ ${n} prospect(s) added to SmartReach → ${dest}`,'success'); logH('✉',`SmartReach: ${n} → ${dest} (${rep})`);
-        // Stamp each lead so the send is countable per rep per DAY. Until now a
-        // send left only one activity-log line with a total, so "how many did
-        // they push on the 24th" was unanswerable and the Home report couldn't
-        // cross-check the contacted number against it.
-        const sent=new Set(emailable.map(l=>String(l.id)));
-        const day=ymdLocal(new Date());
-        setLeads(ls=>ls.map(l=>{
-          if(!sent.has(String(l.id))) return l;
-          return {...l, smartReachAt:day, smartReachCampaign:dest,
-            history:pushHist(l,[histEvent(rep,'smartreach',{to:dest})])};
-        }));
+        // Report the ACTUAL number that landed — never fall back to the selected count.
+        const n = assigned!=null ? assigned : (created!=null?created:emailable.length);
+        if(noEmail.length){ const names=noEmail.slice(0,3).map(s=>s.name||s.email||'?').join(', '); addToast(`⚠ ${noEmail.length} lead(s) skipped — no valid email: ${names}${noEmail.length>3?'…':''}`,'info'); }
+        if(rejected.length){ addToast(`⚠ ${rejected.length} lead(s) rejected by SmartReach (bad address or account full)`,'info'); }
+        if(n>0){
+          addToast(`✓ ${n} prospect(s) added to SmartReach → ${dest}`,'success'); logH('✉',`SmartReach: ${n} → ${dest} (${rep})`);
+          // Stamp each lead so the send is countable per rep per DAY (only when some actually sent).
+          const sent=new Set(emailable.map(l=>String(l.id)));
+          const day=ymdLocal(new Date());
+          setLeads(ls=>ls.map(l=>{
+            if(!sent.has(String(l.id))) return l;
+            return {...l, smartReachAt:day, smartReachCampaign:dest,
+              history:pushHist(l,[histEvent(rep,'smartreach',{to:dest})])};
+          }));
+        } else {
+          addToast(`⚠ 0 prospects reached SmartReach → ${dest} — nothing was added.`,'info',9000);
+        }
       })
       .catch(e=>{ addToast(`SmartReach send failed for ${rep}: ${e.message}`,'error'); logH('✉',`SmartReach send failed for ${rep}`); reportError('importToSmartReach:'+rep, e); });
   }
@@ -9998,12 +10575,29 @@ function App() {
   // recompute when leads actually change.
   const meName=currentUser&&currentUser.name;
   const dupGroups=React.useMemo(()=>{
+    // (1) CHANNEL duplicates — the same YouTube channel on 2+ records.
     const byKey={};
     leads.forEach(l=>{ const k=leadKey(l); if(!k) return; (byKey[k]=byKey[k]||[]).push(l); });
-    return Object.keys(byKey).map(k=>{
+    const chan=Object.keys(byKey).map(k=>{
       const ls=byKey[k];
-      return {key:k, leads:ls, reps:[...new Set(ls.map(l=>l.assignedTo).filter(Boolean))]};
-    }).filter(g=>g.leads.length>1)
+      return {key:k, kind:'channel', leads:ls, reps:[...new Set(ls.map(l=>l.assignedTo).filter(Boolean))]};
+    }).filter(g=>g.leads.length>1);
+    // (2) EMAIL duplicates (policy 2026-09-11) — the SAME email, SAME owner, SAME
+    // campaign collide in one SmartReach send (SmartReach dedupes prospects by email,
+    // so two such leads become one prospect: the "44 of 45" case). The same email
+    // across DIFFERENT campaigns is fine and NOT flagged. Only across DIFFERENT
+    // channels (a same-channel repeat is already a channel dup above).
+    const byEmail={};
+    leads.forEach(l=>{ const owner=l.assignedTo; if(!owner || l.archived) return;
+      const emails=[...new Set((l.emails||[]).map(e=>String(e||'').trim().toLowerCase()).filter(e=>e.includes('@')))];
+      const camps=(l.campaigns||[]).map(String);
+      if(!emails.length || !camps.length) return;
+      emails.forEach(em=>camps.forEach(c=>{ const k='email|'+owner+'|'+c+'|'+em; (byEmail[k]=byEmail[k]||[]).push(l); }));
+    });
+    const emailG=Object.keys(byEmail).map(k=>{ const ls=[...new Set(byEmail[k])]; const p=k.split('|');
+      return {key:k, kind:'email', owner:p[1], campaign:p[2], email:p[3], leads:ls, reps:[...new Set(ls.map(l=>l.assignedTo).filter(Boolean))]};
+    }).filter(g=>g.leads.length>1 && new Set(g.leads.map(leadKey)).size>1);   // 2+ DISTINCT channels
+    return chan.concat(emailG)
       .sort((a,b)=>(b.reps.length-a.reps.length)||(b.leads.length-a.leads.length));
   },[leads]);
   // Reps see duplicate groups that involve THEIR leads (so they're notified when
@@ -10014,7 +10608,11 @@ function App() {
   // global set as dupGroups, so detection is identical everywhere.
   // lastContact + threshold ride along so a row can also warn that a teammate
   // contacted this same channel recently and it isn't due for recycling yet.
-  const dupIndex=React.useMemo(()=>{ const idx={}; dupGroups.forEach(g=>{ idx[g.key]=g.leads.map(l=>({id:l.id, rep:l.assignedTo||'', contacted:isContacted(l)||(l.tags||[]).includes('For Recycle'), lastContact:l.lastContactDate||'', threshold:recycleThresholdDays(l)})); }); return idx; },[dupGroups]);
+  const dupIndex=React.useMemo(()=>{ const idx={}; dupGroups.filter(g=>g.kind!=='email').forEach(g=>{ idx[g.key]=g.leads.map(l=>({id:l.id, rep:l.assignedTo||'', contacted:isContacted(l)||(l.tags||[]).includes('For Recycle'), lastContact:l.lastContactDate||'', threshold:recycleThresholdDays(l)})); }); return idx; },[dupGroups]);
+  // Lead ids that are in an EMAIL-duplicate group (same email·owner·campaign) — used
+  // to badge those rows so a rep spots the conflict before a SmartReach send merges them.
+  const emailDupIds=React.useMemo(()=>{ const s=new Set(); dupGroups.forEach(g=>{ if(g.kind==='email') g.leads.forEach(l=>s.add(String(l.id))); }); return s; },[dupGroups]);
+  const dupCtxValue=React.useMemo(()=>({dupIndex, emailDupIds}),[dupIndex, emailDupIds]);
 
   // Cross-rep lead conflicts worth actively telling someone about: the same
   // channel held by 2+ DIFFERENT teammates. A rep only hears about channels they
@@ -10061,9 +10659,43 @@ function App() {
   // Unassigned = a scraped lead nobody has taken. Mirrors the old Lead-Management
   // "Unassigned" view exactly: no owner, not yet in a dedicated status tab
   // (Pending/Contacted/NQ/Awaiting/Recycle/Partner), and not a pool candidate.
-  // It's a SHARED board — every role sees the same list and anyone can claim it.
-  // Not scoped by canSeeLead on purpose (unassigned belongs to no one yet).
+  // Unclaimed lead that belongs to no one yet (no owner, no status tag, not a
+  // scraper-pool candidate).
   const isUnassignedLead = l => l && !l.assignedTo && !l.archived && !hasTabStatusTag(l) && !(l.pool && (l.campaigns||[]).length===0);
+  // The Unassigned tab is now DIVIDED by who scraped it (each lead's scrapedBy is a
+  // permanent record set from its 'scraped' history event): a rep sees only the
+  // leads THEY scraped; admins see the whole pile and can filter by scraper. No lead
+  // data changes — whoever sourced it simply gets first claim on their own.
+  const myUnassignedLeads=React.useMemo(()=>{
+    const all=vLeads.filter(l=>isUnassignedLead(l));
+    return isAdmin ? all : all.filter(l=>l.scrapedBy===meName);
+  },[leads, isAdmin, meName]);
+  // Admin-only monitoring: how many unassigned leads each rep scraped but hasn't
+  // cleared yet, biggest backlog first.
+  const unassignedByScraper=React.useMemo(()=>{
+    const m={};
+    vLeads.filter(l=>isUnassignedLead(l)).forEach(l=>{ const s=(l.scrapedBy||'').trim()||'—'; m[s]=(m[s]||0)+1; });
+    return Object.entries(m).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
+  },[leads]);
+  // For Recycle is now divided EVENLY across the sales reps (employees, minus the
+  // Demo account) — each aged lead deterministically falls to one rep, always a rep
+  // OTHER than the one who last worked it (recycledFrom), so nobody gets their own
+  // lead back. Stable per lead (channel-key hash). Admins + non-employees see the
+  // whole pool. Mirrors the pool split, plus the last-handler exclusion.
+  const recycleReps=(config.users||[]).filter(u=>u.role==='employee' && u.name!=='Demo account').map(u=>u.name);
+  const recycleShareRep=(l)=>{
+    const last=((l.recycledFrom||l.assignedTo)||'').trim();
+    let pool=recycleReps.filter(r=>r!==last);
+    if(!pool.length) pool=recycleReps.slice();
+    if(!pool.length) return null;
+    const k=leadKey(l)||String(l.id||'');
+    return pool[strHash32(k)%pool.length];
+  };
+  const myRecycleLeads=React.useMemo(()=>{
+    const all=vLeads.filter(l=>(l.tags||[]).includes('For Recycle'));
+    if(isAdmin || !recycleReps.includes(meName)) return all;
+    return all.filter(l=>recycleShareRep(l)===meName);
+  },[leads, isAdmin, meName]);
   const counts=React.useMemo(()=>{
     const rc=new Date(); rc.setDate(rc.getDate()-7);   // matches the Recent-tab cutoff
     return {
@@ -10072,13 +10704,13 @@ function App() {
       nq:vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l)).length,
       awaiting:vLeads.filter(l=>(l.tags||[]).includes('Awaiting Potential')&&canSeeLead(l)).length,
       contacted:vLeads.filter(l=>isContacted(l)).length,
-      recycle:vLeads.filter(l=>l.tags.includes('For Recycle')).length,
+      recycle:myRecycleLeads.length,
       recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=rc).length,
       duplicates:myDupGroups.length,
       partner:vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l)).length,
-      unassigned:vLeads.filter(l=>isUnassignedLead(l)).length,
+      unassigned:myUnassignedLeads.length,
     };
-  },[leads, isAdmin, meName, myDupGroups]);
+  },[leads, isAdmin, meName, myDupGroups, myUnassignedLeads, myRecycleLeads]);
 
   // ── Lead Pools ── the Make scraper feeds these buckets 24/7 with unclaimed
   // candidates; any rep/lead-gen picks one, "Claims" it (→ assigned to them),
@@ -10106,12 +10738,14 @@ function App() {
   // channel key (a lead always falls to the same rep, stable across reloads).
   // Admins see the whole pool; a user outside the trio sees it unfiltered.
   // The sales-floor reps who split the MSN/VIRALS pool — every 'employee' (so
-  // Bella/Mica and future hires are included automatically, same as Chase/etc).
-  const POOL_REPS=(config.users||[]).filter(u=>u.role==='employee').map(u=>u.name);
-  // Per-pool rep lists. VIRALS is ALSO worked by JC (on top of High Ticket), so it
-  // splits 4 ways (employees + JC); MSN stays the employees only.
-  const poolRepsFor = pid => (pid==='virals' && !POOL_REPS.includes('JC')) ? POOL_REPS.concat(['JC']) : POOL_REPS;
-  const poolShareRep = (l, reps) => { reps=(reps&&reps.length)?reps:POOL_REPS; if(!reps.length) return null; const k=leadKey(l)||String(l.id||''); let h=0; for(let i=0;i<k.length;i++) h=((h<<5)-h+k.charCodeAt(i))|0; return reps[Math.abs(h)%reps.length]; };
+  // Bella/Mica and future hires are included automatically, same as Chase/etc),
+  // EXCEPT the Demo account (tutorial/testing only — it must never hold real leads).
+  const POOL_REPS=(config.users||[]).filter(u=>u.role==='employee' && u.name!=='Demo account').map(u=>u.name);
+  // Per-pool rep lists. High Ticket is JC ONLY (not split among the floor reps).
+  // VIRALS is ALSO worked by JC (on top of High Ticket), so it splits across the
+  // employees + JC; MSN stays the employees only.
+  const poolRepsFor = pid => pid==='highticket' ? ['JC'] : ((pid==='virals' && !POOL_REPS.includes('JC')) ? POOL_REPS.concat(['JC']) : POOL_REPS);
+  const poolShareRep = (l, reps) => { reps=(reps&&reps.length)?reps:POOL_REPS; if(!reps.length) return null; const k=leadKey(l)||String(l.id||''); return reps[strHash32(k)%reps.length]; };
   // JC works ONLY the High Ticket pool; the three reps (+ everyone else) work
   // MSN/VIRALS and never see High Ticket. Admins see every pool for oversight.
   const isJC = !!(currentUser && currentUser.name==='JC');
@@ -10132,6 +10766,13 @@ function App() {
     && (isAdmin || (currentUser && l.assignedTo===currentUser.name)));
   // High Ticket = admins + JC. MSN = reps + admins, NOT JC. VIRALS = everyone
   // (admins, the reps, AND JC — JC now shares the VIRALS split too).
+  // Admin-only monitoring: how the pool's unclaimed candidates split per rep (same
+  // deterministic slice each rep actually works), biggest pile first.
+  const poolBreakdown = pid => {
+    const reps=poolRepsFor(pid); const m={};
+    poolLeads(pid).forEach(l=>{ const r=poolShareRep(l,reps)||'—'; m[r]=(m[r]||0)+1; });
+    return Object.entries(m).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
+  };
   const poolVisibleToUser = pid => pid==='highticket' ? canSeeHighTicket : (pid==='virals' ? true : (isAdmin || !isJC));
   const visiblePools = POOLS.filter(p=>poolVisibleToUser(p.id));
 
@@ -10164,7 +10805,7 @@ function App() {
 
   function renderMain(){
     if(showRepSelect) return <RepSelectScreen leads={vLeads} config={config} activeRep={activeRep} onSelect={r=>{if(r){setActiveRep(r);setTab('rep-home');}setShowRepSelect(false);}}/>;
-    if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onBack={()=>setTab('home')} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead} isLeadgen={!!(currentUser&&currentUser.role==='leadgen')}/>;
+    if(tab==='rep-home'&&activeRep) return <RepDashboard rep={activeRep} leads={vLeads} config={config} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onValidateEmails={validateEmails} onCheckClose={checkCloseStatus} onBack={canBack?goBack:(()=>setTab('home'))} canBack={canBack} onImportClose={importToClose} onImportSmartReach={importToSmartReach} onAddLead={addLead} isLeadgen={!!(currentUser&&currentUser.role==='leadgen')}/>;
     if(tab==='home') return <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='leaves') return <LeavesView leaves={leaves} currentUser={currentUser} isAdmin={isAdmin} onFile={fileLeave} onDecide={decideLeave} onDelete={deleteLeave}/>;
     if(tab==='knowledge') return <KnowledgeBaseView articles={kbArticles} tools={config.kbTools||(typeof KB_TOOLS!=='undefined'?KB_TOOLS:[])} isAdmin={isAdmin} onSave={saveArticle} onDelete={deleteArticle} onDeleteTool={deleteKbTool} onStartTour={()=>{ setTab('knowledge'); setShowRepSelect(false); setTourOpen(true); }} dark={darkMode}/>;
@@ -10184,7 +10825,7 @@ function App() {
     // Unassigned — a SHARED board of scraped leads nobody has claimed. Everyone
     // sees the same list and can "Claim to me" (→ assigns it to them, moving it
     // into their own queue to qualify), same claim flow as the pools.
-    if(tab==='unassigned') return <LeadsTable leads={vLeads.filter(l=>isUnassignedLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} claimLabel="⚡ Claim to me" claimTitle="Assign the selected leads to you and move them into your queue" showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="unassigned_leads" printTitle="Unassigned Leads"/>;
+    if(tab==='unassigned') return <LeadsTable key="tab-unassigned" leads={myUnassignedLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} claimLabel="⚡ Claim to me" claimTitle="Assign the selected leads to you and move them into your queue" showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} repFilterField="scrapedBy" repBreakdown={isAdmin?unassignedByScraper:null} breakdownField="scrapedBy" config={config} feats={config.features||{}} campColorMap={campColorMap} filename="unassigned_leads" printTitle="Unassigned Leads"/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     // NQ (Not Qualified): rep-scoped like Pending — reps see only their own.
     if(tab==='nq') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="nq_leads" printTitle="Not Qualified (NQ)"/>;
@@ -10194,12 +10835,12 @@ function App() {
     // Contacted is unassigned, so everyone sees the same board and whoever gets
     // there first picks it up. "Pick up & re-qualify" claims it AND tags it
     // Potential in one step so it lands straight in that rep's queue.
-    if(tab==='recycle') return <RecycleView leads={vLeads.filter(l=>l.tags.includes('For Recycle'))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={claimRecycled} onAutoDistribute={isAdmin?autoDistributeRecycle:null} isAdmin={isAdmin} config={config} campColorMap={campColorMap}/>;
+    if(tab==='recycle') return <RecycleView leads={myRecycleLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={claimRecycled} onAutoDistribute={isAdmin?autoDistributeRecycle:null} isAdmin={isAdmin} shareRep={recycleShareRep} breakdownReps={recycleReps} config={config} campColorMap={campColorMap}/>;
     // Already Partner: the lead is won and out of the pipeline. Reps see their
     // own, admins see everyone's — same scoping as Pending.
     if(tab==='partner') return <LeadsTable leads={vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="already_partner" printTitle="Already Partner"/>;
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
-    if(tab==='duplicates') return <DuplicatesView groups={myDupGroups} config={config} onSave={saveL} onDelete={delL} addToast={addToast}/>;
+    if(tab==='duplicates') return <DuplicatesView groups={myDupGroups} config={config} isAdmin={isAdmin} onSave={saveL} onDelete={delL} onBulkDelete={removeDuplicateExtras} addToast={addToast}/>;
     if(tab==='archive') return isAdmin ? <ArchiveView loadArchived={loadArchivedFromSupabase} onRestore={restoreArchived} config={config} campColorMap={campColorMap} addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='restore') return isAdmin ? <RestorePointsView addToast={addToast} currentUser={currentUser}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='errors') return isAdmin ? <ErrorLogView addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
@@ -10213,7 +10854,7 @@ function App() {
       // High Ticket is JC-only; JC in turn only works High Ticket. Bounce to Home
       // anyone who reaches a pool they shouldn't see.
       if(!poolVisibleToUser(pid)) return <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
-      if(pool) return <LeadsTable leads={poolTabLeads(pid)} searchAlsoLeads={poolClaimedLeads(pid)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} showAssigned showOrigin showCampaign hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename={`pool_${pid}`} printTitle={`${pool.label} Pool`}/>;
+      if(pool) return <LeadsTable key={"tab-pool-"+pid} leads={poolTabLeads(pid)} searchAlsoLeads={poolClaimedLeads(pid)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} showAssigned showOrigin showCampaign hideRepFilter={!isAdmin} repBreakdown={isAdmin?poolBreakdown(pid):null} config={config} feats={config.features||{}} campColorMap={campColorMap} filename={`pool_${pid}`} printTitle={`${pool.label} Pool`}/>;
     }
     const camp=(config.campaigns||[]).find(c=>c.id.toLowerCase()===tab);
     if(camp) return <CampaignView campaign={camp} campColor={camp.color} leads={vLeads} onSave={saveL} onBulkAssign={bulkAssign} addToast={addToast} config={config} isAdmin={isAdmin} currentUser={currentUser}/>;
@@ -10278,7 +10919,7 @@ function App() {
   if(!currentUser) return <>{updateBanner}<LoginScreen config={config} onLogin={login}/></>;
 
   return (
-    <DupContext.Provider value={dupIndex}>
+    <DupContext.Provider value={dupCtxValue}>
     <AdminContext.Provider value={adminCtxValue}>
     <PresenceContext.Provider value={presenceValue}>
     <div id="root" style={{display:'flex',flexDirection:'column',height:'100vh'}}>
@@ -10299,6 +10940,7 @@ function App() {
         </button>
         <div style={{flex:1}}/>
         <div className="topbar-right">
+          <WhosOnlineTopbar config={config}/>
           <button className="topbar-icon-btn" data-tour="tb-search" onClick={()=>setShowSearch(true)} title="Search dashboard (Ctrl/⌘ + K)" aria-label="Search dashboard">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </button>
@@ -10324,6 +10966,7 @@ function App() {
                       <span>🔔 Replies &amp; Alerts · {allMode?'all reps':currentUser.name}</span>
                       <div style={{display:'flex',gap:6,alignItems:'center'}}>
                         {isAdmin && <button className="btn btn-ghost btn-xs" onClick={()=>setBellScope(s=>s==='all'?'mine':'all')} title="Switch between your messages and everyone's">{allMode?'👤 Mine':'👥 All reps'}</button>}
+                        {isAdmin && <button className={`btn btn-xs ${bellRange==='7d'?'btn-primary':'btn-ghost'}`} onClick={()=>setBellRange(r=>r==='7d'?'recent':'7d')} title="Show the full last-7-days history of SmartReach sends">{bellRange==='7d'?'🕔 7 days ✓':'🕔 7 days'}</button>}
                         <button className="btn btn-ghost btn-xs" onClick={()=>loadReplies()} disabled={repliesLoading}>{repliesLoading?'…':'⟳ Check'}</button>
                       </div>
                     </div>
@@ -10343,8 +10986,14 @@ function App() {
                           <span className="bell-open" style={{cursor:'pointer'}} onClick={()=>{ setShowBell(false); setTab('duplicates'); }}>Open Duplicates ↗</span>
                         </div>
                       ))}
-                      {/* SmartReach sends — admins get told whenever a rep pushes leads to SR. */}
-                      {srSends.slice(0,20).map(s=>{
+                      {/* SmartReach sends — admins get told whenever a rep pushes leads to SR.
+                          The "7 days" toggle expands from the recent few to the full week. */}
+                      {isAdmin && bellRange==='7d' && srSends.length>0 && (
+                        <div className="bell-daydivider" style={{padding:'6px 14px',fontSize:11,fontWeight:700,letterSpacing:.3,textTransform:'uppercase',color:'var(--text-dim)'}}>
+                          SmartReach — last 7 days ({srSends.length})
+                        </div>
+                      )}
+                      {srSends.slice(0, bellRange==='7d'?300:20).map(s=>{
                         const m=/^SmartReach:\s*(\d+)\s*→\s*(.+?)\s*\(([^)]+)\)\s*$/.exec(s.text)||[];
                         const cnt=m[1], dest=m[2], who=m[3]||s.rep||'A rep';
                         return (
