@@ -554,6 +554,21 @@ function _channelHandle(u){
   if(m=s.match(/^@([^\s/?#]+)/)) return '@'+m[1];
   return '';
 }
+// TikTok / Instagram PROFILE key, namespaced by platform: "tt:@name" / "ig:name".
+// Without the prefix a TikTok "@name" collided with a YouTube "@name" handle (two
+// different creators read as one lead), and Instagram "/name/reels" vs "/name"
+// variants of the same profile read as two. Post/reel URLs ("/p/…", "/reel/…")
+// aren't profiles → '' so they fall through to the full-URL key.
+const _IG_NON_PROFILE=new Set(['p','reel','reels','tv','explore','stories','accounts','direct','about','developer','legal']);
+function _socialKey(u){
+  let s=String(u||'');
+  try{ s=decodeURIComponent(s); }catch(e){}
+  s=s.trim().toLowerCase().replace(/^https?:\/\//,'').replace(/^(www\.|m\.|vm\.)/,'');
+  let m;
+  if(m=s.match(/^tiktok\.com\/@([^\s/?#]+)/)) return 'tt:@'+m[1];
+  if((m=s.match(/^instagram\.com\/([^\s/?#]+)/)) && !_IG_NON_PROFILE.has(m[1])) return 'ig:'+m[1];
+  return '';
+}
 function leadKey(l){
   if(!l) return '';
   // 1) YouTube channel id (UC…) — from channelId, then anywhere in url/channelUrl
@@ -563,6 +578,10 @@ function leadKey(l){
   let uc=_ucId(l.url)||_ucId(l.channelUrl)||_ucId(cid);
   if(!uc && Array.isArray(l.links)) for(const x of l.links){ uc=_ucId(x&&(x.url||x)); if(uc) break; }
   if(uc) return uc;
+  // 1b) TikTok / Instagram profile — before the handle step so "tiktok.com/@x"
+  //     never collapses onto a YouTube "@x".
+  const soc=_socialKey(l.url)||_socialKey(l.channelUrl);
+  if(soc) return soc;
   // 2) Canonical channel handle/path — collapses URL-format variants of the same
   //    channel (trailing slash, /videos, case, %-encoding) that the raw-URL fallback
   //    used to miss, letting a real duplicate slip through as "distinct".
@@ -5916,8 +5935,33 @@ const FOLLOWER_BRACKETS=[
   { v:'1M',   label:'1M+',           min:1000000, max:Infinity },
 ];
 
+// TikTok / Instagram scraping (ADMIN BETA, 2026-10-16). yt-scrape only knows
+// YouTube, so these go to the separate `social-scrape` Edge Function (Apify):
+// start a run, then poll until it finishes (TikTok runs take ~1-2 min). Results
+// come back already filtered (India/PK/BD, kids, inactive 180d+) and shaped for
+// mapDiscoveryResult. Only admins are offered these platforms.
+const SOCIAL_PLATFORMS=['TikTok','Instagram'];
+async function runSocialScrape(platform, keyword, limit){
+  const url=DEFAULT_CONFIG.supabaseUrl+'/functions/v1/social-scrape';
+  const key=DEFAULT_CONFIG.supabaseKey;
+  const call=async(body)=>{
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',apikey:key,Authorization:'Bearer '+key},body:JSON.stringify({platform:platform.toLowerCase(),limit,...body})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok || j.error) throw new Error(j.error||('HTTP '+r.status));
+    return j;
+  };
+  const {runId}=await call({action:'start',keyword});
+  for(let i=0;i<60;i++){                      // ~4 min ceiling
+    await new Promise(res=>setTimeout(res,4000));
+    const j=await call({action:'poll',runId});
+    if(j.status==='done') return {results:j.results||[], stats:j.stats||{}};
+  }
+  throw new Error(platform+' scrape is taking too long — try again in a minute');
+}
+
 function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,onResults,addToast,config,currentUser}) {
   const [platform,setPlatform]=useState('All');
+  const isAdmin=isAdminUser(currentUser);
   const [minF,setMinF]=useState('10K');
   // Remember the chosen language across reloads so it "sticks".
   const [language,setLanguage]=useState(()=>{ try{ return localStorage.getItem('srLanguage')||'All'; }catch(e){ return 'All'; } });
@@ -5930,7 +5974,9 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
 
   async function scrape(){
     const wh=(config.scrapeWebhook||'').trim();
-    if(!wh || wh.includes('your-') || wh.includes('webhook-id')){
+    const isSocial=SOCIAL_PLATFORMS.includes(platform);
+    if(isSocial && !isAdmin){ addToast('TikTok / Instagram scraping is in admin beta','info'); return; }
+    if(!isSocial && (!wh || wh.includes('your-') || wh.includes('webhook-id'))){
       addToast('No scraper webhook set — add it in ⚙ Customize → Scraper Webhook','info');
       return;
     }
@@ -5971,11 +6017,22 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
     const MAX_PAGES = isAnyBracket ? 1 : 5;
     const buckets={kept:[],unknown:[],below:[],above:[]};
     let lastToken=pageToken, pagesFetched=0, totalItems=0, warned=false;
+    // Bucket each channel: in-bracket / unknown subs / below / above. Unknown
+    // and out-of-band are dropped for a specific bracket; everything passes
+    // for "Any followers".
+    const bucketize=(mapped)=>mapped.forEach(l=>{ const f=parseFollowers(l.followers); if(isAnyBracket){ buckets.kept.push(l); return; } if(!f){ buckets.unknown.push(l); return; } if(f<effMin){ buckets.below.push(l); } else if(f>=br.max){ buckets.above.push(l); } else { buckets.kept.push(l); } });
 
     setLoading(true);
-    addToast('Running scraper…','info');
+    addToast(isSocial?`Running ${platform} scraper (beta) — this can take 1–2 minutes…`:'Running scraper…','info');
     try{
-      for(let page=0; page<MAX_PAGES; page++){
+      if(isSocial){
+        // One Apify run, no paging (the actors have no cursor). A narrow bracket
+        // asks for the 50-result max so more land inside it.
+        const {results}=await runSocialScrape(platform, kw, isAnyBracket?30:50);
+        totalItems=results.length; pagesFetched=1;
+        bucketize(results.map((it,i)=>mapDiscoveryResult(it,platform,i)));
+      }
+      else for(let page=0; page<MAX_PAGES; page++){
         let extraQuery=baseExtra;
         if(lastToken) extraQuery+='&pageToken='+encodeURIComponent(lastToken);
         const payload={ type:'search', platform, keyword:kw, interest:'', language, relevanceLanguage, pageToken:lastToken, extraQuery, apiKey, minFollowers:parseFollowers(minF), maxFollowers:null, limit:50 };
@@ -6006,11 +6063,10 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
         }
         const items=Array.isArray(data)?data:(data.results||data.items||data.data||[]);
         totalItems+=items.length;
-        const mapped=items.map((it,i)=>mapDiscoveryResult(it,platform==='All'?null:platform,page*50+i));
-        // Bucket each channel: in-bracket / unknown subs / below / above. Unknown
-        // and out-of-band are dropped for a specific bracket; everything passes
-        // for "Any followers".
-        mapped.forEach(l=>{ const f=parseFollowers(l.followers); if(isAnyBracket){ buckets.kept.push(l); return; } if(!f){ buckets.unknown.push(l); return; } if(f<effMin){ buckets.below.push(l); } else if(f>=br.max){ buckets.above.push(l); } else { buckets.kept.push(l); } });
+        // yt-scrape only ever returns YouTube channels — label them YouTube no
+        // matter what the dropdown says (it used to stamp the selected platform,
+        // so picking "Instagram" mislabelled YouTube channels).
+        bucketize(items.map((it,i)=>mapDiscoveryResult(it,'YouTube',page*50+i)));
         lastToken=nextToken; pagesFetched++;
         if(buckets.kept.length>=TARGET) break;   // enough matches collected
         if(!nextToken) break;                     // no more pages from YouTube
@@ -6026,7 +6082,7 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
     }
     // Save the cursor so the next run continues deeper (fresh channels). Clear
     // when YouTube has no more pages so an identical search restarts from the top.
-    try{ if(lastToken) localStorage.setItem(pageKey,lastToken); else localStorage.removeItem(pageKey); }catch(e){}
+    if(!isSocial){ try{ if(lastToken) localStorage.setItem(pageKey,lastToken); else localStorage.removeItem(pageKey); }catch(e){} }
 
     const kept = buckets.kept;
     const skipped = buckets.unknown.length + buckets.below.length + buckets.above.length;
@@ -6076,7 +6132,8 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
     <>
       <select value={platform} onChange={e=>setPlatform(e.target.value)} title="Platform">
         <option value="All">All Platforms</option>
-        {PLATFORMS.map(p=><option key={p}>{p}</option>)}
+        {/* TikTok / Instagram are admin beta — reps see YouTube only. */}
+        {PLATFORMS.filter(p=>isAdmin || !SOCIAL_PLATFORMS.includes(p)).map(p=><option key={p} value={p}>{p}{SOCIAL_PLATFORMS.includes(p)?' (beta)':''}</option>)}
       </select>
       <select value={minF} onChange={e=>setMinF(e.target.value)} title="Follower bracket">
         {FOLLOWER_BRACKETS.map(b=><option key={b.v||'any'} value={b.v}>{b.label}</option>)}
