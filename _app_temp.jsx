@@ -139,6 +139,21 @@ function canonTag(raw){
 // id "VIRALS (VVV)" instead of adding a second stray tag. Unknown values are kept
 // verbatim. Matches by: exact (normalized) id/label, then id-prefix either way,
 // then the viral/vvv brand family, then substring.
+// The platform a lead really belongs to — URL first, because many hand-imported
+// TikTok/Instagram leads carry platform "Youtube"; then the platform field.
+function leadPlatform(l){
+  const u=String((l&&(l.url||l.channelUrl))||'').toLowerCase();
+  if(u.includes('tiktok.com')) return 'TikTok';
+  if(u.includes('instagram.com')) return 'Instagram';
+  if(u.includes('youtube.com')||u.includes('youtu.be')) return 'YouTube';
+  const p=String((l&&l.platform)||'').toLowerCase();
+  return p==='tiktok'?'TikTok':p==='instagram'?'Instagram':'YouTube';
+}
+// A campaign can be limited to certain platforms via campaign.platforms (e.g. CS =
+// ['TikTok','Instagram']). A lead on another platform keeps the campaign tag but
+// doesn't count toward, or show in, that campaign. No list = every platform.
+function campaignCountsLead(c,l){ return !c || !Array.isArray(c.platforms) || !c.platforms.length || c.platforms.includes(leadPlatform(l)); }
+function countsInCampaign(l,c){ return !!c && (l.campaigns||[]).includes(c.id) && campaignCountsLead(c,l); }
 function canonCampaign(raw, campaigns){
   const v=String(raw||'').trim(); if(!v) return '';
   const list=Array.isArray(campaigns)?campaigns:[];
@@ -3254,6 +3269,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
 
   const campDefs=(config.campaigns||[]).map(c=>({id:c.id,label:c.label,color:c.color,logo:c.logo||''}));
   const campIds=campDefs.map(c=>c.id);
+  const campById={}; (config.campaigns||[]).forEach(c=>{ campById[c.id]=c; });
   const allReps=(config.salesReps||[]);
   const reps=lockedRep?allReps.filter(r=>r===lockedRep):allReps;
 
@@ -3305,7 +3321,7 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
     campIds.forEach(c=>{ byCamp[c]=EMPTY(); });
     leads.forEach(l=>{
       const rep=l.assignedTo;
-      const camps=(l.campaigns||[]).filter(c=>campIds.includes(c));
+      const camps=(l.campaigns||[]).filter(c=>campIds.includes(c) && campaignCountsLead(campById[c],l));
       const assignedIn=inW(l.dateAssigned);
       const contactedIn=isDirectContacted(l) && inW(l.lastContactDate);
       const isPend=(l.tags||[]).includes('Pending Qualification');
@@ -4903,7 +4919,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const sHt=scopedLeads.filter(l=>l.tags.includes('HT')).length;
   const scopeNote=isDayView?(quotaDay===todayStr?'today':quotaDay):'all dates';
   // Open (uncontacted) potentials per campaign, same scope as the tiles above.
-  const openPotential=(campId)=>sPotentialLeads.filter(l=>!isContacted(l)&&(l.campaigns||[]).includes(campId)).length;
+  const openPotential=(campId)=>{ const c=(config.campaigns||[]).find(x=>x.id===campId)||{id:campId}; return sPotentialLeads.filter(l=>!isContacted(l)&&countsInCampaign(l,c)).length; };
   const openTotalAll=sPotentialLeads.filter(l=>!isContacted(l)).length;
 
   const repColor=(config.repColors||{})[rep]||'#5b5bd6';
@@ -6375,7 +6391,7 @@ function CampaignView({campaign,campColor,leads,onSave,onBulkAssign,addToast,con
   // own leads here, admins see the whole team's. Without this a rep opening MSN
   // was looking at everyone's book.
   const mine=isAdmin?leads:leads.filter(l=>!!currentUser && l.assignedTo===currentUser.name);
-  const inCampaign=mine.filter(l=>l.campaigns.includes(campaign.id));
+  const inCampaign=mine.filter(l=>countsInCampaign(l,campaign));
   // Default = the workable "to-contact" queue (Potential/HT) so a rep's daily list
   // stays clean. The toggle reveals EVERY status in the campaign (incl. Contacted /
   // Partner) so the FULL book is visible in one place — a rep's 43 Potential reading
@@ -7555,6 +7571,10 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
   function addCamp(){const lab=newCamp.label.trim().toUpperCase();if(!lab)return;setLocal(l=>({...l,campaigns:[...l.campaigns,{id:lab,label:lab,color:newCamp.color}]}));setNewCamp({label:'',color:'#1366D6'});}
   function remCamp(id){setLocal(l=>({...l,campaigns:l.campaigns.filter(c=>c.id!==id)}));}
   function updCampColor(id,col){setLocal(l=>({...l,campaigns:l.campaigns.map(c=>c.id===id?{...c,color:col}:c)}));}
+  // Which platforms a campaign counts ('' = all). See campaignCountsLead().
+  const CAMP_PLATFORM_OPTS=[{v:'',label:'All platforms',list:null},{v:'social',label:'TikTok + Instagram only',list:['TikTok','Instagram']},{v:'yt',label:'YouTube only',list:['YouTube']}];
+  const campPlatformVal=c=>{ const p=(c.platforms||[]).slice().sort().join(','); return p==='Instagram,TikTok'?'social':p==='YouTube'?'yt':''; };
+  function updCampPlatforms(id,v){ const o=CAMP_PLATFORM_OPTS.find(x=>x.v===v); setLocal(l=>({...l,campaigns:l.campaigns.map(c=>{ if(c.id!==id) return c; const n={...c}; if(o&&o.list) n.platforms=o.list; else delete n.platforms; return n; })})); }
   // ── Sales-rep quota editor ──────────────────────────────────
   // Quotas drive the Home Performance-KPI board (contacted target per tier per
   // campaign). Seeded off the CURRENT (loaded) campaigns so ids always match.
@@ -7664,6 +7684,9 @@ function SettingsDrawer({config,onConfig,onClose,addToast}) {
                 <div className="edit-row" key={c.id}>
                   <input type="color" className="color-swatch" value={c.color} onChange={e=>updCampColor(c.id,e.target.value)}/>
                   <input value={c.label} readOnly style={{color:'var(--text-dim)',flex:1}}/>
+                  <select value={campPlatformVal(c)} onChange={e=>updCampPlatforms(c.id,e.target.value)} title="Which platforms this campaign counts" style={{fontSize:11.5,maxWidth:150}}>
+                    {CAMP_PLATFORM_OPTS.map(o=><option key={o.v} value={o.v}>{o.label}</option>)}
+                  </select>
                   <button className="btn btn-danger btn-xs" onClick={()=>remCamp(c.id)}>✕</button>
                 </div>
               ))}
@@ -11170,7 +11193,7 @@ function App() {
               const id=c.id.toLowerCase();
               // Scoped like every other lead tab: a rep's badge counts THEIR
               // leads in that campaign, admins see the whole team's.
-              const cnt=vLeads.filter(l=>l.campaigns.includes(c.id) && isWorkable(l) && canSeeLead(l)).length;
+              const cnt=vLeads.filter(l=>countsInCampaign(l,c) && isWorkable(l) && canSeeLead(l)).length;
               return(
                 <div key={id} title={c.label} className={`nav-item ${tab===id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(id);}}>
                   {c.logo
