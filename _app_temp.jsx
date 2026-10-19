@@ -5954,20 +5954,22 @@ const FOLLOWER_BRACKETS=[
 // TikTok / Instagram scraping (ADMIN BETA, 2026-10-16). yt-scrape only knows
 // YouTube, so these go to the separate `social-scrape` Edge Function (Apify):
 // start a run, then poll until it finishes (TikTok runs take ~1-2 min). Results
-// come back already filtered (India/PK/BD, kids, inactive 180d+) and shaped for
-// mapDiscoveryResult. Only admins are offered these platforms.
+// come back already filtered (India/PK/BD, kids, inactive 180d+, follower range,
+// and accounts that aren't actually about the searched niche), best `want` first,
+// shaped for mapDiscoveryResult. Only admins are offered these platforms.
 const SOCIAL_PLATFORMS=['TikTok','Instagram'];
-async function runSocialScrape(platform, keyword, limit){
+const SOCIAL_RESULTS=10;
+async function runSocialScrape(platform, keyword, {want=SOCIAL_RESULTS, minFollowers=0, maxFollowers=0}={}){
   const url=DEFAULT_CONFIG.supabaseUrl+'/functions/v1/social-scrape';
   const key=DEFAULT_CONFIG.supabaseKey;
   const call=async(body)=>{
-    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',apikey:key,Authorization:'Bearer '+key},body:JSON.stringify({platform:platform.toLowerCase(),limit,...body})});
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',apikey:key,Authorization:'Bearer '+key},body:JSON.stringify({platform:platform.toLowerCase(),keyword,want,minFollowers,maxFollowers,...body})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok || j.error) throw new Error(j.error||('HTTP '+r.status));
     return j;
   };
   const {runId}=await call({action:'start',keyword});
-  for(let i=0;i<60;i++){                      // ~4 min ceiling
+  for(let i=0;i<90;i++){                      // ~6 min ceiling (a follower range runs 3 searches)
     await new Promise(res=>setTimeout(res,4000));
     const j=await call({action:'poll',runId});
     if(j.status==='done') return {results:j.results||[], stats:j.stats||{}};
@@ -6032,20 +6034,22 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
     const TARGET = 24;
     const MAX_PAGES = isAnyBracket ? 1 : 5;
     const buckets={kept:[],unknown:[],below:[],above:[]};
-    let lastToken=pageToken, pagesFetched=0, totalItems=0, warned=false;
+    let lastToken=pageToken, pagesFetched=0, totalItems=0, warned=false, socialStats=null;
     // Bucket each channel: in-bracket / unknown subs / below / above. Unknown
     // and out-of-band are dropped for a specific bracket; everything passes
     // for "Any followers".
     const bucketize=(mapped)=>mapped.forEach(l=>{ const f=parseFollowers(l.followers); if(isAnyBracket){ buckets.kept.push(l); return; } if(!f){ buckets.unknown.push(l); return; } if(f<effMin){ buckets.below.push(l); } else if(f>=br.max){ buckets.above.push(l); } else { buckets.kept.push(l); } });
 
     setLoading(true);
-    addToast(isSocial?`Running ${platform} scraper (beta) — this can take 1–2 minutes…`:'Running scraper…','info');
+    addToast(isSocial?`Running ${platform} scraper (beta) — this can take ${isAnyBracket?'1–2':'2–4'} minutes…`:'Running scraper…','info');
     try{
       if(isSocial){
-        // One Apify run, no paging (the actors have no cursor). A narrow bracket
-        // asks for the 50-result max so more land inside it.
-        const {results}=await runSocialScrape(platform, kw, isAnyBracket?30:50);
-        totalItems=results.length; pagesFetched=1;
+        // One Apify run, no paging (the actors have no cursor). The function
+        // applies the follower bracket and the niche check itself and returns
+        // the best SOCIAL_RESULTS accounts.
+        const {results,stats}=await runSocialScrape(platform, kw, { want:SOCIAL_RESULTS,
+          minFollowers:isAnyBracket?0:effMin, maxFollowers:(isAnyBracket||br.max===Infinity)?0:br.max });
+        totalItems=results.length; pagesFetched=1; socialStats=stats;
         bucketize(results.map((it,i)=>mapDiscoveryResult(it,platform,i)));
       }
       else for(let page=0; page<MAX_PAGES; page++){
@@ -6120,7 +6124,21 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
       if(skipped && buckets.unknown.length===skipped) emptyMsg=`All ${skipped} channels came back with unknown subscriber counts (channels.list isn't enriching). Check your API key's Application Restrictions in Google Cloud Console — set them to "None" for server-side use.`;
       else if(skipped) emptyMsg=`No matches for ${br.label} across ${pagesFetched} page(s) (${skipDetail}). Try a wider bracket, a different keyword, or run again to page deeper.`;
       else emptyMsg='Scraper ran but returned 0 profiles';
-      const okMsg = `✓ ${results.length} lead(s) scraped`+(rangeLabel?` (${rangeLabel})`:'')+extra;
+      // TikTok/IG filter server-side, so say what the function dropped and why.
+      let socialNote='';
+      if(socialStats && results.length<SOCIAL_RESULTS){
+        const s=socialStats, why=[];
+        if(s.alreadyLeads) why.push(`${s.alreadyLeads} already leads`);
+        if(s.outOfRange) why.push(`${s.outOfRange} outside ${br.label}`);
+        if(s.offNiche)   why.push(`${s.offNiche} not about "${kw}"`);
+        if(s.stale)      why.push(`${s.stale} inactive`);
+        if(s.excluded)   why.push(`${s.excluded} excluded (region/kids)`);
+        socialNote=` · of ${s.found||0} ${platform} accounts found: ${why.join(', ')||'none matched'}`;
+        if(!results.length) emptyMsg=`No ${platform} accounts matched${socialNote.replace(' · ',' — ')}. Try a wider follower range or a broader keyword.`;
+      }
+      // social-scrape reuses saved searches (see its CREDIT SAVERS note) — say so.
+      if(socialStats && socialStats.paidRuns===0) socialNote+=' · from saved results, no Apify credit used';
+      const okMsg = `✓ ${results.length} lead(s) scraped`+(rangeLabel?` (${rangeLabel})`:'')+extra+socialNote;
       addToast(results.length ? okMsg : emptyMsg,'success');
     };
     if(checkWh && kept.length){
