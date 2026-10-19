@@ -5958,7 +5958,7 @@ const FOLLOWER_BRACKETS=[
 // and accounts that aren't actually about the searched niche), best `want` first,
 // shaped for mapDiscoveryResult. Only admins are offered these platforms.
 const SOCIAL_PLATFORMS=['TikTok','Instagram'];
-const SOCIAL_RESULTS=10;
+const SOCIAL_RESULTS=25;   // results per TikTok/IG search (social-scrape MAX_WANT is 25)
 async function runSocialScrape(platform, keyword, {want=SOCIAL_RESULTS, minFollowers=0, maxFollowers=0}={}){
   const url=DEFAULT_CONFIG.supabaseUrl+'/functions/v1/social-scrape';
   const key=DEFAULT_CONFIG.supabaseKey;
