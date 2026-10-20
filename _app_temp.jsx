@@ -3665,71 +3665,11 @@ function HomeView({leads,config,currentUser,onOpenRep=null,onSaveConfig=null}) {
           </div>
         )}
 
-        {/* ── Hero + campaign cards ── */}
-        <div style={{display:'grid',gridTemplateColumns:'minmax(280px, 1.05fr) minmax(320px, 1.95fr)',gap:16,marginBottom:16}} className="lp-top">
-          {/* team hero */}
-          <div style={{background:'var(--hero-bg)',color:'#fff',borderRadius:22,padding:'22px 24px',display:'flex',flexDirection:'column',justifyContent:'space-between',border:'1px solid rgba(255,255,255,.06)'}}>
-            <div>
-              <div style={{fontSize:10.5,fontWeight:700,letterSpacing:'.12em',color:H.label}}>POTENTIALS TAGGED · {periodTag}</div>
-              <div style={{display:'flex',alignItems:'flex-end',gap:12,marginTop:14}}>
-                <div style={{fontFamily:SG,fontSize:54,fontWeight:800,lineHeight:.85,letterSpacing:'-.04em',fontVariantNumeric:'tabular-nums'}}>{fmt(T.potentials)}</div>
-                <div style={{padding:'4px 10px',borderRadius:999,background:H.chip,marginBottom:5}}
-                  title={`vs the previous ${period==='daily'?'day':period==='weekly'?'7 days':'30 days'} (${fmt(TP.potentials)})`}>
-                  <span style={{fontSize:11.5,fontWeight:700,color:heroDeltaFg}}>{heroDelta.label} vs prev</span>
-                </div>
-              </div>
-            </div>
-            <div style={{marginTop:22}}>
-              <div style={{display:'flex',height:11,borderRadius:999,overflow:'hidden',background:H.track,gap:3}}>
-                <div style={{background:H.good,width:pct(T.contacted,heroBase)+'%'}}/>
-                <div style={{background:H.warn,width:pct(T.pending,heroBase)+'%'}}/>
-                <div style={{background:H.neutral,width:pct(T.toWork,heroBase)+'%'}}/>
-              </div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginTop:14}}>
-                {heroSplit.map(h=>(
-                  <div key={h.label}>
-                    <div style={{display:'flex',alignItems:'center',gap:6}}>
-                      <span style={{width:7,height:7,borderRadius:999,background:h.dot}}/>
-                      <span style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:H.label}}>{h.label}</span>
-                    </div>
-                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4}}>{fmt(h.value)}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{marginTop:18,paddingTop:16,borderTop:'1px solid '+H.line}}>
-                {/* four stats + dividers can get tight in the hero column — allow
-                    them to wrap rather than push the page sideways */}
-                <div style={{display:'flex',alignItems:'center',gap:18,rowGap:12,flexWrap:'wrap'}}>
-                  <div title="Everything that landed on the team in this window, qualified or not — the raw intake, including untouched bulk-sheet imports">
-                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:H.label}}>ASSIGNED</div>
-                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:H.neutral}}>{fmt(T.assigned)}</div>
-                  </div>
-                  <div style={{width:1,height:30,background:H.line}}/>
-                  <div title="POTENTIAL leads that came from an existing/imported list rather than being sourced">
-                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:H.label}}>IMPORTED</div>
-                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:H.blue}}>{fmt(T.imported)}</div>
-                  </div>
-                  <div style={{width:1,height:30,background:H.line}}/>
-                  <div title="POTENTIAL leads the team SOURCED fresh — judged at discovery, so pushing them to Close doesn't erase the credit">
-                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:H.label}}>SOURCED</div>
-                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:H.violet}}>{fmt(T.sourced)}</div>
-                  </div>
-                  <div style={{width:1,height:30,background:H.line}}/>
-                  <div title="POTENTIAL leads not yet on Close — the still-to-push queue">
-                    <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.08em',color:H.label}}>FRESH</div>
-                    <div style={{fontSize:18,fontWeight:700,fontFamily:MONO,marginTop:4,color:H.bad}}>{fmt(T.fresh)}</div>
-                  </div>
-                </div>
-                <div style={{fontSize:11,color:H.faint,marginTop:12}}
-                  title="Tagged and assigned are different populations — the team can tag more than it was given by working through a backlog — so this is a plain comparison, not a conversion rate.">
-                  {fmt(T.potentials)} tagged from {fmt(T.assigned)} assigned {periodWord} · holding {fmt(T.potentialNow)} Potential now
-                </div>
-              </div>
-            </div>
-          </div>
-
+        {/* ── Campaign cards ── (the team "Potentials tagged" hero card was removed
+            2026-10-20 at the user's request; the campaign cards now take the full row) */}
+        <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr)',gap:16,marginBottom:16}} className="lp-top">
           {/* campaign cards */}
-          <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.max(1,Math.min(3,campDefs.length))}, minmax(0,1fr))`,gap:16}} className="lp-camps">
+          <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.max(1,Math.min(4,campDefs.length))}, minmax(0,1fr))`,gap:16}} className="lp-camps">
             {campDefs.map(c=>{
               const o=(lockedRep?repB[c.id]:S.byCamp[c.id])||EMPTY(), po=(lockedRep?repBP[c.id]:P.byCamp[c.id])||EMPTY();
               const d=deltaOf(o.potentials,po.potentials);
