@@ -92,7 +92,7 @@ function leadLocation(lead, config){
   if(isContacted(lead))            return {tab:'contacted',label:'Contacted Leads'};
   if(tags.includes('Pending Qualification')) return {tab:'pending', label:'Pending Qualification'};
   if(lead.pool && !lead.assignedTo && (lead.campaigns||[]).length===0){
-    const p={highticket:'High Ticket Pool',msn:'MSN Pool',virals:'VIRALS Pool'}[lead.pool];
+    const p={highticket:'High Ticket Pool',msn:'MSN Pool',virals:'VIRALS Pool',cs:'CS Pool'}[lead.pool];
     if(p) return {tab:'pool-'+lead.pool, label:p};
   }
   const camp=(config&&config.campaigns||[]).find(c=>(lead.campaigns||[]).includes(c.id));
@@ -671,7 +671,7 @@ function viewLabel(tab, activeRep, showRepSelect, config){
   const MAP={home:'Home',scraper:'Scraper','ai-scraper':'AI Scraper',history:'History','lead-mgmt':'Lead Management','google-import':'Google Sheets',agency:'Agency',leaves:'Leaves',knowledge:'Knowledge Base',attendance:'Attendance',archive:'Archive',restore:'Version History',errors:'Error Log',
     pending:'Pending Qualification',nq:'NQ',awaiting:'Awaiting Potential',contacted:'Contacted',recycle:'For Recycle',partner:'Already Partner',duplicates:'Duplicates'};
   if(MAP[tab]) return MAP[tab];
-  if(tab && tab.indexOf('pool-')===0){ const p=tab.slice(5); return ({highticket:'High Ticket Pool',msn:'MSN Pool',virals:'VIRALS Pool'})[p]||'Lead Pool'; }
+  if(tab && tab.indexOf('pool-')===0){ const p=tab.slice(5); return ({highticket:'High Ticket Pool',msn:'MSN Pool',virals:'VIRALS Pool',cs:'CS Pool'})[p]||'Lead Pool'; }
   const camp=((config&&config.campaigns)||[]).find(c=>String(c.id).toLowerCase()===String(tab).toLowerCase());
   if(camp) return `${camp.label} campaign`;
   return tab ? (String(tab).charAt(0).toUpperCase()+String(tab).slice(1)) : 'Home';
@@ -4707,7 +4707,7 @@ function AddLeadModal({rep,config,onAdd,onClose}) {
           setPlatform('YouTube');
           setLookMsg(`✓ Pulled “${d.name||'channel'}”${d.subs?` · ${d.subs} subs`:''}`);
           // Non-blocking Close duplicate check
-          if(checkWh){ fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads:[{key:0,channelId:d.channelId,url:d.url||u,emails:emails.split(/[,;\s]+/)}]})})
+          if(checkWh){ fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deep:true,leads:[{key:0,channelId:d.channelId,url:d.url||u,emails:emails.split(/[,;\s]+/),name:d.name||name}]})})
             .then(r=>r.json()).then(c=>{ if(c&&(c.existing||[]).length) setOnClose_(true); }).catch(()=>{}); }
         } else { setLookMsg("Couldn't read that channel — fill it in manually"); }
       })
@@ -6083,7 +6083,7 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
     };
     if(checkWh && kept.length){
       try{
-        const cr=await fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads:kept.map((l,i)=>({key:i,channelId:l.channelId,url:l.url,emails:l.emails}))})});
+        const cr=await fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deep:true,leads:kept.map((l,i)=>({key:i,channelId:l.channelId,url:l.url,emails:l.emails,name:l.channelName}))})});
         const resp=await cr.json();
         const ex=new Set((resp&&resp.existing)||[]);
         // Flag the in-Close channels (badge under the channel name) rather than dropping or tagging them.
@@ -9609,7 +9609,7 @@ function App() {
     const CAP=400;                                  // protect Close from huge bursts
     const batch=checkable.slice(0,CAP);
     addToast(`Checking ${batch.length}${checkable.length>CAP?' of '+checkable.length:''} ${sourceLabel} lead(s) against Close…`,'info');
-    fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads:batch.map((l,i)=>({key:i,channelId:l.channelId,url:l.url,emails:l.emails}))})})
+    fetch(checkWh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deep:true,leads:batch.map((l,i)=>({key:i,channelId:l.channelId,url:l.url,emails:l.emails,name:l.channelName}))})})
       .then(r=>r.json())
       .then(resp=>{
         if(!resp||resp.ok===false) return;
@@ -10757,6 +10757,9 @@ function App() {
     {id:'highticket',label:'High Ticket',icon:'⚡',color:'#E3A008'},
     {id:'msn',label:'MSN',icon:'📰',color:'#1366D6'},
     {id:'virals',label:'VIRALS',icon:'🔥',color:'#6554C0'},
+    // TikTok + Instagram, filled twice a day by the social-pool-fill edge fn
+    // (MSN niches, 100K–1M followers). Admin-only while in beta.
+    {id:'cs',label:'CS',icon:'📱',color:'#DB2777'},
   ];
   // A pool candidate = scraper-routed to a bucket and not yet claimed by anyone.
   // A lead sits in its pool only while it's an untouched candidate: not claimed
@@ -10811,7 +10814,7 @@ function App() {
     poolLeads(pid).forEach(l=>{ const r=poolShareRep(l,reps)||'—'; m[r]=(m[r]||0)+1; });
     return Object.entries(m).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
   };
-  const poolVisibleToUser = pid => pid==='highticket' ? canSeeHighTicket : (pid==='virals' ? true : (isAdmin || !isJC));
+  const poolVisibleToUser = pid => pid==='highticket' ? canSeeHighTicket : pid==='cs' ? isAdmin : (pid==='virals' ? true : (isAdmin || !isJC));
   const visiblePools = POOLS.filter(p=>poolVisibleToUser(p.id));
 
   const pendingLeaveCount = leaves.filter(l=>l && l.status==='Pending').length;   // for the admin Leaves nav badge
