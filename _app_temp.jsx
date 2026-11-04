@@ -321,6 +321,10 @@ const HISTORY_CAP=40;
 // leads" would otherwise write megabytes into one activity_log row.
 const PAYLOAD_CAP_BYTES=64*1024;
 // "Jul 9, 2026 · 2:34 PM" — 12-hour, local time.
+function fmtHistDate(ts){
+  const d=new Date(ts); if(isNaN(d)) return '';
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+}
 function fmtHistTime(ts){
   if(!ts) return '';
   const d=new Date(ts); if(isNaN(d)) return '';
@@ -395,7 +399,7 @@ function histSentence(e){
     case 'tag':       return e.to ? `${who} tagged it ${e.to}` : `${who} cleared the status`;
     case 'campaign':  return e.to ? `${who} set campaign to ${e.to}` : `${who} cleared the campaign`;
     case 'close':     return `${who} sent it to Close.io`;
-    case 'contact':   return e.manual ? `${who} corrected the last-contacted date` : `${who} logged a contact`;
+    case 'contact':   return e.manual ? `${who} corrected the last-contacted date` : (e.actor ? `${who} logged a contact` : `Contacted${e.tag?` (${e.tag})`:''}`);
     case 'recycle':   return e.via ? `Auto-recycled — ${e.via}` : `${who} recycled it — clock reset`;
     case 'merge':     return e.via ? `Merged — ${e.via}` : `${who} merged a duplicate record into this lead`;
     case 'smartreach':return `${who} sent it to SmartReach${e.to?` → ${e.to}`:''}`;
@@ -1595,8 +1599,45 @@ function ImportWarnModal({items,onKeepTag,onRemove,onKeepAll,onClose}){
 // ─── LEAD HISTORY PANEL ──────────────────────────────────
 // The lead's own record: who scraped it and who qualified it (with exact date +
 // 12-hour time) up top, then everything else that happened, oldest → newest.
+// Leads created before per-event logging (or by the pool scrapers, which insert
+// without history) have gaps. The panel FILLS them for display only — never
+// written back — from dates the lead already carries, each labelled with where
+// the date came from: added date → 'scraped', assigned date → 'assigned',
+// last-contacted date → 'contacted'. A contacted lead with no contact date at all
+// asks Close for its latest contact activity when the panel opens.
+const ymdToTs=d=>{ const s=toYmd(d); return s ? s+'T12:00:00' : ''; };   // local noon: date-only, no TZ day shift
+function derivedHistory(lead, closeDate){
+  const hist=(lead.history||[]).filter(e=>e && !(e.legacy && !e.ts));     // drop undated "before tracking" stubs
+  const has=fn=>hist.some(fn);
+  const extra=[];
+  const legacyScraped=(lead.history||[]).find(e=>e&&e.type==='scraped'&&e.legacy);
+  if(!has(e=>e.type==='scraped'&&e.ts) && lead.addedAt)
+    extra.push({type:'scraped', ts:lead.addedAt, actor:(legacyScraped&&legacyScraped.actor)||lead.scrapedBy||'', via:'date from when the lead was added', derived:true});
+  if(lead.assignedTo && !has(e=>e.type==='assigned') && ymdToTs(lead.dateAssigned))
+    extra.push({type:'assigned', ts:ymdToTs(lead.dateAssigned), from:'', to:lead.assignedTo, via:'date from the assigned date', derived:true, dateOnly:true});
+  const contacted=(lead.tags||[]).find(t=>/contacted/i.test(String(t)));
+  const hasContact=has(e=>e.ts && (e.type==='contact'||e.type==='smartreach'||(e.type==='tag'&&/contacted/i.test(String(e.to||'')))));
+  if(contacted && !hasContact){
+    if(ymdToTs(lead.lastContactDate)) extra.push({type:'contact', ts:ymdToTs(lead.lastContactDate), actor:'', tag:contacted, via:'date from the last-contacted date', derived:true, dateOnly:true});
+    else if(closeDate) extra.push({type:'contact', ts:closeDate, actor:'', tag:contacted, via:'date from Close activity', derived:true});
+  }
+  if(!extra.length) return hist;
+  const t=e=>{ const v=Date.parse(e.ts||''); return isNaN(v)?0:v; };
+  return [...hist, ...extra].sort((a,b)=>t(a)-t(b));
+}
 function LeadHistoryModal({lead,onClose}){
-  const hist=(lead.history||[]);
+  // Contacted but no contact date anywhere → look up Close's latest contact.
+  const [closeDate,setCloseDate]=useState(null);
+  const needClose=!!lead.closeLeadId && !lead.lastContactDate && (lead.tags||[]).some(t=>/contacted/i.test(String(t)))
+    && !(lead.history||[]).some(e=>e&&e.ts&&(e.type==='contact'||e.type==='smartreach'||(e.type==='tag'&&/contacted/i.test(String(e.to||'')))));
+  useEffect(()=>{
+    if(!needClose) return;
+    let live=true;
+    fetch(DEFAULT_CONFIG.supabaseUrl+'/functions/v1/close-last-contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leadIds:[lead.closeLeadId]})})
+      .then(r=>r.json()).then(res=>{ const d=res&&res.contacts&&res.contacts[lead.closeLeadId]; if(live&&d) setCloseDate(d); }).catch(()=>{});
+    return ()=>{ live=false; };
+  },[lead.id, needClose]);
+  const hist=derivedHistory(lead, closeDate);
   const firstOf=t=>hist.find(e=>e.type===t);
   const scraped=firstOf('scraped'), qualified=firstOf('qualified');
   function Fact({icon,label,ev,fallbackWho}){
@@ -1606,7 +1647,7 @@ function LeadHistoryModal({lead,onClose}){
         <div style={{fontSize:10,fontWeight:800,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text-dim)',marginBottom:6}}>{icon} {label}</div>
         <div style={{fontSize:17,fontWeight:700,letterSpacing:'-.01em',color:who?'var(--text)':'var(--text-light)'}}>{who||'No record'}</div>
         <div style={{fontSize:12.5,color:'var(--text-dim)',marginTop:3}}>
-          {ev&&ev.ts ? fmtHistTime(ev.ts)
+          {ev&&ev.ts ? (ev.dateOnly?fmtHistDate(ev.ts):fmtHistTime(ev.ts))+(ev.derived?' · from lead data':'')
             : ev&&ev.legacy ? <span style={{color:'var(--warn)'}}>on record before history tracking · date unknown</span>
             : <span style={{color:'var(--text-light)'}}>—</span>}
         </div>
@@ -1635,7 +1676,7 @@ function LeadHistoryModal({lead,onClose}){
             per-event history logging (which otherwise start at "Assigned to …"). */}
         {(()=>{
           const src=leadSource(lead);
-          const poolName={highticket:'High Ticket',msn:'MSN',virals:'VIRALS'}[lead.pool]||'';
+          const poolName={highticket:'High Ticket',msn:'MSN',virals:'VIRALS',cs:'CS'}[lead.pool]||'';
           const M={
             pool:   {icon:'🗂', text:'Lead pool'+(poolName?` · ${poolName}`:''), color:'#8B5CF6'},
             scraper:{icon:'🔍', text:'Scraper',              color:'#2563EB'},
@@ -1680,7 +1721,7 @@ function LeadHistoryModal({lead,onClose}){
                       {key && <span style={{marginLeft:7,fontSize:9.5,fontWeight:800,letterSpacing:'.05em',textTransform:'uppercase',color:'var(--accent)',background:'var(--accent-light)',padding:'2px 6px',borderRadius:4}}>Key</span>}
                     </div>
                     <div style={{fontSize:11.5,color:'var(--text-light)',marginTop:2,fontVariantNumeric:'tabular-nums'}}>
-                      {e.ts ? fmtHistTime(e.ts) : <span style={{color:'var(--warn)'}}>date unknown · recorded before history tracking</span>}
+                      {e.ts ? (e.dateOnly?fmtHistDate(e.ts):fmtHistTime(e.ts)) : <span style={{color:'var(--warn)'}}>date unknown · recorded before history tracking</span>}
                       {e.via?` · ${e.via}`:''}
                     </div>
                     {(e.from||e.to) && e.type!=='scraped' && (
