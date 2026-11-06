@@ -19,6 +19,7 @@ var STATUS_CLS = {
   'Not Qualified':  'tag-nq',
   'NQ':             'tag-nq',
   'Awaiting Potential': 'tag-awaiting',
+  'Invalid':        'tag-invalid',
   'Contacted':      'tag-contacted',
   'Existing Leads': 'tag-existing',
   'For Recycle':    'tag-recycle',

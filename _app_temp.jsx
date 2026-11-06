@@ -46,7 +46,7 @@ function isQualifiedLead(lead){
 // with HT always available. Falls back to the built-in STATUSES.
 function statusOptions(config){
   const base=(config&&Array.isArray(config.statusTags)&&config.statusTags.length)?config.statusTags:STATUSES;
-  return [...new Set([...base,'HT'])];
+  return [...new Set([...base,'HT','Invalid'])];
 }
 // Status tags that have their OWN dedicated tab. A lead carrying one has "landed"
 // there and should leave the general Scraper / Lead Management lists.
@@ -58,7 +58,7 @@ function statusOptions(config){
 // daily count credits the day it's tagged Potential). It has its own tab; the
 // rep re-tags it Potential the next day. Kept out of Pending and the general
 // working lists, and NOT counted as workable until promoted.
-const STATUS_TAB_TAGS = ['Pending Qualification','NQ','Awaiting Potential','Contacted','For Recycle','Partner'];
+const STATUS_TAB_TAGS = ['Pending Qualification','NQ','Awaiting Potential','Contacted','For Recycle','Partner','Invalid'];   // 'Invalid' = manual dead-email tag → Invalid Emails tab
 // Already a signed partner — the lead is won. It leaves the rep's queue and the
 // campaign tabs (it isn't workable pipeline any more) and lives in its own tab.
 function isPartnerLead(lead){ return (lead&&(lead.tags||[]).includes('Partner'))||false; }
@@ -87,6 +87,7 @@ function leadLocation(lead, config){
   if(!lead) return {tab:'lead-mgmt', label:'Lead Management'};
   if(lead.archived) return {tab:'archive', label:'Archive'};
   const tags=lead.tags||[];
+  if(tags.includes('Invalid'))     return {tab:'invalidemails', label:'Invalid Emails'};
   if(tags.includes('For Recycle')) return {tab:'recycle',  label:'For Recycle'};
   if(isPartnerLead(lead))          return {tab:'partner',  label:'Already Partner'};
   if(isContacted(lead))            return {tab:'contacted',label:'Contacted Leads'};
@@ -956,6 +957,7 @@ const TAG_COLORS={
   'Not Qualified':{bg:'#FFEBE6',color:'#DE350B'},
   'NQ':{bg:'#FFEBE6',color:'#DE350B'},
   'Awaiting Potential':{bg:'#FEF9C3',color:'#A16207'},
+  'Invalid':{bg:'#FFEBE6',color:'#BF2600'},
   'Contacted':{bg:'#EBF2FF',color:'#1366D6'},
   'For Recycle':{bg:'#FFF4E5',color:'#FF8B00'},
   'Existing Leads':{bg:'#EAE6FF',color:'#6554C0'},
@@ -1499,14 +1501,19 @@ function emailStatusOf(l){
   return (Date.parse(auto.checked_at||0)||0) > (Date.parse(l.emailCheckedAt||0)||0) ? auto.status : own;
 }
 function isHardBadEmail(l){ return HARD_BAD_EMAIL.includes(emailStatusOf(l)); }
+// Manually tagged "Invalid" by a rep/admin (status tag, single-select).
+function isInvalidTagged(l){ return !!(l && (l.tags||[]).includes('Invalid')); }
+// Belongs in the Invalid Emails tab: tagged Invalid OR ZeroBounce-dead.
+function inInvalidTab(l){ return isInvalidTagged(l) || isHardBadEmail(l); }
 // A Contacted / For Recycle lead with a dead email is PARKED: it leaves those tabs
 // and the recycle pool (and the nightly recycle_due_leads skips it) and lives only in
 // the Invalid Emails tab, until someone fixes the email. Partners are never parked;
 // leads on a rep's working dashboard stay where they are.
 // SmartReach send/export block: ONLY ZeroBounce "invalid" (catch-all, unknown,
 // do_not_mail, spamtrap, abuse… are still allowed, by request 2026-11-06).
-function isSrBlockedEmail(l){ return emailStatusOf(l)==='invalid'; }
+function isSrBlockedEmail(l){ return isInvalidTagged(l) || emailStatusOf(l)==='invalid'; }
 function isEmailParked(l){
+  if(isInvalidTagged(l)) return true;
   if(!isHardBadEmail(l)) return false;
   const t=l.tags||[];
   if(t.some(x=>/partner/i.test(String(x)))) return false;
@@ -1518,11 +1525,11 @@ function InvalidEmailsView({leads, tableProps}){
   const [withDnm,setWithDnm]=useState(()=>{ try{ return localStorage.getItem('invalidEmailsDnm')==='1'; }catch(e){ return false; } });
   useEffect(()=>{ try{ localStorage.setItem('invalidEmailsDnm',withDnm?'1':'0'); }catch(e){} },[withDnm]);
   const dnm=leads.filter(l=>emailStatusOf(l)==='do_not_mail').length;
-  const shown=leads.filter(l=>isHardBadEmail(l) || (withDnm && emailStatusOf(l)==='do_not_mail'));
+  const shown=leads.filter(l=>inInvalidTab(l) || (withDnm && emailStatusOf(l)==='do_not_mail'));
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
       <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',margin:'12px 16px 0',padding:'10px 14px',borderRadius:10,background:'var(--danger-light,#FFEBE6)',color:'var(--danger,#DE350B)',fontSize:13,fontWeight:500}}>
-        <span>✉ Leads whose email ZeroBounce marked <b>invalid</b> (or abuse / spamtrap). Contacted / For Recycle ones are kept here instead — out of the recycle pool — until the email is fixed. Editing the email clears the mark.</span>
+        <span>✉ Leads tagged <b>Invalid</b>, or whose email ZeroBounce marked <b>invalid</b> (or abuse / spamtrap). Contacted / For Recycle ones are kept here instead — out of the recycle pool — until the email is fixed. Editing the email clears the mark.</span>
         <label style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'var(--text-dim)',fontWeight:600,fontSize:12.5}}
           title="ZeroBounce 'do not mail' = role addresses (info@, support@), disposable or suppressed emails — often deliverable but risky">
           <input type="checkbox" checked={withDnm} onChange={e=>setWithDnm(e.target.checked)}/>
@@ -11050,7 +11057,7 @@ function App() {
       potential:vLeads.filter(l=>l.tags.includes('Potential')).length,
       pending:vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l)).length,
       nq:vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l)).length,
-      invalidemails:vLeads.filter(l=>isHardBadEmail(l)&&canSeeLead(l)).length,
+      invalidemails:vLeads.filter(l=>inInvalidTab(l)&&canSeeLead(l)).length,
       awaiting:vLeads.filter(l=>(l.tags||[]).includes('Awaiting Potential')&&canSeeLead(l)).length,
       contacted:vLeads.filter(l=>isContacted(l)&&!isEmailParked(l)).length,
       recycle:myRecycleLeads.length,
@@ -11182,7 +11189,7 @@ function App() {
     if(tab==='unassigned') return <LeadsTable key="tab-unassigned" leads={myUnassignedLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} claimLabel="⚡ Claim to me" claimTitle="Assign the selected leads to you and move them into your queue" showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} repFilterField="scrapedBy" repBreakdown={isAdmin?unassignedByScraper:null} breakdownField="scrapedBy" config={config} feats={config.features||{}} campColorMap={campColorMap} filename="unassigned_leads" printTitle="Unassigned Leads"/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     // NQ (Not Qualified): rep-scoped like Pending — reps see only their own.
-    if(tab==='invalidemails') return <InvalidEmailsView leads={vLeads.filter(l=>emailStatusOf(l)&&canSeeLead(l))}
+    if(tab==='invalidemails') return <InvalidEmailsView leads={vLeads.filter(l=>(emailStatusOf(l)||isInvalidTagged(l))&&canSeeLead(l))}
       tableProps={{onEdit:saveL,onDelete:delL,onBulkDelete:bulkDelete,onArchive:archiveLeads,onBulkAssign:bulkAssign,showAssigned:true,showCampaign:true,showOrigin:true,hideRepFilter:!isAdmin,config,feats:config.features||{},campColorMap,filename:'invalid_email_leads',printTitle:'Invalid Emails'}}/>;
     if(tab==='nq') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="nq_leads" printTitle="Not Qualified (NQ)"/>;
     if(tab==='awaiting') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('Awaiting Potential')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="awaiting_potential" printTitle="Awaiting Potential"/>;

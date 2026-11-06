@@ -226,6 +226,7 @@ h1, h2, h3, h4, h5, h6, .display { font-family: Verdana, system-ui, sans-serif; 
 .tag-potential { background: var(--success-light); color: var(--success); }
 .tag-nq { background: var(--danger-light); color: var(--danger); }
 .tag-awaiting { background: #FEF9C3; color: #A16207; }
+.tag-invalid { background: #FFEBE6; color: #BF2600; }
 .tag-contacted { background: var(--accent-light); color: var(--accent); }
 .tag-existing { background: var(--purple-light); color: var(--purple); }
 .tag-recycle { background: var(--warn-light); color: var(--warn); }
