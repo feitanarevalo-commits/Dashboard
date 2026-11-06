@@ -673,7 +673,7 @@ function viewLabel(tab, activeRep, showRepSelect, config){
   if(showRepSelect) return 'Choosing a rep';
   if(tab==='rep-home' && activeRep) return `${activeRep}'s dashboard`;
   const MAP={home:'Home',scraper:'Scraper','ai-scraper':'AI Scraper',history:'History','lead-mgmt':'Lead Management','google-import':'Google Sheets',agency:'Agency',leaves:'Leaves',knowledge:'Knowledge Base',attendance:'Attendance',archive:'Archive',restore:'Version History',errors:'Error Log',
-    pending:'Pending Qualification',nq:'NQ',awaiting:'Awaiting Potential',contacted:'Contacted',recycle:'For Recycle',partner:'Already Partner',duplicates:'Duplicates',emailerrors:'Email Errors'};
+    pending:'Pending Qualification',nq:'NQ',awaiting:'Awaiting Potential',contacted:'Contacted',recycle:'For Recycle',partner:'Already Partner',duplicates:'Duplicates',emailerrors:'Email Errors',invalidemails:'Invalid Emails'};
   if(MAP[tab]) return MAP[tab];
   if(tab && tab.indexOf('pool-')===0){ const p=tab.slice(5); return ({highticket:'High Ticket Pool',msn:'MSN Pool',virals:'VIRALS Pool',cs:'CS Pool'})[p]||'Lead Pool'; }
   const camp=((config&&config.campaigns)||[]).find(c=>String(c.id).toLowerCase()===String(tab).toLowerCase());
@@ -1481,6 +1481,33 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, co
 // ─── INLINE EMAIL (paste/edit email directly in the table) ──
 // ZeroBounce status → small badge shown next to the email. Only the clearly-bad
 // and the "risky" states get a badge; valid/unknown stay clean.
+// ZeroBounce results that mean "don't email this address". HARD = the mailbox is
+// dead / dangerous; do_not_mail = role, disposable or suppressed addresses (often
+// deliverable, but risky) — shown in the Invalid Emails tab only on request.
+const HARD_BAD_EMAIL=['invalid','spamtrap','abuse'];
+function emailStatusOf(l){ return String((l&&l.emailStatus)||'').toLowerCase(); }
+function isHardBadEmail(l){ return HARD_BAD_EMAIL.includes(emailStatusOf(l)); }
+// Invalid Emails tab: leads ZeroBounce marked invalid (from the rep Actions
+// "Validate emails" or the Email Errors re-check), so reps can find a new email.
+function InvalidEmailsView({leads, tableProps}){
+  const [withDnm,setWithDnm]=useState(()=>{ try{ return localStorage.getItem('invalidEmailsDnm')==='1'; }catch(e){ return false; } });
+  useEffect(()=>{ try{ localStorage.setItem('invalidEmailsDnm',withDnm?'1':'0'); }catch(e){} },[withDnm]);
+  const dnm=leads.filter(l=>emailStatusOf(l)==='do_not_mail').length;
+  const shown=leads.filter(l=>isHardBadEmail(l) || (withDnm && emailStatusOf(l)==='do_not_mail'));
+  return (
+    <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
+      <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',margin:'12px 16px 0',padding:'10px 14px',borderRadius:10,background:'var(--danger-light,#FFEBE6)',color:'var(--danger,#DE350B)',fontSize:13,fontWeight:500}}>
+        <span>✉ Leads whose email ZeroBounce marked <b>invalid</b> (or abuse / spamtrap). Find the creator's correct email, then re-validate.</span>
+        <label style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'var(--text-dim)',fontWeight:600,fontSize:12.5}}
+          title="ZeroBounce 'do not mail' = role addresses (info@, support@), disposable or suppressed emails — often deliverable but risky">
+          <input type="checkbox" checked={withDnm} onChange={e=>setWithDnm(e.target.checked)}/>
+          Also show "do not mail" ({dnm})
+        </label>
+      </div>
+      <LeadsTable leads={shown} {...tableProps}/>
+    </div>
+  );
+}
 function EmailStatusBadge({status}){
   const s=String(status||'').toLowerCase();
   if(!s || s==='valid' || s==='unknown') return null;
@@ -10947,6 +10974,7 @@ function App() {
       potential:vLeads.filter(l=>l.tags.includes('Potential')).length,
       pending:vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l)).length,
       nq:vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l)).length,
+      invalidemails:vLeads.filter(l=>isHardBadEmail(l)&&canSeeLead(l)).length,
       awaiting:vLeads.filter(l=>(l.tags||[]).includes('Awaiting Potential')&&canSeeLead(l)).length,
       contacted:vLeads.filter(l=>isContacted(l)).length,
       recycle:myRecycleLeads.length,
@@ -11049,6 +11077,7 @@ function App() {
     {id:'recycle',icon:'↻',label:'For Recycle',count:counts.recycle,cls:'orange'},
     {id:'partner',icon:'🤝',label:'Already Partner',count:counts.partner,cls:'green'},
     {id:'duplicates',icon:'⧉',label:'Duplicates',count:counts.duplicates,cls:'red'},
+    {id:'invalidemails',icon:'✉',label:'Invalid Emails',count:counts.invalidemails,cls:'red'},
     {id:'emailerrors',icon:'⚠',label:'Email Errors',count:emailErrRows.filter(r=>emailErrVisible(r,isAdmin,meName)&&r.zb_status!=='valid').length,cls:'red'},
   ];
 
@@ -11077,6 +11106,8 @@ function App() {
     if(tab==='unassigned') return <LeadsTable key="tab-unassigned" leads={myUnassignedLeads} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} onClaim={ids=>{ if(!currentUser) return; bulkAssign(ids, currentUser.name); }} claimLabel="⚡ Claim to me" claimTitle="Assign the selected leads to you and move them into your queue" showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} repFilterField="scrapedBy" repBreakdown={isAdmin?unassignedByScraper:null} breakdownField="scrapedBy" config={config} feats={config.features||{}} campColorMap={campColorMap} filename="unassigned_leads" printTitle="Unassigned Leads"/>;
     if(tab==='pending') return <LeadsTable leads={vLeads.filter(l=>isPendingLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="pending_qualification" printTitle="Pending Qualification"/>;
     // NQ (Not Qualified): rep-scoped like Pending — reps see only their own.
+    if(tab==='invalidemails') return <InvalidEmailsView leads={vLeads.filter(l=>emailStatusOf(l)&&canSeeLead(l))}
+      tableProps={{onEdit:saveL,onDelete:delL,onBulkDelete:bulkDelete,onArchive:archiveLeads,onBulkAssign:bulkAssign,showAssigned:true,showCampaign:true,showOrigin:true,hideRepFilter:!isAdmin,config,feats:config.features||{},campColorMap,filename:'invalid_email_leads',printTitle:'Invalid Emails'}}/>;
     if(tab==='nq') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="nq_leads" printTitle="Not Qualified (NQ)"/>;
     if(tab==='awaiting') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('Awaiting Potential')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="awaiting_potential" printTitle="Awaiting Potential"/>;
     if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap} addToast={addToast}/>;
@@ -11111,7 +11142,7 @@ function App() {
     return null;
   }
 
-  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',nq:'Not Qualified (NQ)',awaiting:'Awaiting Potential',contacted:'Contacted Leads',recycle:'For Recycle',partner:'Already Partner',recent:'Recently Assigned',duplicates:'Duplicate Leads',emailerrors:'SmartReach Email Errors',archive:'Archive',restore:'Version History',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',nq:'Not Qualified (NQ)',awaiting:'Awaiting Potential',contacted:'Contacted Leads',recycle:'For Recycle',partner:'Already Partner',recent:'Recently Assigned',duplicates:'Duplicate Leads',emailerrors:'SmartReach Email Errors',invalidemails:'Invalid Emails',archive:'Archive',restore:'Version History',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // "New build available" banner — rendered on login AND inside the app, so even a
   // logged-out stale tab is told to reload.
@@ -11337,7 +11368,7 @@ function App() {
           ))}
           <div className="nav-divider"/>
           <div className="sidebar-section-label" data-tour="grp-filters">Lead Filters</div>
-          {NAV_FILTER.filter(n=>(n.id==='unassigned'||n.id==='emailerrors') ? config.tabs[n.id]!==false : config.tabs[n.id]).map(n=>(
+          {NAV_FILTER.filter(n=>(n.id==='unassigned'||n.id==='emailerrors'||n.id==='invalidemails') ? config.tabs[n.id]!==false : config.tabs[n.id]).map(n=>(
             <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
               <span className={`nav-badge ${n.cls}`}>{n.count}</span>
