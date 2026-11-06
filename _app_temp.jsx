@@ -1486,7 +1486,7 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, co
 // ZeroBounce results that mean "don't email this address". HARD = the mailbox is
 // dead / dangerous; do_not_mail = role, disposable or suppressed addresses (often
 // deliverable, but risky) — shown in the Invalid Emails tab only on request.
-const HARD_BAD_EMAIL=['invalid','spamtrap','abuse'];
+const HARD_BAD_EMAIL=['invalid','spamtrap','abuse','does_not_accept_mail','mailbox_not_found'];   // last two = display statuses from effectiveEmailStatus
 // Nightly auto-check results (email_validations table, filled by the email-autocheck
 // edge fn for leads on reps' working dashboards), by lowercase email — loaded by App
 // (non-valid statuses only). A lead's own emailStatus wins when it is newer.
@@ -1505,7 +1505,7 @@ function emailStatusOf(l){
   if(!own) return auto.status;
   return (Date.parse(auto.checked_at||0)||0) > (Date.parse(l.emailCheckedAt||0)||0) ? auto.status : own;
 }
-function isHardBadEmail(l){ return HARD_BAD_EMAIL.includes(emailStatusOf(l)); }
+function isHardBadEmail(l){ return HARD_BAD_EMAIL.includes(effectiveEmailStatus(l)); }
 // Manually tagged "Invalid" by a rep/admin (status tag, single-select).
 function isInvalidTagged(l){ return !!(l && (l.tags||[]).includes('Invalid')); }
 // Belongs in the Invalid Emails tab: tagged Invalid OR ZeroBounce-dead.
@@ -1523,29 +1523,54 @@ function inInvalidTab(l){ return isInvalidTagged(l) || isHardBadEmail(l); }
 // "role_based" / "role_based_catch_all". Other do-not-mail kinds (disposable, toxic,
 // global_suppression, mx_forward, possible_trap) stay blocked. When the sub-status
 // wasn't saved (older checks) we recognise the role prefix instead.
-const SR_BLOCK_STATUSES=['invalid','do_not_mail','spamtrap','abuse'];
+const SR_BLOCK_STATUSES=['invalid','do_not_mail','spamtrap','abuse','does_not_accept_mail','mailbox_not_found'];
 const ROLE_EMAIL_RE=/^(contact|contacts|contactus|contact[._-]?us|info|infos|information|support|suporte|soporte|help|hello|hi|hey|hola|ola|ciao|bonjour|hallo|business|biz|businessinquiries|business[._-]?inquiries|collab|collabs|collaboration|collaborations|collabo|partner|partners|partnership|partnerships|inquiries|inquiry|enquiries|enquiry|media|press|pr|socialmedia|management|mgmt|manager|booking|bookings|sales|ventas|vendas|comercial|commerciale|commercial|team|crew|admin|office|biuro|marketing|mail|email|general|sponsor|sponsors|sponsorship|sponsorships|brand|brands|ads|advertising|work|talent|agency|contato|contacto|contatti|kontakt|kontakty|redazione|redaction|atendimento|atencion|connect|studio|shop|store|orders|service|customerservice|care|hr|jobs|careers|webmaster|editor|editorial|news|newsletter)\d*$/;
 function primaryEmailLc(l){ return leadEmailsLc(l)[0]||''; }
 function emailSubOf(l){
   const e=primaryEmailLc(l); const auto=e&&AUTO_EMAIL_STATUS[e];
-  return String((l&&l.emailSub)||(auto&&auto.sub)||'').toLowerCase();
+  const own=String((l&&l.emailStatus)||'');
+  const autoWins=auto && (!own || (Date.parse(auto.checked_at||0)||0) > (Date.parse((l&&l.emailCheckedAt)||0)||0));
+  return String((autoWins ? auto.sub : (l&&l.emailSub)) || '').toLowerCase();
 }
 function isRoleEmailOk(l){
   const sub=emailSubOf(l);
   if(sub) return sub.startsWith('role_based');
   return ROLE_EMAIL_RE.test(primaryEmailLc(l).split('@')[0]||'');
 }
+// The status the dashboard ACTS on (badge, SmartReach block, Invalid Emails tab,
+// parking). Role / support inboxes (info@, contact@, hello@…) are excused:
+//   • do_not_mail because it's a role inbox → '' (no badge, sendable)
+//   • invalid with a soft / unknown reason → '' (2026-11-06, 5th ask)
+// …EXCEPT hard bounces, which keep a specific badge and stay blocked:
+//   • does_not_accept_mail / no_dns_entries / unroutable_ip_address → "Does not accept mail"
+//   • mailbox_not_found → "Mailbox not found"
+const NO_MAIL_SUBS=['does_not_accept_mail','no_dns_entries','unroutable_ip_address'];
+function effectiveEmailStatus(l){
+  const st=emailStatusOf(l);
+  if(st==='do_not_mail') return isRoleEmailOk(l) ? '' : st;
+  if(st==='invalid'){
+    const sub=emailSubOf(l);
+    if(NO_MAIL_SUBS.includes(sub)) return 'does_not_accept_mail';
+    if(sub==='mailbox_not_found') return 'mailbox_not_found';
+    if(ROLE_EMAIL_RE.test(primaryEmailLc(l).split('@')[0]||'')) return '';
+    return st;
+  }
+  return st;
+}
 function isSrBlockedEmail(l){
   if(isInvalidTagged(l)) return true;
-  const st=emailStatusOf(l);
-  if(!SR_BLOCK_STATUSES.includes(st)) return false;
-  if(st==='do_not_mail' && isRoleEmailOk(l)) return false;   // support / role inbox — allowed
-  return true;
+  return SR_BLOCK_STATUSES.includes(effectiveEmailStatus(l));
 }
-// Status to SHOW on the email badge: a role / support inbox flagged do_not_mail
-// gets no badge (it's sendable — see isSrBlockedEmail), everything else as-is.
-function emailBadgeStatusOf(l){ const st=emailStatusOf(l); return (st==='do_not_mail' && isRoleEmailOk(l)) ? '' : st; }
-function srBlockLabel(l){ if(isInvalidTagged(l)) return 'tagged Invalid'; const s=emailStatusOf(l); if(s!=='do_not_mail') return s; const sub=emailSubOf(l); return 'do not mail'+(sub?' · '+sub.replace(/_/g,' '):''); }
+// Status to SHOW on the email badge.
+function emailBadgeStatusOf(l){ return effectiveEmailStatus(l); }
+function srBlockLabel(l){
+  if(isInvalidTagged(l)) return 'tagged Invalid';
+  const s=effectiveEmailStatus(l);
+  if(s==='does_not_accept_mail') return 'does not accept mail';
+  if(s==='mailbox_not_found') return 'mailbox not found';
+  if(s!=='do_not_mail') return s;
+  const sub=emailSubOf(l); return 'do not mail'+(sub?' · '+sub.replace(/_/g,' '):'');
+}
 function isEmailParked(l){
   if(isInvalidTagged(l)) return true;
   if(!isHardBadEmail(l)) return false;
@@ -1578,12 +1603,15 @@ function InvalidEmailsView({leads, tableProps}){
 function EmailStatusBadge({status}){
   const s=String(status||'').toLowerCase();
   if(!s || s==='valid' || s==='unknown') return null;
-  const bad = s==='invalid' || s==='spamtrap' || s==='abuse' || s==='do_not_mail';
-  const label = s==='invalid' ? '⚠ Invalid' : (s==='catch-all' ? 'Catch-all' : ('⚠ '+s.replace(/_/g,' ')));
+  const bad = s==='invalid' || s==='spamtrap' || s==='abuse' || s==='do_not_mail' || s==='does_not_accept_mail' || s==='mailbox_not_found';
+  const label = s==='invalid' ? '⚠ Invalid'
+    : s==='does_not_accept_mail' ? '⚠ Does not accept mail'
+    : s==='mailbox_not_found' ? '⚠ Mailbox not found'
+    : (s==='catch-all' ? 'Catch-all' : ('⚠ '+s.replace(/_/g,' ')));
   const style = bad
     ? {background:'var(--danger-light,#FFEBE6)',color:'var(--danger,#DE350B)',border:'1px solid var(--danger,#DE350B)'}
     : {background:'var(--warn-light,#FFF4E5)',color:'var(--warn,#B25E00)',border:'1px solid var(--warn,#FF8B00)'};
-  return <span title={`ZeroBounce: ${s}`} onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}
+  return <span title={s==='does_not_accept_mail'?'ZeroBounce: this domain does not accept email — a send would hard-bounce':s==='mailbox_not_found'?'ZeroBounce: this mailbox does not exist — a send would hard-bounce':`ZeroBounce: ${s}`} onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}
     style={{marginLeft:6,fontSize:10,fontWeight:700,padding:'1px 6px',borderRadius:20,whiteSpace:'nowrap',cursor:'default',...style}}>{label}</span>;
 }
 function InlineEmail({emails, status, onSave}) {
