@@ -1491,6 +1491,11 @@ const HARD_BAD_EMAIL=['invalid','spamtrap','abuse'];
 // edge fn for leads on reps' working dashboards), by lowercase email — loaded by App
 // (non-valid statuses only). A lead's own emailStatus wins when it is newer.
 let AUTO_EMAIL_STATUS={};
+// Emails the scraper must never bring back (Supabase blocked_emails: ZeroBounce
+// invalid/spamtrap/abuse, leads tagged Invalid, leads stamped invalid). The DB
+// also refuses such scraped inserts (trg_leads_scrape_guard); this is the client side.
+let BLOCKED_EMAILS=new Set();
+function leadEmailsLc(l){ return ((l&&l.emails&&l.emails.length)?l.emails:[l&&l.email]).map(e=>String(e||'').trim().toLowerCase()).filter(e=>e.includes('@')); }
 function emailStatusOf(l){
   if(!l) return '';
   const own=String(l.emailStatus||'').toLowerCase();
@@ -9141,6 +9146,8 @@ function App() {
     SB.from('email_validations').select('email,status,checked_at').neq('status','valid').limit(20000)
       .then(({data,error})=>{ if(error||!data) return; const m={}; data.forEach(r=>{ m[String(r.email).toLowerCase()]={status:String(r.status).toLowerCase(),checked_at:r.checked_at}; }); AUTO_EMAIL_STATUS=m; setAutoEmailVer(v=>v+1); })
       .catch(()=>{});
+    SB.from('blocked_emails').select('email').limit(50000)
+      .then(({data,error})=>{ if(error||!data) return; BLOCKED_EMAILS=new Set(data.map(r=>String(r.email).toLowerCase())); }).catch(()=>{});
   },[]);
   const [emailErrRows,setEmailErrRows]=useState([]);
   const [emailErrSync,setEmailErrSync]=useState(null);
@@ -10269,8 +10276,13 @@ function App() {
     // URL-only Pending lead still matches a scraped channelId.
     const seen=new Set(leads.map(leadKey).filter(Boolean));
     const arch=archivedKeysRef.current;
-    const fresh=[]; let skipped=0, skippedArch=0;
+    const fresh=[]; let skipped=0, skippedArch=0, skippedBad=0;
+    // Never re-scrape an email that's in the Invalid Emails tab (tagged Invalid or
+    // ZeroBounce-dead) — plus the server's blocked_emails list.
+    const bad=new Set(BLOCKED_EMAILS);
+    leads.forEach(l=>{ if(inInvalidTab(l)) leadEmailsLc(l).forEach(e=>bad.add(e)); });
     arr.forEach(l=>{
+      if(leadEmailsLc(l).some(e=>bad.has(e))){ skippedBad++; return; }
       const k=leadKey(l);
       if(k && arch.has(k)){ skippedArch++; return; }  // deliberately archived — don't resurface
       if(k && seen.has(k)){ skipped++; return; }   // already in your leads
@@ -10288,6 +10300,7 @@ function App() {
     logH('🔎',`Discovery: ${fresh.length} new channel(s) added${skipped>0?` · ${skipped} already in your leads`:''}${skippedArch>0?` · ${skippedArch} in archive`:''}${(skipped||skippedArch)?' — skipped':''}`);
     if(skipped>0) addToast(`⏭ ${skipped} channel(s) already in your leads (Pending/Contacted/etc.) — skipped`,'info');
     if(skippedArch>0) addToast(`🗄 ${skippedArch} channel(s) are in your Archive — skipped (restore them to work again)`,'info');
+    if(skippedBad>0){ addToast(`⛔ ${skippedBad} channel(s) skipped — their email is in Invalid Emails`,'info'); logH('⛔',`Discovery: ${skippedBad} channel(s) with an invalid email skipped`); }
   }
 
   // Normalize a lead object coming back from Close (via n8n) into the shape
