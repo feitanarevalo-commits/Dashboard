@@ -1503,6 +1503,9 @@ function isHardBadEmail(l){ return HARD_BAD_EMAIL.includes(emailStatusOf(l)); }
 // and the recycle pool (and the nightly recycle_due_leads skips it) and lives only in
 // the Invalid Emails tab, until someone fixes the email. Partners are never parked;
 // leads on a rep's working dashboard stay where they are.
+// SmartReach send/export block: ONLY ZeroBounce "invalid" (catch-all, unknown,
+// do_not_mail, spamtrap, abuse… are still allowed, by request 2026-11-06).
+function isSrBlockedEmail(l){ return emailStatusOf(l)==='invalid'; }
 function isEmailParked(l){
   if(!isHardBadEmail(l)) return false;
   const t=l.tags||[];
@@ -1952,7 +1955,11 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
 
   const allSel=filtered.length>0&&filtered.every(l=>sel.includes(l.id));
   // Selected leads that actually have an email (the SmartReach-sendable subset).
-  const selEmailable=filtered.filter(l=>sel.includes(l.id)&&(l.emails||[]).length>0);
+  const selEmailableAll=filtered.filter(l=>sel.includes(l.id)&&(l.emails||[]).length>0);
+  // SmartReach never gets an email ZeroBounce marked INVALID (catch-all / unknown /
+  // do-not-mail etc. still go). Those are listed in a prompt instead of being sent.
+  const selSrInvalid=selEmailableAll.filter(isSrBlockedEmail);
+  const selEmailable=selEmailableAll.filter(l=>!isSrBlockedEmail(l));
   // Close only ever takes FRESH leads (not already on Close). Even if the rep
   // ticks imported/existing leads, they're skipped — Close would just duplicate
   // them. So "Send to Close" auto-narrows the selection to the fresh ones.
@@ -2177,18 +2184,22 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
               <option value="">{(smartReachSend.campaigns||[]).length?'— campaign —':'no campaigns synced'}</option>
               {(smartReachSend.campaigns||[]).map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
-            <button className="btn btn-sm" disabled={!srCampaign||selEmailable.length===0}
-              style={{background:'#3F7D74',color:'#fff',borderColor:'#3F7D74'}}
+            <button className="btn btn-sm" disabled={!srCampaign||selEmailableAll.length===0}
+              style={{background:selEmailable.length?'#3F7D74':'#9CA3AF',color:'#fff',borderColor:selEmailable.length?'#3F7D74':'#9CA3AF'}}
               onClick={()=>{
                 const camp=(smartReachSend.campaigns||[]).find(c=>String(c.id)===String(srCampaign));
                 const label=camp?camp.label:'';
                 const n=selEmailable.length;
-                if(!window.confirm(`Send ${n} lead${n!==1?'s':''} to SmartReach${label?` → ${label}`:''}?\n\nThis adds ${n!==1?'them':'it'} to the SmartReach outreach campaign and starts emailing.`)) return;
+                const NL=String.fromCharCode(10);
+                const badList=selSrInvalid.slice(0,15).map(l=>'  • '+(l.channelName||l.name||'?')+' — '+((l.emails&&l.emails[0])||l.email||'')).join(NL)+(selSrInvalid.length>15?NL+'  …and '+(selSrInvalid.length-15)+' more':'');
+                if(!n){ window.alert(`⛔ Can't send to SmartReach — invalid email${selSrInvalid.length!==1?'s':''}.`+NL+NL+`ZeroBounce marked ${selSrInvalid.length===1?'this email':'these emails'} INVALID:`+NL+badList+NL+NL+`Fix the email on the lead (editing it clears the mark), then send again.`); return; }
+                if(!window.confirm(`Send ${n} lead${n!==1?'s':''} to SmartReach${label?' → '+label:''}?`+NL+NL+`This adds ${n!==1?'them':'it'} to the SmartReach outreach campaign and starts emailing.`
+                  +(selSrInvalid.length?NL+NL+`⛔ ${selSrInvalid.length} lead${selSrInvalid.length!==1?'s':''} with an INVALID email (ZeroBounce) will NOT be sent:`+NL+badList:''))) return;
                 smartReachSend.onSend(selEmailable, srCampaign, label);
                 setSel([]); setSrCampaign('');
               }}
-              title={selEmailable.length?`Send the ${selEmailable.length} selected lead(s) with an email to the chosen SmartReach campaign`:'Select leads that have an email first'}>
-              ✉ Send {selEmailable.length} to SmartReach
+              title={selSrInvalid.length?`${selSrInvalid.length} selected lead(s) have an email ZeroBounce marked INVALID — they can't be sent to SmartReach`:(selEmailable.length?`Send the ${selEmailable.length} selected lead(s) with an email to the chosen SmartReach campaign`:'Select leads that have an email first')}>
+              ✉ Send {selEmailable.length} to SmartReach{selSrInvalid.length?` · ⛔ ${selSrInvalid.length} invalid`:''}
             </button>
           </>)}
           {onArchive&&(<>
@@ -4907,7 +4918,7 @@ function RepDashboard({rep,leads,config,onEdit,onDelete,onBulkDelete,onBulkAssig
   const dayMatch=l=>leadDayStr(l)===quotaDay;
   // SmartReach CSV = the rep's workable (Potential/HT) leads with an email, scoped to
   // the campaign filter AND the viewing day (All dates → every day).
-  const smartReachBase=myLeads.filter(l=>(l.emails||[]).length>0 && isWorkable(l));
+  const smartReachBase=myLeads.filter(l=>(l.emails||[]).length>0 && isWorkable(l) && !isSrBlockedEmail(l));   // ZeroBounce-invalid emails never go to SmartReach
   const smartReachByCamp=srCsvCampaign?smartReachBase.filter(l=>(l.campaigns||[]).includes(srCsvCampaign)):smartReachBase;
   const smartReachLeads=isDayView?smartReachByCamp.filter(dayMatch):smartReachByCamp;
   const srCount=smartReachLeads.length;
@@ -10818,8 +10829,10 @@ function App() {
   function importToSmartReach(rep,repLeads,campaignId,campaignLabel){
     const wh=(config.smartreachWebhook||'').trim();
     if(!wh || wh.includes('your-')){ addToast('Set the SmartReach Webhook in ⚙ Customize first','info'); return; }
-    const emailable=(repLeads||[]).filter(l=>(l.emails||[]).length>0);
-    if(!emailable.length){ addToast(`No selected leads have an email to send for ${rep}`,'info'); return; }
+    const withEmail=(repLeads||[]).filter(l=>(l.emails||[]).length>0);
+    const emailable=withEmail.filter(l=>!isSrBlockedEmail(l));   // safety net: never send ZeroBounce-invalid emails
+    if(withEmail.length>emailable.length) addToast(`⛔ ${withEmail.length-emailable.length} lead(s) with an invalid email were not sent to SmartReach`,'info');
+    if(!emailable.length){ addToast(`No selected leads have a sendable email for ${rep}`,'info'); return; }
     if(!campaignId){ addToast('Pick a SmartReach campaign first','info'); return; }
     const dest=campaignLabel||('campaign '+campaignId);
     // The smartreach-add Edge Function takes {rep, campaign_id (cmp_…), leads},
