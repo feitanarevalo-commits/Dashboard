@@ -1516,7 +1516,11 @@ function inInvalidTab(l){ return isInvalidTagged(l) || isHardBadEmail(l); }
 // leads on a rep's working dashboard stay where they are.
 // SmartReach send/export block: ONLY ZeroBounce "invalid" (catch-all, unknown,
 // do_not_mail, spamtrap, abuse… are still allowed, by request 2026-11-06).
-function isSrBlockedEmail(l){ return isInvalidTagged(l) || emailStatusOf(l)==='invalid'; }
+// 2026-11-06 (2nd ask): also do_not_mail — every red ⚠ badge blocks. Catch-all /
+// unknown still send.
+const SR_BLOCK_STATUSES=['invalid','do_not_mail','spamtrap','abuse'];
+function isSrBlockedEmail(l){ return isInvalidTagged(l) || SR_BLOCK_STATUSES.includes(emailStatusOf(l)); }
+function srBlockLabel(l){ if(isInvalidTagged(l)) return 'tagged Invalid'; const s=emailStatusOf(l); return s==='do_not_mail'?'do not mail':s; }
 function isEmailParked(l){
   if(isInvalidTagged(l)) return true;
   if(!isHardBadEmail(l)) return false;
@@ -2203,14 +2207,14 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                 const label=camp?camp.label:'';
                 const n=selEmailable.length;
                 const NL=String.fromCharCode(10);
-                const badList=selSrInvalid.slice(0,15).map(l=>'  • '+(l.channelName||l.name||'?')+' — '+((l.emails&&l.emails[0])||l.email||'')).join(NL)+(selSrInvalid.length>15?NL+'  …and '+(selSrInvalid.length-15)+' more':'');
-                if(!n){ window.alert(`⛔ Can't send to SmartReach — invalid email${selSrInvalid.length!==1?'s':''}.`+NL+NL+`ZeroBounce marked ${selSrInvalid.length===1?'this email':'these emails'} INVALID:`+NL+badList+NL+NL+`Fix the email on the lead (editing it clears the mark), then send again.`); return; }
+                const badList=selSrInvalid.slice(0,15).map(l=>'  • '+(l.channelName||l.name||'?')+' — '+((l.emails&&l.emails[0])||l.email||'')+'  ('+srBlockLabel(l)+')').join(NL)+(selSrInvalid.length>15?NL+'  …and '+(selSrInvalid.length-15)+' more':'');
+                if(!n){ window.alert(`⛔ Can't send to SmartReach — invalid email${selSrInvalid.length!==1?'s':''}.`+NL+NL+`${selSrInvalid.length===1?'This email is':'These emails are'} invalid / do not mail:`+NL+badList+NL+NL+`Fix the email on the lead (editing it clears the mark), then send again.`); return; }
                 if(!window.confirm(`Send ${n} lead${n!==1?'s':''} to SmartReach${label?' → '+label:''}?`+NL+NL+`This adds ${n!==1?'them':'it'} to the SmartReach outreach campaign and starts emailing.`
-                  +(selSrInvalid.length?NL+NL+`⛔ ${selSrInvalid.length} lead${selSrInvalid.length!==1?'s':''} with an INVALID email (ZeroBounce) will NOT be sent:`+NL+badList:''))) return;
+                  +(selSrInvalid.length?NL+NL+`⛔ ${selSrInvalid.length} lead${selSrInvalid.length!==1?'s':''} with an invalid / do-not-mail email will NOT be sent:`+NL+badList:''))) return;
                 smartReachSend.onSend(selEmailable, srCampaign, label);
                 setSel([]); setSrCampaign('');
               }}
-              title={selSrInvalid.length?`${selSrInvalid.length} selected lead(s) have an email ZeroBounce marked INVALID — they can't be sent to SmartReach`:(selEmailable.length?`Send the ${selEmailable.length} selected lead(s) with an email to the chosen SmartReach campaign`:'Select leads that have an email first')}>
+              title={selSrInvalid.length?`${selSrInvalid.length} selected lead(s) have an invalid / do-not-mail email — they can't be sent to SmartReach`:(selEmailable.length?`Send the ${selEmailable.length} selected lead(s) with an email to the chosen SmartReach campaign`:'Select leads that have an email first')}>
               ✉ Send {selEmailable.length} to SmartReach{selSrInvalid.length?` · ⛔ ${selSrInvalid.length} invalid`:''}
             </button>
           </>)}
@@ -10851,7 +10855,7 @@ function App() {
     if(!wh || wh.includes('your-')){ addToast('Set the SmartReach Webhook in ⚙ Customize first','info'); return; }
     const withEmail=(repLeads||[]).filter(l=>(l.emails||[]).length>0);
     const emailable=withEmail.filter(l=>!isSrBlockedEmail(l));   // safety net: never send ZeroBounce-invalid emails
-    if(withEmail.length>emailable.length) addToast(`⛔ ${withEmail.length-emailable.length} lead(s) with an invalid email were not sent to SmartReach`,'info');
+    if(withEmail.length>emailable.length) addToast(`⛔ ${withEmail.length-emailable.length} lead(s) with an invalid / do-not-mail email were not sent to SmartReach`,'info');
     if(!emailable.length){ addToast(`No selected leads have a sendable email for ${rep}`,'info'); return; }
     if(!campaignId){ addToast('Pick a SmartReach campaign first','info'); return; }
     const dest=campaignLabel||('campaign '+campaignId);
