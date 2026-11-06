@@ -1485,8 +1485,30 @@ function ColHeader({col, label, sortCol, sortDir, onSort, leads, leadsForCol, co
 // dead / dangerous; do_not_mail = role, disposable or suppressed addresses (often
 // deliverable, but risky) — shown in the Invalid Emails tab only on request.
 const HARD_BAD_EMAIL=['invalid','spamtrap','abuse'];
-function emailStatusOf(l){ return String((l&&l.emailStatus)||'').toLowerCase(); }
+// Nightly auto-check results (email_validations table, filled by the email-autocheck
+// edge fn for leads on reps' working dashboards), by lowercase email — loaded by App
+// (non-valid statuses only). A lead's own emailStatus wins when it is newer.
+let AUTO_EMAIL_STATUS={};
+function emailStatusOf(l){
+  if(!l) return '';
+  const own=String(l.emailStatus||'').toLowerCase();
+  const es=((l.emails&&l.emails.length)?l.emails:[l.email]).map(e=>String(e||'').trim().toLowerCase()).filter(e=>e.includes('@'));
+  const auto=es.length ? AUTO_EMAIL_STATUS[es[0]] : null;
+  if(!auto) return own;
+  if(!own) return auto.status;
+  return (Date.parse(auto.checked_at||0)||0) > (Date.parse(l.emailCheckedAt||0)||0) ? auto.status : own;
+}
 function isHardBadEmail(l){ return HARD_BAD_EMAIL.includes(emailStatusOf(l)); }
+// A Contacted / For Recycle lead with a dead email is PARKED: it leaves those tabs
+// and the recycle pool (and the nightly recycle_due_leads skips it) and lives only in
+// the Invalid Emails tab, until someone fixes the email. Partners are never parked;
+// leads on a rep's working dashboard stay where they are.
+function isEmailParked(l){
+  if(!isHardBadEmail(l)) return false;
+  const t=l.tags||[];
+  if(t.some(x=>/partner/i.test(String(x)))) return false;
+  return t.includes('For Recycle') || isContacted(l);
+}
 // Invalid Emails tab: leads ZeroBounce marked invalid (from the rep Actions
 // "Validate emails" or the Email Errors re-check), so reps can find a new email.
 function InvalidEmailsView({leads, tableProps}){
@@ -1497,7 +1519,7 @@ function InvalidEmailsView({leads, tableProps}){
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
       <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',margin:'12px 16px 0',padding:'10px 14px',borderRadius:10,background:'var(--danger-light,#FFEBE6)',color:'var(--danger,#DE350B)',fontSize:13,fontWeight:500}}>
-        <span>✉ Leads whose email ZeroBounce marked <b>invalid</b> (or abuse / spamtrap). Find the creator's correct email, then re-validate.</span>
+        <span>✉ Leads whose email ZeroBounce marked <b>invalid</b> (or abuse / spamtrap). Contacted / For Recycle ones are kept here instead — out of the recycle pool — until the email is fixed. Editing the email clears the mark.</span>
         <label style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'var(--text-dim)',fontWeight:600,fontSize:12.5}}
           title="ZeroBounce 'do not mail' = role addresses (info@, support@), disposable or suppressed emails — often deliverable but risky">
           <input type="checkbox" checked={withDnm} onChange={e=>setWithDnm(e.target.checked)}/>
@@ -2284,7 +2306,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                   {cols.followers && <td><span className="followers-val">{lead.followers}</span></td>}
                   {cols.emails && (
                     <td className="email-cell">
-                      <InlineEmail emails={lead.emails||[]} status={lead.emailStatus} onSave={arr=>patchLead(lead.id,{emails:arr})}/>
+                      <InlineEmail emails={lead.emails||[]} status={emailStatusOf(lead)} onSave={arr=>patchLead(lead.id,{emails:arr})}/>
                     </td>
                   )}
                   {cols.tags && (
@@ -5086,7 +5108,7 @@ function EditableContactDate({lead,effective,onCommit}){
   );
 }
 function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,campColorMap,addToast}) {
-  const contacted=leads.filter(l=>isContacted(l));
+  const contacted=leads.filter(l=>isContacted(l) && !isEmailParked(l));   // dead emails live in Invalid Emails
   const today=new Date();
   // Pull each pushed lead's most recent CONTACT date from Close so the recycle
   // clock counts from the LAST touch, not the first-contacted date.
@@ -9095,6 +9117,13 @@ function App() {
   useEffect(()=>{ try{ localStorage.setItem('navCollapsed',navCollapsed?'1':'0'); }catch(e){} },[navCollapsed]);
   const [leaves,setLeaves]=useState([]);
   // SmartReach invalid-email prospects (Email Errors tab) + last sync state.
+  const [autoEmailVer,setAutoEmailVer]=useState(0);   // bumps when AUTO_EMAIL_STATUS reloads
+  useEffect(()=>{
+    if(!SB) return;
+    SB.from('email_validations').select('email,status,checked_at').neq('status','valid').limit(20000)
+      .then(({data,error})=>{ if(error||!data) return; const m={}; data.forEach(r=>{ m[String(r.email).toLowerCase()]={status:String(r.status).toLowerCase(),checked_at:r.checked_at}; }); AUTO_EMAIL_STATUS=m; setAutoEmailVer(v=>v+1); })
+      .catch(()=>{});
+  },[]);
   const [emailErrRows,setEmailErrRows]=useState([]);
   const [emailErrSync,setEmailErrSync]=useState(null);
   const loadEmailErrors=React.useCallback(()=>{
@@ -9261,6 +9290,10 @@ function App() {
       return;
     }
     let updated={...upd};
+    // A changed email invalidates the old ZeroBounce result (the auto-check table is
+    // keyed by email, so the new address starts clean too).
+    if(old && (old.emails||[]).join(',').toLowerCase()!==(updated.emails||[]).join(',').toLowerCase()
+       && (updated.emailStatus===old.emailStatus)){ delete updated.emailStatus; delete updated.emailCheckedAt; }
     // Any lead with a rep must carry a dateAssigned, else it's invisible to the
     // date-based Home KPIs. Stamp today if a rep is set but the date is missing.
     if(updated.assignedTo && !updated.dateAssigned) updated.dateAssigned=ymdLocal(new Date());
@@ -9653,7 +9686,7 @@ function App() {
   // lead to a rep OTHER than the one who last worked it (recycledFrom) — a fresh set
   // of eyes. Uses least-loaded-eligible so the split stays even. Skips on-leave reps.
   function autoDistributeRecycle(){
-    const recycle=leads.filter(l=>(l.tags||[]).includes('For Recycle') && !l.archived);
+    const recycle=leads.filter(l=>(l.tags||[]).includes('For Recycle') && !l.archived && !isEmailParked(l));
     if(!recycle.length){ addToast('No leads in the recycle pool to distribute','info'); return; }
     const onLeave=repsOnLeave(leaves);
     // The MSN/VVV sales reps who work recycle leads = employee-role users (not JC the
@@ -10994,10 +11027,10 @@ function App() {
     return pool[strHash32(k)%pool.length];
   };
   const myRecycleLeads=React.useMemo(()=>{
-    const all=vLeads.filter(l=>(l.tags||[]).includes('For Recycle'));
+    const all=vLeads.filter(l=>(l.tags||[]).includes('For Recycle') && !isEmailParked(l));
     if(isAdmin || !recycleReps.includes(meName)) return all;
     return all.filter(l=>recycleShareRep(l)===meName);
-  },[leads, isAdmin, meName]);
+  },[leads, isAdmin, meName, autoEmailVer]);
   const counts=React.useMemo(()=>{
     const rc=new Date(); rc.setDate(rc.getDate()-7);   // matches the Recent-tab cutoff
     return {
@@ -11006,14 +11039,14 @@ function App() {
       nq:vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l)).length,
       invalidemails:vLeads.filter(l=>isHardBadEmail(l)&&canSeeLead(l)).length,
       awaiting:vLeads.filter(l=>(l.tags||[]).includes('Awaiting Potential')&&canSeeLead(l)).length,
-      contacted:vLeads.filter(l=>isContacted(l)).length,
+      contacted:vLeads.filter(l=>isContacted(l)&&!isEmailParked(l)).length,
       recycle:myRecycleLeads.length,
       recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=rc).length,
       duplicates:myDupGroups.length,
       partner:vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l)).length,
       unassigned:myUnassignedLeads.length,
     };
-  },[leads, isAdmin, meName, myDupGroups, myUnassignedLeads, myRecycleLeads]);
+  },[leads, isAdmin, meName, myDupGroups, myUnassignedLeads, myRecycleLeads, autoEmailVer]);
 
   // ── Lead Pools ── the Make scraper feeds these buckets 24/7 with unclaimed
   // candidates; any rep/lead-gen picks one, "Claims" it (→ assigned to them),
