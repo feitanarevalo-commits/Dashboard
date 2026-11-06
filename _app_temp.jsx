@@ -6273,19 +6273,28 @@ function EmailErrorsView({rows,syncState,onReload,isAdmin,currentUser,addToast,o
   async function revalidate(list){
     const emails=[...new Set(list.map(r=>r.email))];
     if(!emails.length){ addToast('Nothing to re-check','info'); return; }
-    if(!window.confirm(`Re-check ${emails.length} email${emails.length===1?'':'s'} with ZeroBounce?\n\nUses up to ${emails.length} ZeroBounce credit${emails.length===1?'':'s'} (emails checked in the last 30 days are skipped, max 200 per run). Results also flag the matching leads' emails.`)) return;
+    if(!window.confirm(`Re-check ${emails.length} email${emails.length===1?'':'s'} with ZeroBounce?\n\nUses up to ${emails.length} ZeroBounce credit${emails.length===1?'':'s'} (emails checked in the last 30 days are skipped; large lists run in batches of 150). Results also flag the matching leads' emails.`)) return;
     setBusy('zb');
+    // Batches of ZB_BATCH, one after another — the edge fn checks at most 200 per
+    // call, and one huge request is slow and fragile. Results stamp as they arrive.
+    const ZB_BATCH=150;
+    const map={}; let checked=0, skipped=0, credits=null, failed='';
     try{
-      const res=await call({action:'revalidate',emails});
-      if(!res||!res.ok) throw new Error((res&&res.error)||'re-check failed');
-      const map=res.results||{};
+      for(let i=0;i<emails.length;i+=ZB_BATCH){
+        if(emails.length>ZB_BATCH) addToast(`ZeroBounce: checking ${Math.min(i+ZB_BATCH,emails.length)} of ${emails.length}…`,'info');
+        const res=await call({action:'revalidate',emails:emails.slice(i,i+ZB_BATCH)});
+        if(!res||!res.ok){ failed=(res&&res.error)||'re-check failed'; break; }
+        Object.assign(map,res.results||{}); checked+=res.checked||0; skipped+=res.skippedRecent||0;
+        if(res.credits!=null) credits=res.credits;
+        onStampEmailStatus(res.results||{});
+      }
       const vals=Object.values(map);
       const valid=vals.filter(v=>v.status==='valid').length, invalid=vals.filter(v=>v.status==='invalid').length;
-      onStampEmailStatus(map);
-      addToast(`ZeroBounce: ${res.checked} checked — ${valid} valid, ${invalid} invalid`
-        +(res.skippedRecent?` · ${res.skippedRecent} skipped (checked recently)`:'')
-        +(res.overLimit?` · ${res.overLimit} left for the next run`:'')
-        +(res.credits!=null?` · ${res.credits} credits left`:''), (invalid&&!valid)?'error':'success');
+      if(failed && !vals.length) throw new Error(failed);
+      addToast(`ZeroBounce: ${checked} checked — ${valid} valid, ${invalid} invalid`
+        +(skipped?` · ${skipped} skipped (checked recently)`:'')
+        +(credits!=null?` · ${credits} credits left`:'')
+        +(failed?` · stopped early: ${failed} — click again to finish`:''), (failed||(invalid&&!valid))?'error':'success');
       setSel(new Set()); onReload();
     }catch(e){ addToast('ZeroBounce re-check failed: '+e.message,'error'); }
     finally{ setBusy(''); }
