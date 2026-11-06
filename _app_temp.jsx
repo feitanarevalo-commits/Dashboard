@@ -6243,7 +6243,8 @@ function EmailErrorsView({rows,syncState,onReload,isAdmin,currentUser,addToast,o
   const [repF,setRepF]=useState('');
   const [resF,setResF]=useState('');
   const [q,setQ]=useState('');
-  const [sel,setSel]=useState(()=>new Set());
+  const [sel,setSel]=useState(()=>new Set());   // row keys — an email can be in several campaigns
+  const rk=r=>r.email+'|'+r.campaign_id;
   const [busy,setBusy]=useState('');
   const visible=(rows||[]).filter(r=>emailErrVisible(r,isAdmin,me));
   const resultOf=r=>r.zb_status||'not checked';
@@ -6299,11 +6300,13 @@ function EmailErrorsView({rows,syncState,onReload,isAdmin,currentUser,addToast,o
     }catch(e){ addToast('ZeroBounce re-check failed: '+e.message,'error'); }
     finally{ setBusy(''); }
   }
-  const toggle=email=>setSel(s=>{ const n=new Set(s); n.has(email)?n.delete(email):n.add(email); return n; });
+  const toggle=key=>setSel(s=>{ const n=new Set(s); n.has(key)?n.delete(key):n.add(key); return n; });
+  const selRows=shown.filter(r=>sel.has(rk(r)));
+  const selEmails=new Set(selRows.map(r=>r.email)).size;
   // Copy the ticked rows' emails — or, with nothing ticked, every email the current
   // filters show — one per line, each email once (it can sit in several campaigns).
   async function copyEmails(){
-    const list=[...new Set((sel.size?shown.filter(r=>sel.has(r.email)):shown).map(r=>r.email))];
+    const list=[...new Set((selRows.length?selRows:shown).map(r=>r.email))];
     if(!list.length){ addToast('No emails to copy','info'); return; }
     const text=list.join(String.fromCharCode(10));   // one email per line
     let ok=false;
@@ -6312,9 +6315,9 @@ function EmailErrorsView({rows,syncState,onReload,isAdmin,currentUser,addToast,o
       try{ const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
         document.body.appendChild(ta); ta.select(); ok=document.execCommand('copy'); document.body.removeChild(ta); }catch(e2){}
     }
-    addToast(ok?`📋 Copied ${list.length} email${list.length===1?'':'s'}${sel.size?' (selected)':' (all shown)'}`:'Copy failed — your browser blocked clipboard access', ok?'success':'error');
+    addToast(ok?`📋 Copied ${list.length} email${list.length===1?'':'s'}${selRows.length?' (selected)':' (all shown)'}`:'Copy failed — your browser blocked clipboard access', ok?'success':'error');
   }
-  const allSel=shown.length>0 && shown.every(r=>sel.has(r.email));
+  const allSel=shown.length>0 && shown.every(r=>sel.has(rk(r)));
   const resBadge=r=>{
     const k=resultOf(r);
     const m=EMAIL_ERR_RESULTS[k]||{label:k.replace(/_/g,' '),bg:'var(--danger-light,#FFEBE6)',fg:'var(--danger,#DE350B)',tip:'ZeroBounce: '+k};
@@ -6346,10 +6349,12 @@ function EmailErrorsView({rows,syncState,onReload,isAdmin,currentUser,addToast,o
           <span style={{fontSize:11.5,color:'var(--text-light)'}}>Synced from SmartReach: {synced}</span>
           <div style={{marginLeft:'auto',display:'flex',gap:8,flexWrap:'wrap'}}>
             <button className="btn btn-outline btn-sm" disabled={!shown.length} onClick={copyEmails}
-              title={sel.size?'Copy the selected emails':'Copy every email the current filters show'}>📋 Copy emails ({sel.size?sel.size:new Set(shown.map(r=>r.email)).size})</button>
+              title={(selRows.length?'Copy the selected emails':'Copy every email the current filters show')+' — each email once, even if it is in several campaigns'}>
+              {(()=>{ const rows=selRows.length?selRows:shown; const n=new Set(rows.map(r=>r.email)).size;
+                return `📋 Copy ${n} email${n===1?'':'s'}`+(rows.length!==n?` (${rows.length} rows)`:''); })()}</button>
             {isAdmin && <button className="btn btn-outline btn-sm" disabled={!!busy} onClick={refresh}>{busy==='sync'?'⏳ Syncing…':'↻ Refresh from SmartReach'}</button>}
-            {sel.size>0
-              ? <button className="btn btn-primary btn-sm" disabled={!!busy} onClick={()=>revalidate(shown.filter(r=>sel.has(r.email)))}>{busy==='zb'?'⏳ Checking…':`✓ Re-check selected (${sel.size})`}</button>
+            {selRows.length>0
+              ? <button className="btn btn-primary btn-sm" disabled={!!busy} onClick={()=>revalidate(selRows)}>{busy==='zb'?'⏳ Checking…':`✓ Re-check selected (${selEmails})`}</button>
               : <button className="btn btn-primary btn-sm" disabled={!!busy||!uncheckedEmails} onClick={()=>revalidate(unchecked)}>{busy==='zb'?'⏳ Checking…':`✓ Re-check not-checked (${uncheckedEmails})`}</button>}
           </div>
         </div>
@@ -6359,13 +6364,13 @@ function EmailErrorsView({rows,syncState,onReload,isAdmin,currentUser,addToast,o
           ) : (
           <table className="kpi-table">
             <thead><tr>
-              <th style={{width:28}}><input type="checkbox" checked={allSel} onChange={()=>setSel(allSel?new Set():new Set(shown.map(r=>r.email)))}/></th>
+              <th style={{width:28}}><input type="checkbox" checked={allSel} onChange={()=>setSel(allSel?new Set():new Set(shown.map(rk)))}/></th>
               <th>Email</th><th>SmartReach name</th><th>Campaign</th><th>Dashboard lead</th><th>Rep</th><th>ZeroBounce</th><th>Checked</th>
             </tr></thead>
             <tbody>
               {shown.map(r=>(
                 <tr key={r.email+'|'+r.campaign_id}>
-                  <td><input type="checkbox" checked={sel.has(r.email)} onChange={()=>toggle(r.email)}/></td>
+                  <td><input type="checkbox" checked={sel.has(rk(r))} onChange={()=>toggle(rk(r))}/></td>
                   <td style={{fontFamily:'ui-monospace,monospace',fontSize:12.5}}>{r.email}</td>
                   <td>{r.prospect_name||'—'}</td>
                   <td style={{whiteSpace:'nowrap'}}>{r.campaign_name||'—'}</td>
