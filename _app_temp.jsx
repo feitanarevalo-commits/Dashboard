@@ -673,7 +673,7 @@ function viewLabel(tab, activeRep, showRepSelect, config){
   if(showRepSelect) return 'Choosing a rep';
   if(tab==='rep-home' && activeRep) return `${activeRep}'s dashboard`;
   const MAP={home:'Home',scraper:'Scraper','ai-scraper':'AI Scraper',history:'History','lead-mgmt':'Lead Management','google-import':'Google Sheets',agency:'Agency',leaves:'Leaves',knowledge:'Knowledge Base',attendance:'Attendance',archive:'Archive',restore:'Version History',errors:'Error Log',
-    pending:'Pending Qualification',nq:'NQ',awaiting:'Awaiting Potential',contacted:'Contacted',recycle:'For Recycle',partner:'Already Partner',duplicates:'Duplicates'};
+    pending:'Pending Qualification',nq:'NQ',awaiting:'Awaiting Potential',contacted:'Contacted',recycle:'For Recycle',partner:'Already Partner',duplicates:'Duplicates',emailerrors:'Email Errors'};
   if(MAP[tab]) return MAP[tab];
   if(tab && tab.indexOf('pool-')===0){ const p=tab.slice(5); return ({highticket:'High Ticket Pool',msn:'MSN Pool',virals:'VIRALS Pool',cs:'CS Pool'})[p]||'Lead Pool'; }
   const camp=((config&&config.campaigns)||[]).find(c=>String(c.id).toLowerCase()===String(tab).toLowerCase());
@@ -6187,6 +6187,151 @@ function ScraperView({leads,onSave,onDelete,onBulkDelete,onArchive,onBulkAssign,
 // Surfaces channels that exist in more than one lead record — e.g. when two
 // reps import the same channel from their own sheets. Each group lists every
 // copy with its rep, so an admin can reassign or remove the extras.
+// ─── EMAIL ERRORS (SmartReach invalid emails → ZeroBounce re-check) ─────────
+// Prospects SmartReach flagged as an invalid email in its campaign "Errors" tab
+// (not bounced), synced nightly by the smartreach-email-errors edge fn into
+// smartreach_email_errors and matched to their dashboard lead. Admins see all;
+// a rep sees the rows on their leads (or, for emails with no dashboard lead, the
+// rows from their own SmartReach campaign — "BELLA | ADCE" → Bella).
+// "Re-check" runs the chosen emails through ZeroBounce (1 credit each; the fn
+// skips anything checked in the last 30 days) and stamps the matched leads'
+// emailStatus so the usual ⚠ Invalid / Catch-all badge shows on them too.
+const EMAIL_ERR_FN = '/functions/v1/smartreach-email-errors';
+function emailErrVisible(row, isAdmin, me){
+  if(isAdmin) return true;
+  if(!me) return false;
+  if(row.rep) return row.rep===me;
+  const owner=String(row.campaign_name||'').split('|')[0].trim().toLowerCase();
+  return !!owner && owner===String(me).toLowerCase();
+}
+const EMAIL_ERR_RESULTS={
+  'valid':      {label:'✓ Valid',     bg:'var(--success-light,#E3FCEF)', fg:'var(--success,#006644)', tip:'ZeroBounce says this address works — worth "Mark as valid and force send" in SmartReach (5 per day).'},
+  'invalid':    {label:'✗ Invalid',   bg:'var(--danger-light,#FFEBE6)',  fg:'var(--danger,#DE350B)',  tip:"Confirmed bad — find the creator's correct email."},
+  'catch-all':  {label:'Catch-all',   bg:'var(--warn-light,#FFF4E5)',    fg:'var(--warn,#B25E00)',    tip:"The domain accepts everything, so the mailbox can't be confirmed — send at your own risk."},
+  'unknown':    {label:'Unknown',     bg:'var(--bg)',                    fg:'var(--text-dim)',        tip:"ZeroBounce couldn't tell — try again later."},
+  'not checked':{label:'Not checked', bg:'var(--bg)',                    fg:'var(--text-light)',      tip:'Not re-checked with ZeroBounce yet.'},
+};
+function EmailErrorsView({rows,syncState,onReload,isAdmin,currentUser,addToast,onStampEmailStatus}){
+  const me=currentUser&&currentUser.name;
+  const [repF,setRepF]=useState('');
+  const [resF,setResF]=useState('');
+  const [q,setQ]=useState('');
+  const [sel,setSel]=useState(()=>new Set());
+  const [busy,setBusy]=useState('');
+  const visible=(rows||[]).filter(r=>emailErrVisible(r,isAdmin,me));
+  const resultOf=r=>r.zb_status||'not checked';
+  const needle=q.trim().toLowerCase();
+  const shown=visible.filter(r=>(!repF || (r.rep||'(no lead)')===repF) && (!resF || resultOf(r)===resF)
+    && (!needle || [r.email,r.prospect_name,r.lead_name,r.campaign_name].some(v=>String(v||'').toLowerCase().includes(needle))));
+  const reps=[...new Set(visible.map(r=>r.rep||'(no lead)'))].sort();
+  const count=k=>visible.filter(r=>resultOf(r)===k).length;
+  const unchecked=shown.filter(r=>!r.zb_status);
+  const base=(DEFAULT_CONFIG.supabaseUrl||'').replace(/\/+$/,'');
+  const call=body=>fetch(base+EMAIL_ERR_FN,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+
+  async function refresh(){
+    if(busy) return; setBusy('sync');
+    try{
+      let res=await call({action:'sync',force:true});
+      for(let i=0;i<20 && res && res.ok && !res.done;i++){
+        addToast(`Syncing SmartReach… ${res.progress||''}`,'info');
+        res=await call({action:'sync'});
+      }
+      if(!res||!res.ok) throw new Error((res&&res.error)||'sync failed');
+      addToast(`✓ SmartReach synced — ${res.flagged??0} invalid-email prospects across ${res.campaigns??'?'} campaigns`,'success');
+      onReload();
+    }catch(e){ addToast('SmartReach sync failed: '+e.message,'error'); }
+    finally{ setBusy(''); }
+  }
+  async function revalidate(list){
+    const emails=[...new Set(list.map(r=>r.email))];
+    if(!emails.length){ addToast('Nothing to re-check','info'); return; }
+    if(!window.confirm(`Re-check ${emails.length} email${emails.length===1?'':'s'} with ZeroBounce?\n\nUses up to ${emails.length} ZeroBounce credit${emails.length===1?'':'s'} (emails checked in the last 30 days are skipped, max 200 per run). Results also flag the matching leads' emails.`)) return;
+    setBusy('zb');
+    try{
+      const res=await call({action:'revalidate',emails});
+      if(!res||!res.ok) throw new Error((res&&res.error)||'re-check failed');
+      const map=res.results||{};
+      const vals=Object.values(map);
+      const valid=vals.filter(v=>v.status==='valid').length, invalid=vals.filter(v=>v.status==='invalid').length;
+      onStampEmailStatus(map);
+      addToast(`ZeroBounce: ${res.checked} checked — ${valid} valid, ${invalid} invalid`
+        +(res.skippedRecent?` · ${res.skippedRecent} skipped (checked recently)`:'')
+        +(res.overLimit?` · ${res.overLimit} left for the next run`:'')
+        +(res.credits!=null?` · ${res.credits} credits left`:''), (invalid&&!valid)?'error':'success');
+      setSel(new Set()); onReload();
+    }catch(e){ addToast('ZeroBounce re-check failed: '+e.message,'error'); }
+    finally{ setBusy(''); }
+  }
+  const toggle=email=>setSel(s=>{ const n=new Set(s); n.has(email)?n.delete(email):n.add(email); return n; });
+  const allSel=shown.length>0 && shown.every(r=>sel.has(r.email));
+  const resBadge=r=>{
+    const k=resultOf(r);
+    const m=EMAIL_ERR_RESULTS[k]||{label:k.replace(/_/g,' '),bg:'var(--danger-light,#FFEBE6)',fg:'var(--danger,#DE350B)',tip:'ZeroBounce: '+k};
+    return <span title={m.tip+(r.zb_sub?` (${String(r.zb_sub).replace(/_/g,' ')})`:'')}
+      style={{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:20,background:m.bg,color:m.fg,border:'1px solid var(--border)',whiteSpace:'nowrap'}}>{m.label}</span>;
+  };
+  const synced=syncState&&syncState.finished_at ? fmtHistTime(syncState.finished_at) : 'not yet';
+  const uncheckedEmails=new Set(unchecked.map(r=>r.email)).size;
+
+  return (
+    <div className="home-content">
+      <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:4}}>
+        <div className="stat-card red"><div className="stat-label">SmartReach email errors</div><div className="stat-value">{visible.length}</div><div className="stat-sub">invalid, not bounced</div></div>
+        <div className="stat-card"><div className="stat-label">Not checked</div><div className="stat-value">{count('not checked')}</div><div className="stat-sub">ZeroBounce pending</div></div>
+        <div className="stat-card green"><div className="stat-label">Valid after re-check</div><div className="stat-value">{count('valid')}</div><div className="stat-sub">force-send candidates</div></div>
+        <div className="stat-card orange"><div className="stat-label">Confirmed invalid</div><div className="stat-value">{count('invalid')}</div><div className="stat-sub">need a new email</div></div>
+      </div>
+      <div style={{padding:'10px 14px',borderRadius:10,background:'var(--warn-light,#FFF4E5)',color:'var(--warn,#B25E00)',fontSize:13,fontWeight:500}}>
+        These are the prospects on your SmartReach campaigns' <b>Errors</b> tab. Re-check them with ZeroBounce: <b>Valid</b> ones are safe to "Mark as valid and force send" in SmartReach (it allows 5 a day); <b>Invalid</b> ones need the creator's correct email.
+      </div>
+      <div className="card">
+        <div className="card-header" style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search email, name, campaign…" style={{minWidth:220}}/>
+          {isAdmin && <select value={repF} onChange={e=>setRepF(e.target.value)}><option value="">All reps</option>{reps.map(r=><option key={r} value={r}>{r}</option>)}</select>}
+          <select value={resF} onChange={e=>setResF(e.target.value)}>
+            <option value="">All results</option>
+            {Object.keys(EMAIL_ERR_RESULTS).map(k=><option key={k} value={k}>{EMAIL_ERR_RESULTS[k].label.replace(/^[✓✗] /,'')}</option>)}
+          </select>
+          <span style={{fontSize:11.5,color:'var(--text-light)'}}>Synced from SmartReach: {synced}</span>
+          <div style={{marginLeft:'auto',display:'flex',gap:8,flexWrap:'wrap'}}>
+            {isAdmin && <button className="btn btn-outline btn-sm" disabled={!!busy} onClick={refresh}>{busy==='sync'?'⏳ Syncing…':'↻ Refresh from SmartReach'}</button>}
+            {sel.size>0
+              ? <button className="btn btn-primary btn-sm" disabled={!!busy} onClick={()=>revalidate(shown.filter(r=>sel.has(r.email)))}>{busy==='zb'?'⏳ Checking…':`✓ Re-check selected (${sel.size})`}</button>
+              : <button className="btn btn-primary btn-sm" disabled={!!busy||!uncheckedEmails} onClick={()=>revalidate(unchecked)}>{busy==='zb'?'⏳ Checking…':`✓ Re-check not-checked (${uncheckedEmails})`}</button>}
+          </div>
+        </div>
+        <div className="card-body" style={{padding:0,overflowX:'auto'}}>
+          {!shown.length ? (
+            <div style={{textAlign:'center',padding:'36px 16px',color:'var(--text-dim)'}}>{visible.length?'No rows match these filters.':'No SmartReach email errors on your leads 🎉'}</div>
+          ) : (
+          <table className="kpi-table">
+            <thead><tr>
+              <th style={{width:28}}><input type="checkbox" checked={allSel} onChange={()=>setSel(allSel?new Set():new Set(shown.map(r=>r.email)))}/></th>
+              <th>Email</th><th>SmartReach name</th><th>Campaign</th><th>Dashboard lead</th><th>Rep</th><th>ZeroBounce</th><th>Checked</th>
+            </tr></thead>
+            <tbody>
+              {shown.map(r=>(
+                <tr key={r.email+'|'+r.campaign_id}>
+                  <td><input type="checkbox" checked={sel.has(r.email)} onChange={()=>toggle(r.email)}/></td>
+                  <td style={{fontFamily:'ui-monospace,monospace',fontSize:12.5}}>{r.email}</td>
+                  <td>{r.prospect_name||'—'}</td>
+                  <td style={{whiteSpace:'nowrap'}}>{r.campaign_name||'—'}</td>
+                  <td>{r.lead_name ? (r.lead_url ? <a href={r.lead_url} target="_blank" rel="noopener noreferrer">{r.lead_name}</a> : r.lead_name)
+                    : <span style={{color:'var(--text-light)'}} title="No dashboard lead has this email">not on the dashboard</span>}</td>
+                  <td>{r.rep||<span style={{color:'var(--text-light)'}}>—</span>}</td>
+                  <td>{resBadge(r)}</td>
+                  <td style={{whiteSpace:'nowrap',fontSize:12,color:'var(--text-dim)'}}>{r.zb_checked_at?fmtHistDate(r.zb_checked_at):'—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DuplicatesView({groups,config,isAdmin,onSave,onDelete,onBulkDelete,addToast}) {
   const reps=config.salesReps||[];
   const crossRep=groups.filter(g=>g.kind!=='email' && g.reps.length>=2).length;
@@ -8892,6 +9037,17 @@ function App() {
   const [navCollapsed,setNavCollapsed]=useState(()=>{ try{ return localStorage.getItem('navCollapsed')!=='0'; }catch(e){ return true; } });
   useEffect(()=>{ try{ localStorage.setItem('navCollapsed',navCollapsed?'1':'0'); }catch(e){} },[navCollapsed]);
   const [leaves,setLeaves]=useState([]);
+  // SmartReach invalid-email prospects (Email Errors tab) + last sync state.
+  const [emailErrRows,setEmailErrRows]=useState([]);
+  const [emailErrSync,setEmailErrSync]=useState(null);
+  const loadEmailErrors=React.useCallback(()=>{
+    if(!SB) return;
+    SB.from('smartreach_email_errors').select('*').eq('still_flagged',true).order('rep',{ascending:true}).limit(5000)
+      .then(({data,error})=>{ if(!error&&data) setEmailErrRows(data); }).catch(()=>{});
+    SB.from('smartreach_sync_state').select('status,finished_at,flagged').eq('id',1).maybeSingle()
+      .then(({data})=>{ if(data) setEmailErrSync(data); }).catch(()=>{});
+  },[]);
+  useEffect(()=>{ loadEmailErrors(); },[loadEmailErrors]);
   // Load leaves on mount, then re-poll every 60s so the admin's pending-leave
   // badge picks up newly-submitted requests without a page reload. The server is
   // source of truth, so this safely reconciles any optimistic local updates.
@@ -9304,6 +9460,16 @@ function App() {
   // zerobounce-validate edge function (key stays server-side), then stamps each lead
   // with `emailStatus` (valid/invalid/catch-all/…) + `emailCheckedAt` so the table
   // can badge invalid ones. One credit per unique email — we confirm the count first.
+  // Stamp ZeroBounce results ({email:{status,sub}}) onto the leads holding those
+  // emails — same rule as validateEmails: a lead's status is its primary email's.
+  function stampEmailStatus(map){
+    const nowIso=new Date().toISOString();
+    setLeads(ls=>ls.map(l=>{
+      const es=((l.emails&&l.emails.length)?l.emails:[l.email]).map(e=>String(e||'').trim().toLowerCase()).filter(e=>e.includes('@'));
+      const primary=es.find(e=>map[e]); if(!primary) return l;
+      return {...l, emailStatus:map[primary].status, emailCheckedAt:nowIso};
+    }));
+  }
   function validateEmails(targetLeads){
     if(!SB){ addToast('Not connected','error'); return; }
     const withEmail=(targetLeads||[]).filter(l=>l && ((l.emails&&l.emails.length)||l.email));
@@ -10883,6 +11049,7 @@ function App() {
     {id:'recycle',icon:'↻',label:'For Recycle',count:counts.recycle,cls:'orange'},
     {id:'partner',icon:'🤝',label:'Already Partner',count:counts.partner,cls:'green'},
     {id:'duplicates',icon:'⧉',label:'Duplicates',count:counts.duplicates,cls:'red'},
+    {id:'emailerrors',icon:'⚠',label:'Email Errors',count:emailErrRows.filter(r=>emailErrVisible(r,isAdmin,meName)&&r.zb_status!=='valid').length,cls:'red'},
   ];
 
   function renderMain(){
@@ -10922,6 +11089,7 @@ function App() {
     // own, admins see everyone's — same scoping as Pending.
     if(tab==='partner') return <LeadsTable leads={vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="already_partner" printTitle="Already Partner"/>;
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
+    if(tab==='emailerrors') return <EmailErrorsView rows={emailErrRows} syncState={emailErrSync} onReload={loadEmailErrors} isAdmin={isAdmin} currentUser={currentUser} addToast={addToast} onStampEmailStatus={stampEmailStatus}/>;
     if(tab==='duplicates') return <DuplicatesView groups={myDupGroups} config={config} isAdmin={isAdmin} onSave={saveL} onDelete={delL} onBulkDelete={removeDuplicateExtras} addToast={addToast}/>;
     if(tab==='archive') return isAdmin ? <ArchiveView loadArchived={loadArchivedFromSupabase} onRestore={restoreArchived} config={config} campColorMap={campColorMap} addToast={addToast}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
     if(tab==='restore') return isAdmin ? <RestorePointsView addToast={addToast} currentUser={currentUser}/> : <HomeView leads={vLeads} config={config} currentUser={currentUser} onOpenRep={r=>{setShowRepSelect(false);setActiveRep(r);setTab('rep-home');}} onSaveConfig={applyConfig}/>;
@@ -10943,7 +11111,7 @@ function App() {
     return null;
   }
 
-  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',nq:'Not Qualified (NQ)',awaiting:'Awaiting Potential',contacted:'Contacted Leads',recycle:'For Recycle',partner:'Already Partner',recent:'Recently Assigned',duplicates:'Duplicate Leads',archive:'Archive',restore:'Version History',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',nq:'Not Qualified (NQ)',awaiting:'Awaiting Potential',contacted:'Contacted Leads',recycle:'For Recycle',partner:'Already Partner',recent:'Recently Assigned',duplicates:'Duplicate Leads',emailerrors:'SmartReach Email Errors',archive:'Archive',restore:'Version History',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // "New build available" banner — rendered on login AND inside the app, so even a
   // logged-out stale tab is told to reload.
@@ -11169,7 +11337,7 @@ function App() {
           ))}
           <div className="nav-divider"/>
           <div className="sidebar-section-label" data-tour="grp-filters">Lead Filters</div>
-          {NAV_FILTER.filter(n=>n.id==='unassigned' ? config.tabs.unassigned!==false : config.tabs[n.id]).map(n=>(
+          {NAV_FILTER.filter(n=>(n.id==='unassigned'||n.id==='emailerrors') ? config.tabs[n.id]!==false : config.tabs[n.id]).map(n=>(
             <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
               <span className={`nav-badge ${n.cls}`}>{n.count}</span>
