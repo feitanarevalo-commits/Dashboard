@@ -6300,6 +6300,20 @@ function EmailErrorsView({rows,syncState,onReload,isAdmin,currentUser,addToast,o
     finally{ setBusy(''); }
   }
   const toggle=email=>setSel(s=>{ const n=new Set(s); n.has(email)?n.delete(email):n.add(email); return n; });
+  // Copy the ticked rows' emails — or, with nothing ticked, every email the current
+  // filters show — one per line, each email once (it can sit in several campaigns).
+  async function copyEmails(){
+    const list=[...new Set((sel.size?shown.filter(r=>sel.has(r.email)):shown).map(r=>r.email))];
+    if(!list.length){ addToast('No emails to copy','info'); return; }
+    const text=list.join(String.fromCharCode(10));   // one email per line
+    let ok=false;
+    try{ await navigator.clipboard.writeText(text); ok=true; }
+    catch(e){
+      try{ const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
+        document.body.appendChild(ta); ta.select(); ok=document.execCommand('copy'); document.body.removeChild(ta); }catch(e2){}
+    }
+    addToast(ok?`📋 Copied ${list.length} email${list.length===1?'':'s'}${sel.size?' (selected)':' (all shown)'}`:'Copy failed — your browser blocked clipboard access', ok?'success':'error');
+  }
   const allSel=shown.length>0 && shown.every(r=>sel.has(r.email));
   const resBadge=r=>{
     const k=resultOf(r);
@@ -6331,6 +6345,8 @@ function EmailErrorsView({rows,syncState,onReload,isAdmin,currentUser,addToast,o
           </select>
           <span style={{fontSize:11.5,color:'var(--text-light)'}}>Synced from SmartReach: {synced}</span>
           <div style={{marginLeft:'auto',display:'flex',gap:8,flexWrap:'wrap'}}>
+            <button className="btn btn-outline btn-sm" disabled={!shown.length} onClick={copyEmails}
+              title={sel.size?'Copy the selected emails':'Copy every email the current filters show'}>📋 Copy emails ({sel.size?sel.size:new Set(shown.map(r=>r.email)).size})</button>
             {isAdmin && <button className="btn btn-outline btn-sm" disabled={!!busy} onClick={refresh}>{busy==='sync'?'⏳ Syncing…':'↻ Refresh from SmartReach'}</button>}
             {sel.size>0
               ? <button className="btn btn-primary btn-sm" disabled={!!busy} onClick={()=>revalidate(shown.filter(r=>sel.has(r.email)))}>{busy==='zb'?'⏳ Checking…':`✓ Re-check selected (${sel.size})`}</button>
