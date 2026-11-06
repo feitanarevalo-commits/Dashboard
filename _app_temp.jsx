@@ -1518,9 +1518,31 @@ function inInvalidTab(l){ return isInvalidTagged(l) || isHardBadEmail(l); }
 // do_not_mail, spamtrap, abuse… are still allowed, by request 2026-11-06).
 // 2026-11-06 (2nd ask): also do_not_mail — every red ⚠ badge blocks. Catch-all /
 // unknown still send.
+// EXCEPTION (2026-11-06, 3rd ask): "do not mail" because the address is a ROLE /
+// support inbox (contact@, info@, hello@, contato@…) IS allowed — ZeroBounce sub
+// "role_based" / "role_based_catch_all". Other do-not-mail kinds (disposable, toxic,
+// global_suppression, mx_forward, possible_trap) stay blocked. When the sub-status
+// wasn't saved (older checks) we recognise the role prefix instead.
 const SR_BLOCK_STATUSES=['invalid','do_not_mail','spamtrap','abuse'];
-function isSrBlockedEmail(l){ return isInvalidTagged(l) || SR_BLOCK_STATUSES.includes(emailStatusOf(l)); }
-function srBlockLabel(l){ if(isInvalidTagged(l)) return 'tagged Invalid'; const s=emailStatusOf(l); return s==='do_not_mail'?'do not mail':s; }
+const ROLE_EMAIL_RE=/^(contact|contacts|contactus|contact[._-]?us|info|infos|information|support|suporte|soporte|help|hello|hi|hey|hola|ola|ciao|bonjour|hallo|business|biz|businessinquiries|business[._-]?inquiries|collab|collabs|collaboration|collaborations|collabo|partner|partners|partnership|partnerships|inquiries|inquiry|enquiries|enquiry|media|press|pr|socialmedia|management|mgmt|manager|booking|bookings|sales|ventas|vendas|comercial|commerciale|commercial|team|crew|admin|office|biuro|marketing|mail|email|general|sponsor|sponsors|sponsorship|sponsorships|brand|brands|ads|advertising|work|talent|agency|contato|contacto|contatti|kontakt|kontakty|redazione|redaction|atendimento|atencion|connect|studio|shop|store|orders|service|customerservice|care|hr|jobs|careers|webmaster|editor|editorial|news|newsletter)\d*$/;
+function primaryEmailLc(l){ return leadEmailsLc(l)[0]||''; }
+function emailSubOf(l){
+  const e=primaryEmailLc(l); const auto=e&&AUTO_EMAIL_STATUS[e];
+  return String((l&&l.emailSub)||(auto&&auto.sub)||'').toLowerCase();
+}
+function isRoleEmailOk(l){
+  const sub=emailSubOf(l);
+  if(sub) return sub.startsWith('role_based');
+  return ROLE_EMAIL_RE.test(primaryEmailLc(l).split('@')[0]||'');
+}
+function isSrBlockedEmail(l){
+  if(isInvalidTagged(l)) return true;
+  const st=emailStatusOf(l);
+  if(!SR_BLOCK_STATUSES.includes(st)) return false;
+  if(st==='do_not_mail' && isRoleEmailOk(l)) return false;   // support / role inbox — allowed
+  return true;
+}
+function srBlockLabel(l){ if(isInvalidTagged(l)) return 'tagged Invalid'; const s=emailStatusOf(l); if(s!=='do_not_mail') return s; const sub=emailSubOf(l); return 'do not mail'+(sub?' · '+sub.replace(/_/g,' '):''); }
 function isEmailParked(l){
   if(isInvalidTagged(l)) return true;
   if(!isHardBadEmail(l)) return false;
@@ -9147,8 +9169,8 @@ function App() {
   const [autoEmailVer,setAutoEmailVer]=useState(0);   // bumps when AUTO_EMAIL_STATUS reloads
   useEffect(()=>{
     if(!SB) return;
-    SB.from('email_validations').select('email,status,checked_at').neq('status','valid').limit(20000)
-      .then(({data,error})=>{ if(error||!data) return; const m={}; data.forEach(r=>{ m[String(r.email).toLowerCase()]={status:String(r.status).toLowerCase(),checked_at:r.checked_at}; }); AUTO_EMAIL_STATUS=m; setAutoEmailVer(v=>v+1); })
+    SB.from('email_validations').select('email,status,sub,checked_at').neq('status','valid').limit(20000)
+      .then(({data,error})=>{ if(error||!data) return; const m={}; data.forEach(r=>{ m[String(r.email).toLowerCase()]={status:String(r.status).toLowerCase(),sub:String(r.sub||'').toLowerCase(),checked_at:r.checked_at}; }); AUTO_EMAIL_STATUS=m; setAutoEmailVer(v=>v+1); })
       .catch(()=>{});
     SB.from('blocked_emails').select('email').limit(50000)
       .then(({data,error})=>{ if(error||!data) return; BLOCKED_EMAILS=new Set(data.map(r=>String(r.email).toLowerCase())); }).catch(()=>{});
@@ -9322,7 +9344,7 @@ function App() {
     // A changed email invalidates the old ZeroBounce result (the auto-check table is
     // keyed by email, so the new address starts clean too).
     if(old && (old.emails||[]).join(',').toLowerCase()!==(updated.emails||[]).join(',').toLowerCase()
-       && (updated.emailStatus===old.emailStatus)){ delete updated.emailStatus; delete updated.emailCheckedAt; }
+       && (updated.emailStatus===old.emailStatus)){ delete updated.emailStatus; delete updated.emailSub; delete updated.emailCheckedAt; }
     // Any lead with a rep must carry a dateAssigned, else it's invisible to the
     // date-based Home KPIs. Stamp today if a rep is set but the date is missing.
     if(updated.assignedTo && !updated.dateAssigned) updated.dateAssigned=ymdLocal(new Date());
@@ -9586,7 +9608,7 @@ function App() {
     setLeads(ls=>ls.map(l=>{
       const es=((l.emails&&l.emails.length)?l.emails:[l.email]).map(e=>String(e||'').trim().toLowerCase()).filter(e=>e.includes('@'));
       const primary=es.find(e=>map[e]); if(!primary) return l;
-      return {...l, emailStatus:map[primary].status, emailCheckedAt:nowIso};
+      return {...l, emailStatus:map[primary].status, emailSub:map[primary].sub||'', emailCheckedAt:nowIso};
     }));
   }
   function validateEmails(targetLeads){
@@ -9610,8 +9632,9 @@ function App() {
         // Lead's status = its primary email's result (falls back to the first known).
         const primary=es.find(e=>map[e])||es[0];
         const st=(map[primary]&&map[primary].status)||statuses[0];
+        const sub=(map[primary]&&map[primary].sub)||'';
         updated++; if(st==='invalid') invalid++;
-        return {...l, emailStatus:st, emailCheckedAt:nowIso};
+        return {...l, emailStatus:st, emailSub:sub, emailCheckedAt:nowIso};
       }));
       const creditNote=(res.credits!=null)?` · ${res.credits} credits left`:'';
       addToast(`Validated ${updated} lead${updated===1?'':'s'} — ${invalid} invalid email${invalid===1?'':'s'} flagged${creditNote}`, invalid?'error':'success');
