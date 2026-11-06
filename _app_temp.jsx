@@ -1542,6 +1542,9 @@ function isSrBlockedEmail(l){
   if(st==='do_not_mail' && isRoleEmailOk(l)) return false;   // support / role inbox — allowed
   return true;
 }
+// Status to SHOW on the email badge: a role / support inbox flagged do_not_mail
+// gets no badge (it's sendable — see isSrBlockedEmail), everything else as-is.
+function emailBadgeStatusOf(l){ const st=emailStatusOf(l); return (st==='do_not_mail' && isRoleEmailOk(l)) ? '' : st; }
 function srBlockLabel(l){ if(isInvalidTagged(l)) return 'tagged Invalid'; const s=emailStatusOf(l); if(s!=='do_not_mail') return s; const sub=emailSubOf(l); return 'do not mail'+(sub?' · '+sub.replace(/_/g,' '):''); }
 function isEmailParked(l){
   if(isInvalidTagged(l)) return true;
@@ -1555,8 +1558,9 @@ function isEmailParked(l){
 function InvalidEmailsView({leads, tableProps}){
   const [withDnm,setWithDnm]=useState(()=>{ try{ return localStorage.getItem('invalidEmailsDnm')==='1'; }catch(e){ return false; } });
   useEffect(()=>{ try{ localStorage.setItem('invalidEmailsDnm',withDnm?'1':'0'); }catch(e){} },[withDnm]);
-  const dnm=leads.filter(l=>emailStatusOf(l)==='do_not_mail').length;
-  const shown=leads.filter(l=>inInvalidTab(l) || (withDnm && emailStatusOf(l)==='do_not_mail'));
+  const isDnm=l=>emailBadgeStatusOf(l)==='do_not_mail';   // role/support inboxes excluded
+  const dnm=leads.filter(isDnm).length;
+  const shown=leads.filter(l=>inInvalidTab(l) || (withDnm && isDnm(l)));
   return (
     <div style={{display:'flex',flexDirection:'column',flex:1,minHeight:0}}>
       <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',margin:'12px 16px 0',padding:'10px 14px',borderRadius:10,background:'var(--danger-light,#FFEBE6)',color:'var(--danger,#DE350B)',fontSize:13,fontWeight:500}}>
@@ -2355,7 +2359,7 @@ function LeadsTable({leads,onEdit,onDelete,onBulkDelete=null,onArchive=null,onBu
                   {cols.followers && <td><span className="followers-val">{lead.followers}</span></td>}
                   {cols.emails && (
                     <td className="email-cell">
-                      <InlineEmail emails={lead.emails||[]} status={emailStatusOf(lead)} onSave={arr=>patchLead(lead.id,{emails:arr})}/>
+                      <InlineEmail emails={lead.emails||[]} status={emailBadgeStatusOf(lead)} onSave={arr=>patchLead(lead.id,{emails:arr})}/>
                     </td>
                   )}
                   {cols.tags && (
