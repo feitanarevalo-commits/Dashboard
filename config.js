@@ -25,6 +25,7 @@ var STATUS_CLS = {
   'For Recycle':    'tag-recycle',
   'Duplicate':      'tag-duplicate',
   'Partner':        'tag-partner',
+  'Won':            'tag-won',
 };
 
 // Tags that cause a lead to leave the Scraper queue.
@@ -48,6 +49,7 @@ var TAG_COLORS = {
   'Duplicate':      { bg: '#F0F2F5', color: '#68737D' },
   'HT':             { bg: '#FFF4E5', color: '#FF8B00' },
   'Partner':        { bg: '#E6F4EA', color: '#1E7B45' },
+  'Won':            { bg: '#FEF3C7', color: '#92400E' },
 };
 
 // ── APP DEFAULT SETTINGS ───────────────────────────────────

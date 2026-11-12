@@ -46,7 +46,7 @@ function isQualifiedLead(lead){
 // with HT always available. Falls back to the built-in STATUSES.
 function statusOptions(config){
   const base=(config&&Array.isArray(config.statusTags)&&config.statusTags.length)?config.statusTags:STATUSES;
-  return [...new Set([...base,'HT','Invalid'])];
+  return [...new Set([...base,'HT','Invalid','Won'])];
 }
 // Status tags that have their OWN dedicated tab. A lead carrying one has "landed"
 // there and should leave the general Scraper / Lead Management lists.
@@ -58,10 +58,15 @@ function statusOptions(config){
 // daily count credits the day it's tagged Potential). It has its own tab; the
 // rep re-tags it Potential the next day. Kept out of Pending and the general
 // working lists, and NOT counted as workable until promoted.
-const STATUS_TAB_TAGS = ['Pending Qualification','NQ','Awaiting Potential','Contacted','For Recycle','Partner','Invalid'];   // 'Invalid' = manual dead-email tag → Invalid Emails tab
+const STATUS_TAB_TAGS = ['Pending Qualification','NQ','Awaiting Potential','Contacted','For Recycle','Partner','Won','Invalid'];   // 'Invalid' = manual dead-email tag → Invalid Emails tab; 'Won' = matched to a Close won opportunity → Won tab
 // Already a signed partner — the lead is won. It leaves the rep's queue and the
 // campaign tabs (it isn't workable pipeline any more) and lives in its own tab.
 function isPartnerLead(lead){ return (lead&&(lead.tags||[]).includes('Partner'))||false; }
+// Won in Close — matched from a won opportunity by close-won-sync (nightly + the
+// admin 'Sync from Close' button). Like Partner it's out of the pipeline (never
+// recycled, never in the Potential queue), but kept in its OWN tab so won deals
+// are tracked apart from partners.
+function isWonLead(lead){ return (lead&&(lead.tags||[]).includes('Won'))||false; }
 // Deep link to the lead's page in Close. Only leads with a RESOLVED Close id get
 // one — a lead that's on Close but whose id hasn't been backfilled yet has no
 // addressable page, and a link to Close's home screen is worse than no link.
@@ -87,6 +92,7 @@ function leadLocation(lead, config){
   if(!lead) return {tab:'lead-mgmt', label:'Lead Management'};
   if(lead.archived) return {tab:'archive', label:'Archive'};
   const tags=lead.tags||[];
+  if(isWonLead(lead))              return {tab:'won',     label:'Won'};
   if(tags.includes('Invalid'))     return {tab:'invalidemails', label:'Invalid Emails'};
   if(tags.includes('For Recycle')) return {tab:'recycle',  label:'For Recycle'};
   if(isPartnerLead(lead))          return {tab:'partner',  label:'Already Partner'};
@@ -674,7 +680,7 @@ function viewLabel(tab, activeRep, showRepSelect, config){
   if(showRepSelect) return 'Choosing a rep';
   if(tab==='rep-home' && activeRep) return `${activeRep}'s dashboard`;
   const MAP={home:'Home',scraper:'Scraper','ai-scraper':'AI Scraper',history:'History','lead-mgmt':'Lead Management','google-import':'Google Sheets',agency:'Agency',leaves:'Leaves',knowledge:'Knowledge Base',attendance:'Attendance',archive:'Archive',restore:'Version History',errors:'Error Log',
-    pending:'Pending Qualification',nq:'NQ',awaiting:'Awaiting Potential',contacted:'Contacted',recycle:'For Recycle',partner:'Already Partner',duplicates:'Duplicates',emailerrors:'Email Errors',invalidemails:'Invalid Emails'};
+    pending:'Pending Qualification',nq:'NQ',awaiting:'Awaiting Potential',contacted:'Contacted',recycle:'For Recycle',partner:'Already Partner',won:'Won',duplicates:'Duplicates',emailerrors:'Email Errors',invalidemails:'Invalid Emails'};
   if(MAP[tab]) return MAP[tab];
   if(tab && tab.indexOf('pool-')===0){ const p=tab.slice(5); return ({highticket:'High Ticket Pool',msn:'MSN Pool',virals:'VIRALS Pool',cs:'CS Pool'})[p]||'Lead Pool'; }
   const camp=((config&&config.campaigns)||[]).find(c=>String(c.id).toLowerCase()===String(tab).toLowerCase());
@@ -964,6 +970,7 @@ const TAG_COLORS={
   'Duplicate':{bg:'#F0F2F5',color:'#68737D'},
   'HT':{bg:'#FFF4E5',color:'#FF8B00'},
   'Partner':{bg:'#E6F4EA',color:'#1E7B45'},
+  'Won':{bg:'#FEF3C7',color:'#92400E'},
 };
 
 function TagBadge({tag}) {
@@ -1509,7 +1516,7 @@ function isHardBadEmail(l){ return HARD_BAD_EMAIL.includes(effectiveEmailStatus(
 // Manually tagged "Invalid" by a rep/admin (status tag, single-select).
 function isInvalidTagged(l){ return !!(l && (l.tags||[]).includes('Invalid')); }
 // Belongs in the Invalid Emails tab: tagged Invalid OR ZeroBounce-dead.
-function inInvalidTab(l){ return isInvalidTagged(l) || isHardBadEmail(l); }
+function inInvalidTab(l){ return !isWonLead(l) && (isInvalidTagged(l) || isHardBadEmail(l)); }
 // A Contacted / For Recycle lead with a dead email is PARKED: it leaves those tabs
 // and the recycle pool (and the nightly recycle_due_leads skips it) and lives only in
 // the Invalid Emails tab, until someone fixes the email. Partners are never parked;
@@ -1580,6 +1587,32 @@ function isEmailParked(l){
 }
 // Invalid Emails tab: leads ZeroBounce marked invalid (from the rep Actions
 // "Validate emails" or the Email Errors re-check), so reps can find a new email.
+// Won tab — leads matched to a Close WON opportunity. Out of the pipeline:
+// never recycled, never in the Potential queue. Admins get the manual sync +
+// last-run time; the nightly cron keeps it current on its own.
+function WonView({leads, isAdmin, syncState, onSync, busy, onEdit, onDelete, onBulkDelete, onArchive, onBulkAssign, hideRepFilter, config, campColorMap}){
+  const when=syncState&&syncState.finished_at ? new Date(syncState.finished_at) : null;
+  const ago=when ? (()=>{ const m=Math.round((Date.now()-when.getTime())/60000); if(m<60) return m<=1?'just now':`${m} min ago`; const h=Math.round(m/60); if(h<24) return `${h} h ago`; return `${Math.round(h/24)} d ago`; })() : null;
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',padding:'10px 14px',marginBottom:12,borderRadius:10,
+        background:'var(--success-light,#E3FCEF)',border:'1px solid var(--success,#1E7B45)'}}>
+        <span style={{fontSize:16,lineHeight:1}}>🏆</span>
+        <span style={{fontSize:13,fontWeight:600,color:'var(--success,#1E7B45)'}}>
+          {leads.length} won lead{leads.length===1?'':'s'} — matched to a won opportunity in Close. Out of recycling and the Potential queue.
+        </span>
+        <span style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:10}}>
+          {ago && <span style={{fontSize:11.5,color:'var(--text-dim)'}}>Synced {ago}</span>}
+          {isAdmin && <button onClick={onSync} disabled={busy}
+            style={{border:'none',borderRadius:8,padding:'8px 15px',fontWeight:700,fontSize:12.5,cursor:busy?'default':'pointer',opacity:busy?.6:1,
+              fontFamily:'inherit',background:'var(--success,#1E7B45)',color:'#fff'}}>
+            {busy?'Syncing…':'↻ Sync from Close'}</button>}
+        </span>
+      </div>
+      <LeadsTable leads={leads} onEdit={onEdit} onDelete={onDelete} onBulkDelete={onBulkDelete} onArchive={onArchive} onBulkAssign={onBulkAssign} showAssigned showCampaign showOrigin hideRepFilter={hideRepFilter} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="won_leads" printTitle="Won"/>
+    </div>
+  );
+}
 function InvalidEmailsView({leads, tableProps}){
   const [withDnm,setWithDnm]=useState(()=>{ try{ return localStorage.getItem('invalidEmailsDnm')==='1'; }catch(e){ return false; } });
   useEffect(()=>{ try{ localStorage.setItem('invalidEmailsDnm',withDnm?'1':'0'); }catch(e){} },[withDnm]);
@@ -6504,6 +6537,7 @@ function DuplicatesView({groups,config,isAdmin,onSave,onDelete,onBulkDelete,addT
   const workScore=(l)=>{
     let s=0;
     if(isPartnerLead(l)) s+=32;
+    if(isWonLead(l)) s+=40;
     if(isContacted(l)) s+=16;
     if(isQualifiedLead(l) || (l.tags||[]).some(t=>/potential|high[\s-]*ticket|\bHT\b/i.test(String(t)))) s+=8;
     if(hasStatusTag(l)) s+=4;
@@ -9209,12 +9243,16 @@ function App() {
   },[]);
   const [emailErrRows,setEmailErrRows]=useState([]);
   const [emailErrSync,setEmailErrSync]=useState(null);
+  const [wonSync,setWonSync]=useState(null);
+  const [wonBusy,setWonBusy]=useState(false);
   const loadEmailErrors=React.useCallback(()=>{
     if(!SB) return;
     SB.from('smartreach_email_errors').select('*').eq('still_flagged',true).order('rep',{ascending:true}).limit(5000)
       .then(({data,error})=>{ if(!error&&data) setEmailErrRows(data); }).catch(()=>{});
     SB.from('smartreach_sync_state').select('status,finished_at,flagged').eq('id',1).maybeSingle()
       .then(({data})=>{ if(data) setEmailErrSync(data); }).catch(()=>{});
+    SB.from('won_sync_state').select('finished_at,won_opps,matched,status').eq('id',1).maybeSingle()
+      .then(({data})=>{ if(data) setWonSync(data); }).catch(()=>{});
   },[]);
   useEffect(()=>{ loadEmailErrors(); },[loadEmailErrors]);
   // Load leaves on mount, then re-poll every 60s so the admin's pending-leave
@@ -9737,6 +9775,29 @@ function App() {
       addToast(`Moved ${won} → Already Partner, ${rej} → NQ from Close status`, 'success');
       logH('☁',`Close status check: ${won} → Already Partner, ${rej} → NQ (of ${work.length-notfound} checked)`, before.length?{type:'revert',before,after}:null);
     }).catch(()=>addToast('Close status check failed','error'));
+  }
+  // Admin: pull Close's WON opportunities and tag the matching dashboard leads
+  // 'Won' (loops the sync in batches until done), then reload so the Won tab fills.
+  function syncWon(){
+    if(!SB){ addToast('Not connected','error'); return; }
+    if(!isAdmin){ addToast('Admins only','error'); return; }
+    if(wonBusy) return;
+    if(!window.confirm('Sync Won from Close?\n\nThis scans every won opportunity in Close and tags the matching dashboard leads as Won, so they leave recycling and the Potential queue. It runs in a few batches and can take a few minutes.\n\nContinue?')) return;
+    setWonBusy(true);
+    addToast('Syncing Won from Close… this can take a few minutes','info',12000);
+    let totalTagged=0, calls=0;
+    const step=(skip)=>SB.functions.invoke('close-won-sync',{body:{apply:true,skip}}).then(({data,error})=>{
+      const res=data||{};
+      if(error||!res.ok){ setWonBusy(false); addToast('Won sync failed'+((res&&res.error)?`: ${res.error}`:''),'error'); return; }
+      totalTagged+=res.tagged||0; calls++;
+      if(!res.done && res.nextSkip!=null && calls<12){ addToast(`Won sync… ${totalTagged} tagged so far`,'info',8000); return step(res.nextSkip); }
+      SB.from('won_sync_state').select('finished_at,won_opps,matched,status').eq('id',1).maybeSingle().then(({data})=>{ if(data) setWonSync(data); }).catch(()=>{});
+      loadLeadsFromSupabase().then(r=>{ if(r&&r.items&&r.items.length) setLeads(r.items); });
+      setWonBusy(false);
+      addToast(`Won sync complete — ${totalTagged} lead${totalTagged===1?'':'s'} tagged Won`,'success');
+      logH('🏆',`Won sync from Close: ${totalTagged} lead(s) tagged Won`);
+    }).catch(()=>{ setWonBusy(false); addToast('Won sync failed','error'); });
+    step(0);
   }
   // Pick up recycled leads. A lead that aged out of Contacted is unassigned and
   // sits in For Recycle for anyone to take — this claims the selected ones under
@@ -11136,6 +11197,7 @@ function App() {
       recent:vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=rc).length,
       duplicates:myDupGroups.length,
       partner:vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l)).length,
+      won:vLeads.filter(l=>isWonLead(l)&&canSeeLead(l)).length,
       unassigned:myUnassignedLeads.length,
     };
   },[leads, isAdmin, meName, myDupGroups, myUnassignedLeads, myRecycleLeads, autoEmailVer]);
@@ -11231,6 +11293,7 @@ function App() {
     {id:'contacted',icon:'✉',label:'Contacted',count:counts.contacted,cls:'blue'},
     {id:'recycle',icon:'↻',label:'For Recycle',count:counts.recycle,cls:'orange'},
     {id:'partner',icon:'🤝',label:'Already Partner',count:counts.partner,cls:'green'},
+    {id:'won',icon:'🏆',label:'Won',count:counts.won,cls:'green'},
     {id:'duplicates',icon:'⧉',label:'Duplicates',count:counts.duplicates,cls:'red'},
     {id:'invalidemails',icon:'✉',label:'Invalid Emails',count:counts.invalidemails,cls:'red'},
     {id:'emailerrors',icon:'⚠',label:'Email Errors',count:emailErrRows.filter(r=>emailErrVisible(r,isAdmin,meName)&&r.zb_status!=='valid').length,cls:'red'},
@@ -11274,6 +11337,7 @@ function App() {
     // Already Partner: the lead is won and out of the pipeline. Reps see their
     // own, admins see everyone's — same scoping as Pending.
     if(tab==='partner') return <LeadsTable leads={vLeads.filter(l=>isPartnerLead(l)&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="already_partner" printTitle="Already Partner"/>;
+    if(tab==='won') return <WonView leads={vLeads.filter(l=>isWonLead(l)&&canSeeLead(l))} isAdmin={isAdmin} syncState={wonSync} onSync={syncWon} busy={wonBusy} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} hideRepFilter={!isAdmin} config={config} campColorMap={campColorMap}/>;
     if(tab==='recent') return <LeadsTable leads={vLeads.filter(l=>l.assignedTo&&l.dateAssigned&&new Date(l.dateAssigned)>=recentCutoff)} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin config={config} feats={config.features||{}} campColorMap={campColorMap} filename="recent_leads" printTitle="Recently Assigned Leads"/>;
     if(tab==='emailerrors') return <EmailErrorsView rows={emailErrRows} syncState={emailErrSync} onReload={loadEmailErrors} isAdmin={isAdmin} currentUser={currentUser} addToast={addToast} onStampEmailStatus={stampEmailStatus}/>;
     if(tab==='duplicates') return <DuplicatesView groups={myDupGroups} config={config} isAdmin={isAdmin} onSave={saveL} onDelete={delL} onBulkDelete={removeDuplicateExtras} addToast={addToast}/>;
@@ -11297,7 +11361,7 @@ function App() {
     return null;
   }
 
-  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',nq:'Not Qualified (NQ)',awaiting:'Awaiting Potential',contacted:'Contacted Leads',recycle:'For Recycle',partner:'Already Partner',recent:'Recently Assigned',duplicates:'Duplicate Leads',emailerrors:'SmartReach Email Errors',invalidemails:'Invalid Emails',archive:'Archive',restore:'Version History',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
+  const PAGE_TITLE={home:'Home',scraper:'Scraper',history:'History','prev-scraped':'Previously Scraped Leads','lead-mgmt':'Lead Management','google-import':'Google Sheets Import',agency:'Agency Folders','close-data':'Close Leads Data',pending:'Pending Qualification',nq:'Not Qualified (NQ)',awaiting:'Awaiting Potential',contacted:'Contacted Leads',recycle:'For Recycle',partner:'Already Partner',won:'Won',recent:'Recently Assigned',duplicates:'Duplicate Leads',emailerrors:'SmartReach Email Errors',invalidemails:'Invalid Emails',archive:'Archive',restore:'Version History',errors:'Error Log','pool-highticket':'High Ticket Pool','pool-msn':'MSN Pool','pool-virals':'VIRALS Pool',...Object.fromEntries((config.campaigns||[]).map(c=>[c.id.toLowerCase(),`${c.label} Campaign`]))};
 
   // "New build available" banner — rendered on login AND inside the app, so even a
   // logged-out stale tab is told to reload.
@@ -11523,7 +11587,7 @@ function App() {
           ))}
           <div className="nav-divider"/>
           <div className="sidebar-section-label" data-tour="grp-filters">Lead Filters</div>
-          {NAV_FILTER.filter(n=>(n.id==='unassigned'||n.id==='emailerrors'||n.id==='invalidemails') ? config.tabs[n.id]!==false : config.tabs[n.id]).map(n=>(
+          {NAV_FILTER.filter(n=>(n.id==='unassigned'||n.id==='emailerrors'||n.id==='invalidemails'||n.id==='won') ? config.tabs[n.id]!==false : config.tabs[n.id]).map(n=>(
             <div key={n.id} title={n.label} className={`nav-item ${tab===n.id&&!showRepSelect?'active':''}`} onClick={()=>{setShowRepSelect(false);setTab(n.id);}}>
               <span className="nav-icon">{n.icon}</span>{n.label}
               <span className={`nav-badge ${n.cls}`}>{n.count}</span>
