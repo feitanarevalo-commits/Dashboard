@@ -8765,7 +8765,6 @@ function GlobalSearch({leads,config,isAdmin,currentUser,dupIndex,onClose,onNavig
     {id:'lead-mgmt',label:'Lead Management',icon:'◉'},{id:'google-import',label:'Google Sheets Import',icon:'◫'},
     {id:'agency',label:'Agency Folders',icon:'▦'},
     {id:'pending',label:'Pending Qualification',icon:'◔'},
-    {id:'nq',label:'NQ (Not Qualified)',icon:'⊘'},
     {id:'awaiting',label:'Awaiting Potential',icon:'⌛'},
     {id:'contacted',label:'Contacted Leads',icon:'✉'},{id:'recycle',label:'For Recycle',icon:'↻'},
   ].filter(p=>(config.tabs||{})[p.id]).filter(p=>p.id!=='lead-mgmt'||canSeeLeadMgmt(currentUser,isAdmin));   // Lead Management: admins + allow-listed reps
@@ -11288,7 +11287,6 @@ function App() {
   const NAV_FILTER=[
     {id:'unassigned',icon:'📥',label:'Unassigned',count:counts.unassigned,cls:'blue'},
     {id:'pending',icon:'◔',label:'Pending Qualification',count:counts.pending,cls:'orange'},
-    {id:'nq',icon:'⊘',label:'NQ',count:counts.nq,cls:'red'},
     {id:'awaiting',icon:'⌛',label:'Awaiting Potential',count:counts.awaiting,cls:'amber'},
     {id:'contacted',icon:'✉',label:'Contacted',count:counts.contacted,cls:'blue'},
     {id:'recycle',icon:'↻',label:'For Recycle',count:counts.recycle,cls:'orange'},
