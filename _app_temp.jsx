@@ -5221,7 +5221,29 @@ function EditableContactDate({lead,effective,onCommit}){
     </span>
   );
 }
-function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,campColorMap,addToast}) {
+// Per-row "Re-potential" control for the Contacted tab. Collapsed to a single
+// button; clicking ARMS an inline confirm with a native <select> of reps (so the
+// menu is never clipped by the scrolling table). Pre-selects the lead's current
+// rep, so the default is "send it back to the same rep". Confirm → onConfirm(rep).
+function RePotentialAction({reps, defaultRep, onConfirm}){
+  const [armed,setArmed]=useState(false);
+  const [rep,setRep]=useState(defaultRep||'');
+  useEffect(()=>{ if(armed) setRep(defaultRep||''); },[armed]);
+  const opts=[...new Set([...(reps||[]), defaultRep].filter(Boolean))];
+  if(!armed) return <button className="btn btn-ghost btn-xs" title="Re-potential — tag this lead Potential and move it back into a rep's active queue, even before it's due to recycle" onClick={()=>setArmed(true)}>⚡ Re-potential</button>;
+  return (
+    <span style={{display:'inline-flex',alignItems:'center',gap:5}} onClick={e=>e.stopPropagation()}>
+      <select value={rep} onChange={e=>setRep(e.target.value)} title="Assign the re-potentialed lead to this rep"
+        style={{padding:'4px 6px',border:'1px solid var(--border)',borderRadius:6,fontSize:11.5,background:'var(--card)',color:'var(--text)',maxWidth:116,fontFamily:'inherit'}}>
+        <option value="">— pick rep —</option>
+        {opts.map(r=><option key={r} value={r}>{r}</option>)}
+      </select>
+      <button className="btn btn-primary btn-xs" disabled={!rep} title="Confirm — tag Potential & assign" onClick={()=>{ if(rep){ onConfirm(rep); setArmed(false); } }}>✓ Potential</button>
+      <button className="btn btn-ghost btn-xs" title="Cancel" onClick={()=>setArmed(false)}>✕</button>
+    </span>
+  );
+}
+function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,onRePotential,currentUser,isAdmin,config,campColorMap,addToast}) {
   const contacted=leads.filter(l=>isContacted(l) && !isEmailParked(l));   // dead emails live in Invalid Emails
   const today=new Date();
   // Pull each pushed lead's most recent CONTACT date from Close so the recycle
@@ -5426,6 +5448,7 @@ function ContactedView({leads,onSave,onDelete,onBulkDelete,onBulkAssign,config,c
                         ? <span style={{fontSize:10.5,color:'var(--text-light)'}} title="Looking this lead up in Close…">checking Close…</span>
                         : <span style={{fontSize:10.5,color:'var(--text-light)'}} title="Not found in Close">not in Close</span>}
                     <button className="btn btn-ghost btn-xs" title="Log a contact today — resets the recycle clock" onClick={()=>logContact(l)}>✓ Log contact</button>
+                    {onRePotential && isAdmin && <RePotentialAction reps={config.salesReps||[]} defaultRep={l.assignedTo||''} onConfirm={rep=>onRePotential([l.id],rep)}/>}
                     <button className="btn-icon" onClick={()=>setHistLead(l)} title={humanScraper(l)?`History — scraped by ${humanScraper(l)}`:'History — who scraped & qualified this lead'}>🕘</button>
                   </div>
                 </td>
@@ -9826,6 +9849,35 @@ function App() {
     addToast(`♻ ${ids.length} lead(s) picked up and tagged Potential — they're in your queue now`,'success');
     logH('♻️',`Recycle pick-up: ${ids.length} lead(s) → ${me}, re-tagged Potential`, before.length?{type:'revert',before,after}:null);
   }
+  // Re-potential a CONTACTED lead ON DEMAND — pull an important contacted lead back
+  // into a rep's active Potential queue BEFORE it's due for recycling, and (re)tag it
+  // to a sales rep. Mirrors the recycle pick-up tag logic, but works from the
+  // Contacted tab for any lead regardless of its recycle clock.
+  function rePotentialContacted(ids, rep){
+    const target=(rep||'').trim();
+    if(!target){ addToast('Pick a sales rep to re-potential to','error'); return; }
+    const idSet=new Set(ids.map(String));
+    const before=leads.filter(l=>idSet.has(String(l.id))).map(undoSnap);
+    if(!before.length) return;
+    const me=(currentUser&&currentUser.name)||'System';
+    const today=ymdLocal(new Date());
+    // Drop every "contacted" tag (incl. "Recently Contacted"), plus recycle/pending
+    // staging tags, so the lead leaves Contacted. Keep HT/campaign/other tags. Then
+    // add Potential so it lands back in the rep's working queue.
+    const stripTag=t=>{ const s=String(t); if(/contacted/i.test(s) && !/\bnot[\s-]*contacted/i.test(s)) return true; return ['For Recycle','Pending Qualification','Awaiting Potential','NQ'].includes(t); };
+    const retag=l=>{ const tags=(l.tags||[]).filter(t=>!stripTag(t)); if(!tags.includes('Potential')) tags.push('Potential'); return tags; };
+    setLeads(ls=>ls.map(l=>{
+      if(!idSet.has(String(l.id))) return l;
+      const evs=[histEvent(me,'assigned',{from:l.assignedTo||'',to:target,via:'re-potential from Contacted'}),
+                 histEvent(me,'qualified',{from:'Contacted',to:'Potential',via:'re-potential from Contacted'})];
+      return {...l, assignedTo:target, dateAssigned:today, tags:retag(l),
+        lastContactDate:null, contactDateManual:false,
+        history:pushHist(l,evs)};
+    }));
+    const after=before.map(b=>({...b, assignedTo:target, dateAssigned:today, tags:retag(b), lastContactDate:null, contactDateManual:false}));
+    addToast(`⚡ ${ids.length} lead(s) re-potentialed → ${target}'s active queue`,'success');
+    logH('⚡',`Re-potential from Contacted: ${ids.length} lead(s) → ${target}`, before.length?{type:'revert',before,after}:null);
+  }
   // Auto-distribute the WHOLE recycle pool evenly across the sales reps, giving each
   // lead to a rep OTHER than the one who last worked it (recycledFrom) — a fresh set
   // of eyes. Uses least-loaded-eligible so the split stays even. Skips on-leave reps.
@@ -11326,7 +11378,7 @@ function App() {
       tableProps={{onEdit:saveL,onDelete:delL,onBulkDelete:bulkDelete,onArchive:archiveLeads,onBulkAssign:bulkAssign,showAssigned:true,showCampaign:true,showOrigin:true,hideRepFilter:!isAdmin,config,feats:config.features||{},campColorMap,filename:'invalid_email_leads',printTitle:'Invalid Emails'}}/>;
     if(tab==='nq') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('NQ')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="nq_leads" printTitle="Not Qualified (NQ)"/>;
     if(tab==='awaiting') return <LeadsTable leads={vLeads.filter(l=>(l.tags||[]).includes('Awaiting Potential')&&canSeeLead(l))} onEdit={saveL} onDelete={delL} onBulkDelete={bulkDelete} onArchive={archiveLeads} onBulkAssign={bulkAssign} showAssigned showCampaign showOrigin hideRepFilter={!isAdmin} config={config} feats={config.features||{}} campColorMap={campColorMap} filename="awaiting_potential" printTitle="Awaiting Potential"/>;
-    if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} config={config} campColorMap={campColorMap} addToast={addToast}/>;
+    if(tab==='contacted') return <ContactedView leads={vLeads} onSave={saveL} onDelete={delL} onBulkDelete={bulkDelete} onBulkAssign={bulkAssign} onRePotential={rePotentialContacted} currentUser={currentUser} isAdmin={isAdmin} config={config} campColorMap={campColorMap} addToast={addToast}/>;
     // For Recycle is a SHARED POOL, not a per-rep list: a lead that ages out of
     // Contacted is unassigned, so everyone sees the same board and whoever gets
     // there first picks it up. "Pick up & re-qualify" claims it AND tags it
